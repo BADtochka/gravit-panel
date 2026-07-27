@@ -1,0 +1,16 @@
+{
+  "name": "gravit-panel",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun --filter '*' dev",
+    "dev:api": "bun --filter @gravit-panel/api dev",
+    "dev:web": "bun --filter @gravit-panel/web dev",
+    "check": "bun --filter '*' check",
+    "test": "DATABASE_PATH=:memory: bun test"
+  }
+}

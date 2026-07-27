@@ -1,0 +1,802 @@
+import type {
+  ClientBuildInput,
+  ClientBuildResult,
+  ClientPreparationState,
+  ClientProfileDescriptor,
+  ClientProfileState,
+  GravitInstallation,
+  LauncherArtifact,
+  LauncherBuildResult,
+  LauncherCustomizationAsset,
+  LauncherCustomizationResult,
+  LauncherCustomizationState,
+  LauncherRuntimeInstallResult,
+  PrestarterInstallResult,
+  WorkspaceApplyResult,
+} from '@gravit-panel/shared'
+import {
+  lstat,
+  readFile,
+} from 'node:fs/promises'
+import { basename, join, relative, resolve } from 'node:path'
+import type {
+  BuildControlCommand,
+  ClientControlCommand,
+  ControlFileService,
+} from '../gravit/control-file.service'
+import {
+  ContainerVolumeService,
+  type VolumeFileOperations,
+} from '../docker/container-volume.service'
+import type { JobTaskContext } from '../jobs/jobs.runner'
+import { findCatalogModule } from '../modules/module-catalog'
+import { ModuleManagementService } from '../modules/module-management.service'
+import { resolveClientCompatibility } from './compatibility.service'
+import {
+  launcherBuildSource,
+  launcherRuntimeRelease,
+  mirrorHelperSource,
+  prestarterRelease,
+  workspaceManifest,
+} from './client-sources'
+import { LauncherRuntimeService } from './launcher-runtime.service'
+import {
+  fetchVerifiedArtifact,
+  sha256Bytes,
+  type VerifiedArtifactFetcher,
+} from './verified-artifact'
+import {
+  LoaderInstallerService,
+  type LoaderInstallerProvider,
+} from './loader-installer.service'
+
+export interface LaunchServerLifecycle {
+  restartLaunchServer(
+    installation: GravitInstallation,
+    context: JobTaskContext,
+  ): Promise<void>
+}
+
+const safeTimestamp = () => new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
+const profilePattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/
+const versionPattern = /^[0-9]+(?:\.[0-9]+){1,3}$/
+const modPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/
+const mirrorHelperModule = (() => {
+  const item = findCatalogModule('MirrorHelper_module')
+  if (!item) throw new Error('MirrorHelper is missing from the verified module catalog')
+  return item
+})()
+const prestarterModule = (() => {
+  const item = findCatalogModule('Prestarter_module')
+  if (!item) throw new Error('Prestarter is missing from the verified module catalog')
+  return item
+})()
+const customizationManifestPath = '.gravit-panel-launcher-customization.json'
+const customizationAssets = {
+  logo: {
+    path: 'runtime/images/logo.png',
+    maxBytes: 2 * 1024 * 1024,
+  },
+  background: {
+    path: 'runtime/images/background.png',
+    maxBytes: 8 * 1024 * 1024,
+  },
+  favicon: {
+    path: 'runtime/favicon.png',
+    maxBytes: 2 * 1024 * 1024,
+  },
+} as const
+type LauncherCustomizationAssetId = keyof typeof customizationAssets
+const launcherRuntimeReleaseSource = () => ({
+  repository: launcherRuntimeRelease.repository,
+  revision: launcherRuntimeRelease.revision,
+  file: 'runtime',
+})
+export type LauncherCustomizationFiles = Partial<
+  Record<LauncherCustomizationAssetId, Uint8Array>
+>
+
+const exists = async (path: string) => {
+  try {
+    await lstat(path)
+    return true
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false
+    throw error
+  }
+}
+
+const launcherRoot = (installation: GravitInstallation) => join(installation.path, 'launcher')
+
+interface LaunchProfileConfig {
+  version?: unknown
+  mainClass?: unknown
+  clientArgs?: unknown
+  classPath?: unknown
+}
+
+export const inferProfileLoader = (
+  profile: LaunchProfileConfig,
+): ClientProfileDescriptor['loader'] => {
+  const mainClass = typeof profile.mainClass === 'string' ? profile.mainClass : ''
+  const clientArgs = Array.isArray(profile.clientArgs)
+    ? profile.clientArgs.filter((item): item is string => typeof item === 'string')
+    : []
+  const classPath = Array.isArray(profile.classPath)
+    ? profile.classPath.filter((item): item is string => typeof item === 'string')
+    : []
+  const signals = [mainClass, ...clientArgs, ...classPath].join('\n').toLowerCase()
+
+  if (
+    signals.includes('org.quiltmc.loader') ||
+    signals.includes('quilt-loader') ||
+    signals.includes('quilt_loader')
+  ) return 'QUILT'
+  if (
+    signals.includes('--fml.neoforgeversion') ||
+    signals.includes('/net/neoforged/') ||
+    signals.includes('net.neoforged.')
+  ) return 'NEOFORGE'
+  if (
+    signals.includes('net.fabricmc.loader') ||
+    signals.includes('/net/fabricmc/fabric-loader/')
+  ) return 'FABRIC'
+  if (
+    signals.includes('--fml.forgeversion') ||
+    signals.includes('/net/minecraftforge/forge/') ||
+    signals.includes('net.minecraftforge.')
+  ) return 'FORGE'
+  return 'VANILLA'
+}
+
+const assertInside = (root: string, path: string) => {
+  const child = relative(resolve(root), resolve(path))
+  if (child.startsWith('..') || child === '') {
+    throw new Error('Resolved artifact path escapes the Launcher data directory')
+  }
+  return path
+}
+
+interface LaunchServerLocalConfig {
+  updatesProvider?: {
+    updatesDir?: string
+    binaryName?: string
+  }
+}
+
+export class ClientBuildService {
+  constructor(
+    private readonly control: ControlFileService,
+    private readonly volume: VolumeFileOperations = new ContainerVolumeService(),
+    private readonly modules: Pick<ModuleManagementService, 'install'> =
+      new ModuleManagementService(control),
+    private readonly artifactFetcher: VerifiedArtifactFetcher = fetchVerifiedArtifact,
+    private readonly runtime: Pick<LauncherRuntimeService, 'ensureInstalled'> =
+      new LauncherRuntimeService(control),
+    private readonly loaderInstallers: LoaderInstallerProvider =
+      new LoaderInstallerService(),
+    private readonly lifecycle?: LaunchServerLifecycle,
+  ) {}
+
+  compatibility(minecraftVersion: string) {
+    this.validateVersion(minecraftVersion)
+    return resolveClientCompatibility(minecraftVersion)
+  }
+
+  async preparationState(
+    installation: GravitInstallation,
+  ): Promise<ClientPreparationState> {
+    const [workspaceDirectory, workspaceDigest, prestarterDigest, artifacts] =
+      await Promise.all([
+        this.volume.exists(
+          installation,
+          'config/MirrorHelper/workspace',
+          'directory',
+        ),
+        this.volume.sha256?.(
+          installation,
+          'config/MirrorHelper/workspace.panel.json',
+        ) ?? Promise.resolve(null),
+        this.volume.sha256?.(installation, prestarterRelease.asset) ??
+          Promise.resolve(null),
+        this.listLauncherArtifacts(installation),
+      ])
+    return {
+      installationId: installation.id,
+      workspaceApplied:
+        workspaceDirectory && workspaceDigest === workspaceManifest.sha256,
+      prestarterInstalled: prestarterDigest === prestarterRelease.sha256,
+      launcherBuilt: artifacts.length > 0,
+    }
+  }
+
+  async profileState(
+    installation: GravitInstallation,
+    name: string,
+  ): Promise<ClientProfileState> {
+    this.validateProfile(name)
+    const [hasProfile, hasUpdates] = await Promise.all([
+      this.volume.exists(installation, join('profiles', `${name}.json`)),
+      this.volume.exists(installation, join('updates', name), 'directory'),
+    ])
+    return {
+      installationId: installation.id,
+      name,
+      built: hasProfile && hasUpdates,
+    }
+  }
+
+  async listProfiles(
+    installation: GravitInstallation,
+  ): Promise<{ items: ClientProfileDescriptor[] }> {
+    if (!this.volume.listFiles || !this.volume.readFile) {
+      throw new Error('Container volume profile discovery is unavailable')
+    }
+    const files = (await this.volume.listFiles(installation, 'profiles'))
+      .filter((file) => /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}\.json$/.test(file))
+
+    const items = await Promise.all(files.map(async (file): Promise<ClientProfileDescriptor> => {
+      const name = file.slice(0, -'.json'.length)
+      try {
+        const profile = JSON.parse(
+          await this.volume.readFile!(installation, join('profiles', file)),
+        ) as LaunchProfileConfig
+        const minecraftVersion =
+          typeof profile.version === 'string' && versionPattern.test(profile.version)
+            ? profile.version
+            : null
+        return {
+          name,
+          minecraftVersion,
+          loader: inferProfileLoader(profile),
+        }
+      } catch {
+        return { name, minecraftVersion: null, loader: null }
+      }
+    }))
+    return { items }
+  }
+
+  async applyWorkspace(
+    installation: GravitInstallation,
+    context: JobTaskContext,
+  ): Promise<WorkspaceApplyResult> {
+    await this.modules.install(installation, mirrorHelperModule, context, {
+      checking: 5,
+      loading: 10,
+      verifying: 15,
+      completed: 20,
+    })
+    context.progress(25, 'Downloading pinned MirrorHelper workspace manifest')
+    const bytes = await this.artifactFetcher(
+      workspaceManifest.url,
+      workspaceManifest.sha256,
+      256 * 1024,
+    )
+    const manifestRelativePath = 'config/MirrorHelper/workspace.panel.json'
+    const workspaceRelativePath = 'config/MirrorHelper/workspace'
+    let manifestBackupRelativePath: string | null = null
+    if (await this.volume.exists(installation, manifestRelativePath)) {
+      manifestBackupRelativePath = `${manifestRelativePath}.backup-${safeTimestamp()}`
+      await this.volume.copy(
+        installation,
+        manifestRelativePath,
+        manifestBackupRelativePath,
+      )
+      context.log(
+        `Workspace manifest snapshot created: ${join(launcherRoot(installation), manifestBackupRelativePath)}`,
+      )
+    }
+    await this.volume.writeFileAtomic(installation, manifestRelativePath, bytes, '0600')
+    context.log(`Verified workspace manifest: sha256:${workspaceManifest.sha256}`)
+
+    let snapshotRelativePath: string | null = null
+    if (await this.volume.exists(installation, workspaceRelativePath, 'directory')) {
+      snapshotRelativePath = `config/MirrorHelper/workspace.backup-${safeTimestamp()}`
+      await this.volume.move(installation, workspaceRelativePath, snapshotRelativePath)
+      context.log(
+        `Workspace snapshot created: ${join(launcherRoot(installation), snapshotRelativePath)}`,
+      )
+    }
+
+    try {
+      context.progress(55, 'Applying pinned MirrorHelper workspace')
+      const command =
+        'applyworkspace /app/data/config/MirrorHelper/workspace.panel.json' satisfies ClientControlCommand
+      const lines = await this.control.executeClientCommand(installation, command)
+      lines.forEach(context.log)
+      if (!(await this.volume.exists(installation, workspaceRelativePath, 'directory'))) {
+        throw new Error('MirrorHelper did not create its workspace directory')
+      }
+    } catch (error) {
+      await this.volume.remove(installation, workspaceRelativePath, true)
+      if (snapshotRelativePath) {
+        await this.volume.move(installation, snapshotRelativePath, workspaceRelativePath)
+      }
+      if (manifestBackupRelativePath) {
+        await this.volume.copy(
+          installation,
+          manifestBackupRelativePath,
+          manifestRelativePath,
+        )
+      } else {
+        await this.volume.remove(installation, manifestRelativePath)
+      }
+      throw error
+    }
+
+    context.progress(95, 'Pinned MirrorHelper workspace applied')
+    return {
+      installationId: installation.id,
+      manifestUrl: workspaceManifest.url,
+      manifestSha256: workspaceManifest.sha256,
+      snapshotPath: snapshotRelativePath
+        ? join(launcherRoot(installation), snapshotRelativePath)
+        : null,
+      source: workspaceManifest.source,
+    }
+  }
+
+  async installPrestarter(
+    installation: GravitInstallation,
+    context: JobTaskContext,
+  ): Promise<PrestarterInstallResult> {
+    context.progress(10, `Downloading pinned LauncherPrestarter ${prestarterRelease.tag}`)
+    const bytes = await this.artifactFetcher(
+      prestarterRelease.url,
+      prestarterRelease.sha256,
+      16 * 1024 * 1024,
+    )
+    const targetRelativePath = prestarterRelease.asset
+    const targetPath = join(launcherRoot(installation), targetRelativePath)
+    let backupRelativePath: string | null = null
+    if (await this.volume.exists(installation, targetRelativePath)) {
+      backupRelativePath = `${targetRelativePath}.backup-${safeTimestamp()}`
+      await this.volume.copy(installation, targetRelativePath, backupRelativePath)
+      context.log(
+        `Prestarter snapshot created: ${join(launcherRoot(installation), backupRelativePath)}`,
+      )
+    }
+    await this.volume.writeFileAtomic(installation, targetRelativePath, bytes, '0755')
+    context.log(`Verified Prestarter.exe: sha256:${prestarterRelease.sha256}`)
+
+    try {
+      await this.modules.install(installation, prestarterModule, context, {
+        checking: 55,
+        loading: 65,
+        verifying: 75,
+        completed: 80,
+      })
+      context.progress(85, 'Restarting LaunchServer to initialize Prestarter binary')
+      await this.restartForPrestarter(installation, context)
+      await this.modules.install(installation, prestarterModule, context, {
+        checking: 90,
+        loading: 91,
+        verifying: 92,
+        completed: 93,
+      })
+    } catch (error) {
+      await this.volume.remove(installation, targetRelativePath)
+      if (backupRelativePath) {
+        await this.volume.copy(installation, backupRelativePath, targetRelativePath)
+      }
+      throw error
+    }
+
+    context.progress(95, 'LauncherPrestarter installed and initialized')
+    return {
+      installationId: installation.id,
+      path: targetPath,
+      releaseTag: prestarterRelease.tag,
+      sha256: prestarterRelease.sha256,
+      backupPath: backupRelativePath
+        ? join(launcherRoot(installation), backupRelativePath)
+        : null,
+      source: {
+        repository: prestarterRelease.repository,
+        revision: prestarterRelease.revision,
+      },
+    }
+  }
+
+  async buildLauncher(
+    installation: GravitInstallation,
+    context: JobTaskContext,
+  ): Promise<LauncherBuildResult> {
+    const runtime = await this.runtime.ensureInstalled(installation, context)
+    return this.buildLauncherWithRuntime(installation, context, runtime)
+  }
+
+  private async buildLauncherWithRuntime(
+    installation: GravitInstallation,
+    context: JobTaskContext,
+    runtime: LauncherRuntimeInstallResult,
+  ): Promise<LauncherBuildResult> {
+    const [prestarterDigest, existingArtifacts] = await Promise.all([
+      this.volume.sha256?.(installation, prestarterRelease.asset) ??
+        Promise.resolve(null),
+      this.listLauncherArtifacts(installation),
+    ])
+    const expectsWindowsArtifact = prestarterDigest === prestarterRelease.sha256
+    if (
+      expectsWindowsArtifact &&
+      !existingArtifacts.some((artifact) => artifact.variant === 'windows-x64')
+    ) {
+      context.progress(31, 'Initializing Prestarter launcher binary provider')
+      await this.restartForPrestarter(installation, context)
+      await this.modules.install(installation, prestarterModule, context, {
+        checking: 32,
+        loading: 33,
+        verifying: 34,
+        completed: 35,
+      })
+    }
+    context.progress(35, 'Running source-verified LaunchServer build command')
+    const lines = await this.control.executeBuildCommand(
+      installation,
+      'build' satisfies BuildControlCommand,
+    )
+    lines.forEach(context.log)
+    context.progress(80, 'Inspecting generated launcher artifacts')
+    const artifacts = await this.listLauncherArtifacts(installation)
+    if (!artifacts.length) throw new Error('LaunchServer build completed without launcher artifacts')
+    if (
+      expectsWindowsArtifact &&
+      !artifacts.some((artifact) => artifact.variant === 'windows-x64')
+    ) {
+      throw new Error(
+        'LaunchServer build completed without the Prestarter Windows executable',
+      )
+    }
+    artifacts.forEach((artifact) =>
+      context.log(`${artifact.filename}: ${artifact.size} bytes sha256:${artifact.sha256}`),
+    )
+    context.progress(95, 'Launcher artifacts verified')
+    return {
+      installationId: installation.id,
+      command: 'build',
+      artifacts,
+      runtime,
+      source: launcherBuildSource,
+    }
+  }
+
+  async customizationState(
+    installation: GravitInstallation,
+  ): Promise<LauncherCustomizationState> {
+    if (!this.volume.readFile) {
+      throw new Error('Launcher customization state discovery is unavailable')
+    }
+    if (!(await this.volume.exists(installation, customizationManifestPath))) {
+      return {
+        installationId: installation.id,
+        customized: false,
+        assets: [],
+        source: launcherRuntimeReleaseSource(),
+      }
+    }
+    try {
+      const parsed = JSON.parse(
+        await this.volume.readFile(installation, customizationManifestPath),
+      ) as { assets?: LauncherCustomizationAsset[] }
+      const assets = Array.isArray(parsed.assets)
+        ? parsed.assets.filter(
+            (asset) =>
+              asset &&
+              asset.id in customizationAssets &&
+              customizationAssets[asset.id].path === asset.path &&
+              /^[a-f0-9]{64}$/.test(asset.sha256),
+          )
+        : []
+      return {
+        installationId: installation.id,
+        customized: assets.length > 0,
+        assets,
+        source: launcherRuntimeReleaseSource(),
+      }
+    } catch {
+      return {
+        installationId: installation.id,
+        customized: false,
+        assets: [],
+        source: launcherRuntimeReleaseSource(),
+      }
+    }
+  }
+
+  async customizeLauncher(
+    installation: GravitInstallation,
+    files: LauncherCustomizationFiles,
+    context: JobTaskContext,
+  ): Promise<LauncherCustomizationResult> {
+    const selected = Object.entries(files).filter(
+      (entry): entry is [LauncherCustomizationAssetId, Uint8Array] =>
+        entry[1] instanceof Uint8Array,
+    )
+    if (!selected.length) throw new Error('Select at least one launcher PNG asset')
+    selected.forEach(([id, bytes]) => this.validateCustomizationAsset(id, bytes))
+
+    const runtime = await this.runtime.ensureInstalled(installation, context)
+    const backups: string[] = []
+    const changedPaths: string[] = []
+    const manifestBackup = await this.backupCustomizationFile(
+      installation,
+      customizationManifestPath,
+      context,
+    )
+    if (manifestBackup) backups.push(manifestBackup)
+
+    try {
+      for (const [id, bytes] of selected) {
+        const target = customizationAssets[id].path
+        const backup = await this.backupCustomizationFile(installation, target, context)
+        if (backup) backups.push(backup)
+        await this.volume.writeFileAtomic(installation, target, bytes, '0644')
+        changedPaths.push(target)
+        context.log(`Launcher ${id} updated: ${target}`)
+      }
+
+      const previous = await this.customizationState(installation)
+      const merged = new Map(previous.assets.map((asset) => [asset.id, asset]))
+      for (const [id, bytes] of selected) {
+        merged.set(id, {
+          id,
+          path: customizationAssets[id].path,
+          sha256: sha256Bytes(bytes),
+        })
+      }
+      const assets = [...merged.values()]
+      const source = launcherRuntimeReleaseSource()
+      await this.volume.writeFileAtomic(
+        installation,
+        customizationManifestPath,
+        new TextEncoder().encode(
+          `${JSON.stringify({ source, assets }, null, 2)}\n`,
+        ),
+        '0600',
+      )
+      context.progress(30, 'Launcher customization saved; rebuilding artifacts')
+      const build = await this.buildLauncherWithRuntime(
+        installation,
+        context,
+        runtime,
+      )
+      return {
+        installationId: installation.id,
+        customized: true,
+        assets,
+        backups,
+        build,
+        source,
+      }
+    } catch (error) {
+      if (!changedPaths.length) throw error
+      context.log(
+        'Launcher customization files were saved, but artifact rebuild did not complete; retry Build launcher',
+      )
+      throw error
+    }
+  }
+
+  async buildClient(
+    installation: GravitInstallation,
+    input: ClientBuildInput,
+    context: JobTaskContext,
+  ): Promise<ClientBuildResult> {
+    this.validateProfile(input.name)
+    this.validateVersion(input.minecraftVersion)
+    input.mods.forEach((mod) => this.validateMod(mod))
+    const compatibility = resolveClientCompatibility(input.minecraftVersion)
+    const authlibRelativePath = join(
+      'config',
+      'MirrorHelper',
+      'workspace',
+      'authlib',
+      compatibility.authlibArtifact,
+    )
+    if (!(await this.volume.exists(installation, authlibRelativePath))) {
+      throw new Error(
+        `${compatibility.authlibArtifact} is missing; apply the pinned MirrorHelper workspace first`,
+      )
+    }
+    context.log(
+      `Compatibility decision: ${input.minecraftVersion} requires ${compatibility.authlibArtifact}`,
+    )
+
+    const suffix = input.mods.length ? ` ${input.mods.join(',')}` : ''
+    const command =
+      `installClient ${input.name} ${input.minecraftVersion} ${input.loader}${suffix}` as ClientControlCommand
+    context.progress(20, 'Configuring MirrorHelper client build')
+    const configLines = await this.control.executeClientCommand(
+      installation,
+      'mirrorhelper setDisableDownloadAssets true',
+    )
+    configLines.forEach(context.log)
+    await this.ensureLoaderInstaller(installation, input.loader, input.minecraftVersion, context)
+    context.progress(40, `Building ${input.name} with MirrorHelper`)
+    const lines = await this.control.executeClientCommand(installation, command)
+    lines.forEach(context.log)
+
+    const profileRelativePath = join('profiles', `${input.name}.json`)
+    const updatesRelativePath = join('updates', input.name)
+    const [hasProfile, hasUpdates] = await Promise.all([
+      this.volume.exists(installation, profileRelativePath),
+      this.volume.exists(installation, updatesRelativePath, 'directory'),
+    ])
+    if (!hasProfile || !hasUpdates) {
+      throw new Error('MirrorHelper did not produce the expected profile and updates directory')
+    }
+    const profilePath = join(launcherRoot(installation), profileRelativePath)
+    const updatesPath = join(launcherRoot(installation), updatesRelativePath)
+    context.progress(95, 'Client profile and update files verified')
+    return {
+      installationId: installation.id,
+      name: input.name,
+      minecraftVersion: input.minecraftVersion,
+      loader: input.loader,
+      mods: input.mods,
+      profilePath,
+      updatesPath,
+      compatibility,
+      source: mirrorHelperSource,
+    }
+  }
+
+  private async ensureLoaderInstaller(
+    installation: GravitInstallation,
+    loader: ClientBuildInput['loader'],
+    minecraftVersion: string,
+    context: JobTaskContext,
+  ) {
+    if (loader !== 'FORGE' && loader !== 'NEOFORGE') return
+
+    const prefix = loader.toLowerCase()
+    const workspace = 'config/MirrorHelper/workspace'
+    const installerPaths = [
+      join(workspace, 'installers', `${prefix}-${minecraftVersion}-installer-nogui.jar`),
+      join(workspace, 'installers', `${prefix}-${minecraftVersion}-installer.jar`),
+    ]
+    const cachePath = join(workspace, 'clients', prefix, minecraftVersion)
+    const [hasNoGuiInstaller, hasGuiInstaller, hasCache] = await Promise.all([
+      this.volume.exists(installation, installerPaths[0]!),
+      this.volume.exists(installation, installerPaths[1]!),
+      this.volume.exists(installation, cachePath, 'directory'),
+    ])
+    if (hasNoGuiInstaller || hasGuiInstaller || hasCache) {
+      context.log(`Reusing cached ${loader} installer data for Minecraft ${minecraftVersion}`)
+      return
+    }
+
+    context.progress(30, `Downloading ${loader} installer for Minecraft ${minecraftVersion}`)
+    try {
+      const artifact = await this.loaderInstallers.download(loader, minecraftVersion)
+      const installerPath = join(workspace, 'installers', artifact.filename)
+      if (!installerPaths.includes(installerPath)) {
+        throw new Error(`Resolved an unexpected installer filename: ${artifact.filename}`)
+      }
+      await this.volume.writeFileAtomic(installation, installerPath, artifact.bytes)
+      context.log(
+        `Resolved ${loader} ${artifact.loaderVersion} for Minecraft ${minecraftVersion}`,
+      )
+      context.log(`Verified ${artifact.filename}: sha256:${artifact.sha256}`)
+    } catch (error) {
+      await Promise.allSettled(
+        installerPaths.map((path) => this.volume.remove(installation, path)),
+      )
+      const detail = error instanceof Error ? error.message : String(error)
+      throw new Error(
+        `Failed to prepare ${loader} installer for Minecraft ${minecraftVersion}: ${detail}`,
+        { cause: error },
+      )
+    }
+  }
+
+  private async restartForPrestarter(
+    installation: GravitInstallation,
+    context: JobTaskContext,
+  ) {
+    if (!this.lifecycle) {
+      throw new Error(
+        'LaunchServer restart is unavailable; Prestarter cannot initialize its executable build task',
+      )
+    }
+    await this.lifecycle.restartLaunchServer(installation, context)
+  }
+
+  private async backupCustomizationFile(
+    installation: GravitInstallation,
+    path: string,
+    context: JobTaskContext,
+  ) {
+    if (!(await this.volume.exists(installation, path))) return null
+    const backup = `${path}.backup-${safeTimestamp()}`
+    await this.volume.copy(installation, path, backup)
+    context.log(`Customization snapshot created: ${backup}`)
+    return backup
+  }
+
+  private validateCustomizationAsset(
+    id: LauncherCustomizationAssetId,
+    bytes: Uint8Array,
+  ) {
+    const expected = customizationAssets[id]
+    if (!bytes.length || bytes.length > expected.maxBytes) {
+      throw new Error(
+        `${id} PNG must be between 1 byte and ${expected.maxBytes} bytes`,
+      )
+    }
+    const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+    if (!pngSignature.every((byte, index) => bytes[index] === byte)) {
+      throw new Error(`${id} must be a valid PNG file`)
+    }
+  }
+
+  async listLauncherArtifacts(installation: GravitInstallation): Promise<LauncherArtifact[]> {
+    const root = launcherRoot(installation)
+    const parsed = JSON.parse(
+      await readFile(join(root, 'LaunchServer.json'), 'utf8'),
+    ) as LaunchServerLocalConfig
+    const updatesDir = parsed.updatesProvider?.updatesDir ?? 'updates'
+    const binaryName = parsed.updatesProvider?.binaryName ?? 'Launcher'
+    if (
+      !/^[a-zA-Z0-9._-]+$/.test(updatesDir) ||
+      !/^[a-zA-Z0-9._-]+$/.test(binaryName) ||
+      basename(updatesDir) !== updatesDir ||
+      basename(binaryName) !== binaryName
+    ) {
+      throw new Error('LaunchServer updatesProvider contains an unsafe artifact path')
+    }
+    const directory = assertInside(root, join(root, updatesDir))
+    const candidates = [
+      { variant: 'jar' as const, filename: `${binaryName}.jar` },
+      { variant: 'windows-x64' as const, filename: `${binaryName}.exe` },
+    ]
+    const artifacts: LauncherArtifact[] = []
+    for (const candidate of candidates) {
+      const path = assertInside(root, join(directory, candidate.filename))
+      if (!(await exists(path))) continue
+      const metadata = await lstat(path)
+      if (!metadata.isFile()) continue
+      const bytes = await readFile(path)
+      artifacts.push({
+        variant: candidate.variant,
+        filename: candidate.filename,
+        size: metadata.size,
+        sha256: sha256Bytes(bytes),
+        modifiedAt: metadata.mtime.toISOString(),
+        downloadPath: `/api/clients/launcher/artifacts/${candidate.variant}?installationId=${installation.id}`,
+      })
+    }
+    return artifacts
+  }
+
+  async artifactPath(installation: GravitInstallation, variant: LauncherArtifact['variant']) {
+    const artifact = (await this.listLauncherArtifacts(installation)).find(
+      (item) => item.variant === variant,
+    )
+    if (!artifact) return null
+    const parsed = JSON.parse(
+      await readFile(join(launcherRoot(installation), 'LaunchServer.json'), 'utf8'),
+    ) as LaunchServerLocalConfig
+    const updatesDir = parsed.updatesProvider?.updatesDir ?? 'updates'
+    if (!/^[a-zA-Z0-9._-]+$/.test(updatesDir) || basename(updatesDir) !== updatesDir) {
+      throw new Error('LaunchServer updatesProvider contains an unsafe artifact path')
+    }
+    return assertInside(
+      launcherRoot(installation),
+      join(launcherRoot(installation), updatesDir, artifact.filename),
+    )
+  }
+
+  private validateProfile(value: string) {
+    if (!profilePattern.test(value)) throw new Error('Profile name contains unsupported characters')
+  }
+
+  private validateVersion(value: string) {
+    if (!versionPattern.test(value)) throw new Error('Minecraft version is invalid')
+  }
+
+  private validateMod(value: string) {
+    if (!modPattern.test(value)) throw new Error(`Invalid Modrinth slug: ${value}`)
+  }
+}
