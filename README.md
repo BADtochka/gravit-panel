@@ -40,8 +40,15 @@ start the stack:
 ```bash
 cp .env.example .env
 mkdir -p /srv/gravit-panel/data/launchserver
-docker compose --env-file .env up -d --build
+docker compose --env-file .env pull
+docker compose --env-file .env up -d
 ```
+
+GitHub Actions publishes `ghcr.io/badtochka/gravit-panel-api` and
+`ghcr.io/badtochka/gravit-panel-web` after every push to `main`. Compose uses
+their `latest` tags by default; set `PANEL_API_IMAGE` and `PANEL_WEB_IMAGE` to
+matching `sha-<commit>` tags for a pinned rollout. If the GHCR packages remain
+private, configure registry credentials on the deployment host or in Coolify.
 
 `compose.yaml` exposes the web service only as `127.0.0.1:8080` by default.
 Use an HTTPS reverse proxy to publish it. `PANEL_DATA_DIR` must be a host bind
@@ -75,9 +82,9 @@ Coolify:
 | `CORS_ORIGINS` | Optional; normally empty for the same-origin web/API setup |
 
 Assign the panel domain to the `web` service on port `80`, and the game domain
-to `launchserver-web` on port `80`. Coolify can build both panel services from
-the included `Dockerfile`, run the declared health checks, and terminate TLS at
-its proxy. The `api` and `launchserver` services are not published directly.
+to `launchserver-web` on port `80`. Coolify pulls the published panel images,
+runs the declared health checks, and terminates TLS at its proxy. The `api` and
+`launchserver` services are not published directly.
 Create `PANEL_DATA_DIR/launchserver` on the target Docker host before the first
 deployment; it must not be a path inside Coolify's temporary source checkout.
 Protect the application with an external identity layer before assigning a

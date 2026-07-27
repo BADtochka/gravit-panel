@@ -6,10 +6,7 @@ name: gravit-panel
 
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: api-runtime
+    image: ${PANEL_API_IMAGE:-ghcr.io/badtochka/gravit-panel-api:latest}
     restart: unless-stopped
     environment:
       HOST: 0.0.0.0
@@ -34,10 +31,7 @@ services:
       start_period: 20s
 
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: web-runtime
+    image: ${PANEL_WEB_IMAGE:-ghcr.io/badtochka/gravit-panel-web:latest}
     restart: unless-stopped
     depends_on:
       api:
