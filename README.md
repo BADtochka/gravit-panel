@@ -94,7 +94,8 @@ The reverse proxy must route `PathPrefix(/panel)` to the panel and strip
 `/panel` before forwarding it. The browser keeps the prefix for assets, API,
 SSE, router navigation, OAuth redirects, and cookies; nginx and the API still
 receive their normal root paths. For Coolify, `compose.coolify.yaml` performs
-this when `PANEL_PUBLIC_PATH=/panel` is set.
+this when `PANEL_PUBLIC_PATH=/panel` is set, including a redirect from
+`/panel` to `/panel/` for relative assets.
 
 The same stack starts an official `launchserver` service and its
 `launchserver-web` nginx facade at `127.0.0.1:17549`. It serves updates and

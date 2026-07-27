@@ -52,10 +52,15 @@ services:
       SERVICE_URL_PANELWEB_80: ${PANEL_PUBLIC_PATH:-/}
       PANEL_PUBLIC_PATH: ${PANEL_PUBLIC_PATH:-}
     labels:
-      # Empty path uses a non-matching prefix. Set PANEL_PUBLIC_PATH=/panel to
-      # expose the panel under /panel and strip it before forwarding to nginx.
+      # Normalise /panel to /panel/ before StripPrefix so relative Vite assets
+      # are resolved below the public route. An empty path never matches.
+      - "traefik.http.middlewares.gravit-panel-trailing.redirectregex.regex=^https?://([^/]+)${PANEL_PUBLIC_PATH:-/__gravit-panel-disabled__}$$"
+      - "traefik.http.middlewares.gravit-panel-trailing.redirectregex.replacement=https://$${1}${PANEL_PUBLIC_PATH:-/__gravit-panel-disabled__}/"
+      - "traefik.http.middlewares.gravit-panel-trailing.redirectregex.permanent=true"
+      # Set PANEL_PUBLIC_PATH=/panel to expose the panel below /panel and
+      # remove that prefix before forwarding the request to nginx.
       - "traefik.http.middlewares.gravit-panel-strip.stripprefix.prefixes=${PANEL_PUBLIC_PATH:-/__gravit-panel-disabled__}"
-      - "coolify.traefik.middlewares=gravit-panel-strip@docker"
+      - "coolify.traefik.middlewares=gravit-panel-trailing@docker,gravit-panel-strip@docker"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
       interval: 15s
