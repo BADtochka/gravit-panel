@@ -1,4 +1,9 @@
-import type { GravitModuleInstallInput, JobRecord } from '@gravit-panel/shared'
+import type {
+  DiscordAuthSystemBuildInput,
+  GravitModuleInstallInput,
+  GravitModuleRemoveInput,
+  JobRecord,
+} from '@gravit-panel/shared'
 import { Elysia, t } from 'elysia'
 import { ControlFileBusyError } from '../gravit/control-file.service'
 import { installationsStore } from '../gravit/gravit.runtime'
@@ -6,6 +11,7 @@ import type { InstallationsStore } from '../gravit/installations.store'
 import type { JobsRunner } from '../jobs/jobs.runner'
 import type { JobsStore } from '../jobs/jobs.store'
 import { activeJobForInstallation, jobsRunner, jobsStore } from '../jobs/jobs.runtime'
+import { DiscordAuthSystemBuildService } from './discord-auth-system-build.service'
 import { findCatalogModule, moduleCatalog } from './module-catalog'
 import { moduleManagement } from './modules.runtime'
 
@@ -21,7 +27,8 @@ export interface ModulesRoutesDependencies {
   jobs: Pick<JobsRunner, 'create'>
   jobsStore: Pick<JobsStore, 'listByStatuses'>
   activeJob: (installationId: string) => JobRecord | null | undefined
-  management: Pick<typeof moduleManagement, 'getState' | 'install'>
+  management: Pick<typeof moduleManagement, 'getState' | 'install' | 'remove'>
+  buildService?: DiscordAuthSystemBuildService
 }
 
 export const createModulesRoutes = ({
@@ -30,6 +37,7 @@ export const createModulesRoutes = ({
   jobsStore,
   activeJob,
   management,
+  buildService = new DiscordAuthSystemBuildService(),
 }: ModulesRoutesDependencies) => {
   const activeModuleJobs = () => jobsStore.listByStatuses(['queued', 'running'])
 
@@ -96,6 +104,78 @@ export const createModulesRoutes = ({
     },
     {
       body: t.Object({ installationId, moduleId }),
+    },
+  )
+  .post(
+    '/remove',
+    ({ body, set }) => {
+      const input = body as GravitModuleRemoveInput
+      const installation = installations.get(input.installationId)
+      if (!installation) {
+        set.status = 404
+        return { message: 'LauncherDockered installation not found.' }
+      }
+
+      const item = findCatalogModule(input.moduleId)
+      if (!item) {
+        set.status = 404
+        return { message: 'Module is not present in the source-verified release catalog.' }
+      }
+
+      const conflictingJob = activeJob(installation.id)
+      if (conflictingJob) {
+        set.status = 409
+        return {
+          message: 'Another module operation is already active for this installation.',
+          jobId: conflictingJob.id,
+        }
+      }
+
+      const job = jobs.create(
+        'gravit.module.remove',
+        { ...input },
+        `${item.name} module removal queued`,
+        async (context) => ({ ...(await management.remove(installation, item, context)) }),
+      )
+      set.status = 202
+      return job
+    },
+    {
+      body: t.Object({ installationId, moduleId, confirmRemove: t.Literal(true) }),
+    },
+  )
+  .post(
+    '/discordauthsystem/build',
+    ({ body, set }) => {
+      const input = body as DiscordAuthSystemBuildInput
+      const installation = installations.get(input.installationId)
+      if (!installation) {
+        set.status = 404
+        return { message: 'LauncherDockered installation not found.' }
+      }
+
+      const conflictingJob = activeJob(installation.id)
+      if (conflictingJob) {
+        set.status = 409
+        return {
+          message: 'Another module operation is already active for this installation.',
+          jobId: conflictingJob.id,
+        }
+      }
+
+      const job = jobs.create(
+        'gravit.module.discordauthsystem.build',
+        { ...input },
+        'DiscordAuthSystem module Docker build queued',
+        async (context) => ({
+          ...(await buildService.build(context, installation)),
+        }),
+      )
+      set.status = 202
+      return job
+    },
+    {
+      body: t.Object({ installationId }),
     },
   )
 }

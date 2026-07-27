@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import type {
   GravitInstallation,
+  LaunchServerRuntimeHealth,
   WorkspaceApplyResult,
 } from '@gravit-panel/shared'
 import { Database } from 'bun:sqlite'
@@ -41,8 +42,19 @@ const workspaceResult: WorkspaceApplyResult = {
   },
 }
 
+const launchServerHealth: LaunchServerRuntimeHealth = {
+  installationId: installation.id,
+  status: 'healthy',
+  checkedAt: '2026-07-27T12:00:00.000Z',
+  message: 'LaunchServer control socket is ready.',
+}
+
 const createHarness = (
   overrides: Partial<ClientBuildService> = {},
+  lifecycleOverrides: {
+    checkLaunchServer?: () => Promise<LaunchServerRuntimeHealth>
+    restartLaunchServer?: () => Promise<void>
+  } = {},
 ) => {
   const database = new Database(':memory:')
   databases.push(database)
@@ -88,6 +100,10 @@ const createHarness = (
   const app = new Elysia({ prefix: '/api' }).use(
     createClientsRoutes({
       service,
+      lifecycle: {
+        checkLaunchServer: lifecycleOverrides.checkLaunchServer ?? (async () => launchServerHealth),
+        restartLaunchServer: lifecycleOverrides.restartLaunchServer ?? (async () => {}),
+      },
       versions: {
         list: async () => ({
           items: [
@@ -135,6 +151,32 @@ const waitForTerminalJob = async (store: JobsStore, id: string) => {
 }
 
 describe('clients workspace API', () => {
+  test('reports LaunchServer health and queues a restart through the lifecycle service', async () => {
+    let restarts = 0
+    const { request, store } = createHarness({}, {
+      restartLaunchServer: async () => { restarts += 1 },
+    })
+
+    const health = await request(`/api/clients/launcher/health?installationId=${installation.id}`)
+    const restart = await request('/api/clients/launcher/restart', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ installationId: installation.id }),
+    })
+    const queued = await restart.json()
+    const completed = await waitForTerminalJob(store, queued.id)
+
+    expect(health.status).toBe(200)
+    expect(await health.json()).toEqual(launchServerHealth)
+    expect(restart.status).toBe(202)
+    expect(queued).toMatchObject({ type: 'gravit.launchserver.restart' })
+    expect(completed).toMatchObject({
+      status: 'succeeded',
+      result: { installationId: installation.id, restarted: true },
+    })
+    expect(restarts).toBe(1)
+  })
+
   test('reports preparation completion for the selected installation', async () => {
     const { request } = createHarness()
     const response = await request(`/api/clients/state?installationId=${installation.id}`)

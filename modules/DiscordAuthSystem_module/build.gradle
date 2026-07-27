@@ -1,0 +1,29 @@
+plugins {
+    id 'java'
+}
+
+group = 'pro.gravit.launchermodules'
+version = '1.0.3'
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+dependencies {
+    // Compile against LaunchServer and launcher-base JARs placed in libs/.
+    // These are provided at runtime by the LaunchServer classloader.
+    compileOnly fileTree(dir: 'libs', include: '*.jar')
+}
+
+jar {
+    archiveBaseName = 'DiscordAuthSystem_module'
+    manifest.attributes(
+        'Module-Main-Class': 'pro.gravit.launchermodules.discordauthsystem.DiscordAuthSystemModule',
+        'Module-Config-Class': 'pro.gravit.launchermodules.discordauthsystem.DiscordAuthSystemConfig',
+    )
+}

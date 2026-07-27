@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+node_modules
+**/node_modules
+**/dist
+**/.gradle
+**/build
+data
+apps/api/data
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

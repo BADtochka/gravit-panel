@@ -1,6 +1,8 @@
 import type {
   AuthConfiguration,
   AuthCoreRecipeId,
+  AuthDiscordCoreConfig,
+  AuthDiscordCoreInput,
   AuthHttpCoreConfig,
   AuthPasswordVerifierConfig,
   AuthProviderApplyInput,
@@ -18,7 +20,11 @@ import type { AuthControlCommand, ControlFileService } from '../gravit/control-f
 import { ContainerVolumeService } from '../docker/container-volume.service'
 import type { LauncherDockeredService } from '../docker/launcherdockered.service'
 import type { JobTaskContext } from '../jobs/jobs.runner'
-import { findCatalogModule } from '../modules/module-catalog'
+import { DiscordAuthSystemBuildService } from '../modules/discord-auth-system-build.service'
+import {
+  discordAuthSystemArtifactVersion,
+  findCatalogModule,
+} from '../modules/module-catalog'
 import { ModuleManagementService } from '../modules/module-management.service'
 import {
   authRecipes,
@@ -40,6 +46,7 @@ interface LaunchServerConfig {
 }
 
 interface AuthVolumeOperations {
+  exists?(installation: GravitInstallation, relativePath: string): Promise<boolean>
   readFile(installation: GravitInstallation, relativePath: string): Promise<string>
   writeFileAtomic(
     installation: GravitInstallation,
@@ -58,6 +65,7 @@ type AuthControlTransport = Pick<
 const authIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/
 const safeTimestamp = () => new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
 const configPath = 'LaunchServer.json'
+const discordModuleConfigPath = 'config/DiscordAuthSystem/Config.json'
 
 const sqlDrivers: Record<
   AuthSqlDriverPreset,
@@ -95,9 +103,17 @@ const additionalHashModule = (() => {
   return item
 })()
 
+const discordAuthSystemModule = (() => {
+  const item = findCatalogModule('DiscordAuthSystem_module')
+  if (!item) throw new Error('DiscordAuthSystem is missing from the module catalog')
+  return item
+})()
+
 const recipeSource = (recipeId: AuthCoreRecipeId) => {
   if (recipeId === 'file') return fileAuthRecipeSource
   if (recipeId === 'mojang' || recipeId === 'microsoft') return mojangSupportSource
+  const recipe = authRecipes.find((item) => item.id === recipeId)
+  if (recipe) return recipe.source
   return authWikiSource
 }
 
@@ -109,6 +125,8 @@ export class AuthProviderService {
       control,
     ),
     private readonly lifecycle: Pick<LauncherDockeredService, 'restartLaunchServer'> | null = null,
+    private readonly discordModuleBuilder: Pick<DiscordAuthSystemBuildService, 'build'> =
+      new DiscordAuthSystemBuildService(),
   ) {}
 
   async configuration(installation: GravitInstallation): Promise<AuthConfiguration> {
@@ -130,7 +148,7 @@ export class AuthProviderService {
     const config = await this.readConfig(installation)
     const pair = config.auth?.[authId]
     if (!pair) throw new Error(`Auth provider "${authId}" does not exist`)
-    return this.sanitizeProvider(authId, pair)
+    return this.sanitizeProvider(installation, authId, pair)
   }
 
   async installFileAuth(
@@ -230,6 +248,17 @@ export class AuthProviderService {
       })
     }
 
+    if (input.recipeId === 'discord') {
+      await this.ensureDiscordModule(installation, context)
+      await this.applyDiscordModuleConfig(installation, input.discord, context)
+      await this.modules.install(installation, discordAuthSystemModule, context, {
+        checking: 5,
+        loading: 15,
+        verifying: 25,
+        completed: 30,
+      })
+    }
+
     const before = await this.readConfig(installation)
     if (!before.auth) throw new Error('LaunchServer configuration does not contain an auth provider map')
 
@@ -297,6 +326,65 @@ export class AuthProviderService {
     }
   }
 
+  private async applyDiscordModuleConfig(
+    installation: GravitInstallation,
+    config: AuthDiscordCoreInput | undefined,
+    context: JobTaskContext,
+  ): Promise<void> {
+    if (!config) throw new Error('Discord auth requires module configuration')
+    const existing = await this.readDiscordModuleConfig(installation)
+    const clientSecret = config.clientSecret || existing?.clientSecret
+    if (!config.clientId || !clientSecret || !config.redirectUrl) {
+      throw new Error('Discord auth requires clientId, clientSecret, and redirectUrl')
+    }
+
+    const moduleConfig = {
+      clientId: config.clientId,
+      clientSecret,
+      redirectUrl: config.redirectUrl,
+      discordAuthorizeUrl: config.discordAuthorizeUrl || 'https://discord.com/oauth2/authorize',
+      discordTokenUrl: config.discordTokenUrl || 'https://discord.com/api/oauth2/token',
+      discordApiEndpoint: config.discordApiEndpoint || 'https://discord.com/api/v10',
+      requiredGuildIds: config.requiredGuildIds ?? [],
+      useGlobalNickname: config.useGlobalNickname ?? true,
+      usernameRegex: config.usernameRegex || '^[a-zA-Z0-9_]{3,16}$',
+      usernameFormat: config.usernameFormat || '{discord}',
+      autoRegister: config.autoRegister ?? true,
+    }
+
+    context.progress(12, 'Writing DiscordAuthSystem module configuration')
+    await this.volume.writeFileAtomic(
+      installation,
+      discordModuleConfigPath,
+      new TextEncoder().encode(`${JSON.stringify(moduleConfig, null, 2)}\n`),
+      '0644',
+    )
+    context.log(`DiscordAuthSystem module config written: ${discordModuleConfigPath}`)
+  }
+
+  private async ensureDiscordModule(
+    installation: GravitInstallation,
+    context: JobTaskContext,
+  ): Promise<void> {
+    const jarPath = `modules/${discordAuthSystemModule.jar}`
+    const versionPath = 'modules/.gravit-panel-discordauthsystem-version'
+    const hasCurrentArtifact =
+      (await this.volume.exists?.(installation, jarPath)) &&
+      (await this.volume.exists?.(installation, versionPath)) &&
+      (await this.volume.readFile(installation, versionPath)).trim() === discordAuthSystemArtifactVersion
+    if (hasCurrentArtifact) {
+      context.log(`Using published DiscordAuthSystem module JAR: ${jarPath}`)
+      return
+    }
+
+    context.progress(5, 'Building and publishing the current DiscordAuthSystem module')
+    await this.discordModuleBuilder.build(context, installation)
+    if (this.lifecycle) {
+      context.progress(96, 'Restarting LaunchServer with the updated DiscordAuthSystem module')
+      await this.lifecycle.restartLaunchServer(installation, context)
+    }
+  }
+
   private buildProviderPair(
     input: AuthProviderApplyInput,
     existing: LaunchServerAuthPair,
@@ -341,6 +429,8 @@ export class AuthProviderService {
         return this.buildHttpCore(input.http, existing.core)
       case 'sql':
         return this.buildSqlCore(input.sql, existing.core)
+      case 'discord':
+        return { type: 'discordauthsystem' }
       default:
         throw new Error(`Recipe "${input.recipeId}" cannot be applied through JSON write`)
     }
@@ -459,7 +549,11 @@ export class AuthProviderService {
     }))
   }
 
-  private sanitizeProvider(id: string, pair: LaunchServerAuthPair): AuthProviderDetail {
+  private async sanitizeProvider(
+    installation: GravitInstallation,
+    id: string,
+    pair: LaunchServerAuthPair,
+  ): Promise<AuthProviderDetail> {
     const core = pair.core ?? {}
     const coreType = typeof core.type === 'string' ? core.type : 'unknown'
     const texture = pair.textureProvider
@@ -544,6 +638,25 @@ export class AuthProviderService {
       }
     }
 
+    let discord: AuthProviderDetail['discord'] = null
+    if (coreType === 'discordauthsystem') {
+      const config = await this.readDiscordModuleConfig(installation)
+      discord = {
+        clientId: config?.clientId ?? '',
+        redirectUrl: config?.redirectUrl ?? '',
+        discordAuthorizeUrl:
+          config?.discordAuthorizeUrl ?? 'https://discord.com/oauth2/authorize',
+        discordTokenUrl: config?.discordTokenUrl ?? 'https://discord.com/api/oauth2/token',
+        discordApiEndpoint: config?.discordApiEndpoint ?? 'https://discord.com/api/v10',
+        requiredGuildIds: config?.requiredGuildIds ?? [],
+        useGlobalNickname: config?.useGlobalNickname ?? true,
+        usernameRegex: config?.usernameRegex ?? '^[a-zA-Z0-9_]{3,16}$',
+        usernameFormat: config?.usernameFormat ?? '{discord}',
+        autoRegister: config?.autoRegister ?? true,
+        clientSecretConfigured: Boolean(config?.clientSecret),
+      }
+    }
+
     return {
       id,
       displayName: pair.displayName ?? id,
@@ -553,6 +666,7 @@ export class AuthProviderService {
       textureProvider,
       sql,
       http,
+      discord,
       merge,
     }
   }
@@ -561,6 +675,53 @@ export class AuthProviderService {
     if (driverClass.includes('postgresql')) return 'postgresql'
     if (driverClass.includes('mariadb')) return 'mariadb'
     return 'mysql'
+  }
+
+  private async readDiscordModuleConfig(
+    installation: GravitInstallation,
+  ): Promise<AuthDiscordCoreConfig | null> {
+    if (this.volume.exists && !(await this.volume.exists(installation, discordModuleConfigPath))) {
+      return null
+    }
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(await this.volume.readFile(installation, discordModuleConfigPath))
+    } catch (error) {
+      throw new Error(
+        `Unable to read DiscordAuthSystem configuration: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      )
+    }
+    const value = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
+    return {
+      clientId: typeof value.clientId === 'string' ? value.clientId : '',
+      clientSecret: typeof value.clientSecret === 'string' ? value.clientSecret : '',
+      redirectUrl: typeof value.redirectUrl === 'string' ? value.redirectUrl : '',
+      discordAuthorizeUrl:
+        typeof value.discordAuthorizeUrl === 'string'
+          ? value.discordAuthorizeUrl
+          : 'https://discord.com/oauth2/authorize',
+      discordTokenUrl:
+        typeof value.discordTokenUrl === 'string'
+          ? value.discordTokenUrl
+          : 'https://discord.com/api/oauth2/token',
+      discordApiEndpoint:
+        typeof value.discordApiEndpoint === 'string'
+          ? value.discordApiEndpoint
+          : 'https://discord.com/api/v10',
+      requiredGuildIds: Array.isArray(value.requiredGuildIds)
+        ? value.requiredGuildIds.filter((item): item is string => typeof item === 'string')
+        : [],
+      useGlobalNickname:
+        typeof value.useGlobalNickname === 'boolean' ? value.useGlobalNickname : true,
+      usernameRegex:
+        typeof value.usernameRegex === 'string' ? value.usernameRegex : '^[a-zA-Z0-9_]{3,16}$',
+      usernameFormat: typeof value.usernameFormat === 'string' ? value.usernameFormat : '{discord}',
+      autoRegister: typeof value.autoRegister === 'boolean' ? value.autoRegister : true,
+    }
   }
 
   private findConfiguredFileProvider(config: LaunchServerConfig, requestedAuthId: string) {

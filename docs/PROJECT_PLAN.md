@@ -434,8 +434,15 @@ and action status cannot leak between profiles.
 Status: completed.
 
 - Split auth-related catalog modules (`FileAuthSystem`, `MojangSupport`,
-  `AdditionalHash`) into a dedicated Modules Auth tab with FileAuthSystem
-  `autoSave` configuration.
+  `AdditionalHash`, `DiscordAuthSystem`) into a dedicated Modules Auth tab. The
+  `DiscordAuthSystem` entry is a built-in standalone Java module stored under
+  `modules/DiscordAuthSystem_module` with source link to `BADtochka/gravit-panel`.
+  Discord OAuth is available as a built-in auth recipe: the Auth page opens a
+  modal for Discord app credentials, required guilds, and nickname formatting,
+  and writes both `LaunchServer.json` and `config/DiscordAuthSystem/Config.json`.
+  FileAuthSystem module settings (`autoSave`) are configured from the Auth page.
+  Every catalog entry carries a per-module source link (repository, revision,
+  path).
 - Expand the Auth page to apply verified built-in cores: memory, sql, http,
   merge, fileauthsystem, mojang, and microsoft. SQL writes include JDBC driver
   presets and password verifiers (`bcrypt`, `digest`, `doubleDigest`, `phpass`).
@@ -447,7 +454,8 @@ Status: completed.
 
 ## Secondary Scope
 
-- Discord OAuth and other community auth modules beyond the built-in cores.
+- Built-in standalone Discord OAuth auth and other community auth modules beyond
+  the built-in cores.
 - Texture provider recipes, starting with URL template providers.
 - Standalone (non-LauncherDockered) server import.
 - Snapshot diff viewer.
@@ -471,6 +479,7 @@ Status: completed.
 - LauncherModules: https://github.com/GravitLauncher/LauncherModules
 - LauncherDockered: https://github.com/GravitLauncher/LauncherDockered
 - LauncherPrestarter: https://github.com/GravitLauncher/LauncherPrestarter
+- Built-in DiscordAuthSystem module: modules/DiscordAuthSystem_module
 - GravitLauncher quickstart: https://gravitlauncher.com/quickstart/
 - Elysia: https://elysiajs.com/at-glance
 - Bun Elysia guide: https://bun.com/docs/guides/ecosystem/elysia

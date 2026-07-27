@@ -1,0 +1,88 @@
+name: gravit-panel
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api-runtime
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_PATH: ${PANEL_DATA_DIR:?Set PANEL_DATA_DIR to an absolute host directory}/gravit-panel.sqlite
+      INSTALLATIONS_ROOT: ${PANEL_DATA_DIR:?Set PANEL_DATA_DIR to an absolute host directory}/installations
+      MODULE_ARTIFACTS_DIR: ${PANEL_DATA_DIR:?Set PANEL_DATA_DIR to an absolute host directory}/modules
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    volumes:
+      # Keep the host and container paths identical. LauncherDockered's own
+      # Compose projects use relative bind mounts, resolved by the host daemon.
+      - type: bind
+        source: ${PANEL_DATA_DIR:?Set PANEL_DATA_DIR to an absolute host directory}
+        target: ${PANEL_DATA_DIR:?Set PANEL_DATA_DIR to an absolute host directory}
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    healthcheck:
+      test: ["CMD-SHELL", "bun -e \"const response = await fetch('http://127.0.0.1:3000/api/health'); process.exit(response.ok ? 0 : 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web-runtime
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${PANEL_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  launchserver:
+    image: ghcr.io/gravitlauncher/launcher:v5.7.9
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    environment:
+      ADDRESS: ${LAUNCHSERVER_ADDRESS:-localhost:17549}
+      PROJECTNAME: ${LAUNCHSERVER_PROJECT_NAME:-main}
+      JAVA_OPTS: ${LAUNCHSERVER_JAVA_OPTS:-}
+    volumes:
+      - type: bind
+        source: ${PANEL_DATA_DIR:?Set PANEL_DATA_DIR to an absolute host directory}/launchserver
+        target: /app/data
+
+  launchserver-web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      launchserver:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${LAUNCHSERVER_PORT:-17549}:80"
+    volumes:
+      - type: bind
+        source: ./deploy/launchserver/nginx.conf
+        target: /etc/nginx/conf.d/default.conf
+        read_only: true
+      - type: bind
+        source: ${PANEL_DATA_DIR:?Set PANEL_DATA_DIR to an absolute host directory}/launchserver
+        target: /volume
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s

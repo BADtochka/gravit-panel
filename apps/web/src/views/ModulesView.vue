@@ -19,7 +19,8 @@
       <CardHeader class="border-b">
         <CardTitle class="text-base">Verified artifact manifest</CardTitle>
         <CardDescription>
-          Only JARs present in this pinned release and discovered in the running image can be loaded.
+          Only JARs present in this pinned release can be loaded. Built-in local modules are verified
+          after publication to the selected LaunchServer installation.
         </CardDescription>
       </CardHeader>
       <CardContent class="grid gap-3 pt-6 text-xs text-muted-foreground md:grid-cols-3">
@@ -86,20 +87,34 @@
         :value="group.kind"
         class="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
       >
-        <Card v-for="item in group.items" :key="item.id">
+        <Card v-for="item in group.items" :key="item.id" class="h-full">
           <CardHeader>
             <div class="flex items-start justify-between gap-3">
               <div>
                 <CardTitle class="text-base">{{ item.name }}</CardTitle>
                 <CardDescription class="mt-1">{{ item.description }}</CardDescription>
               </div>
-              <Badge :variant="badgeVariant(item.category)">
-                {{ categoryLabel(item.category) }}
-              </Badge>
+              <div class="flex shrink-0 gap-1">
+                <Badge v-if="isCommunityModule(item)" variant="outline">Community</Badge>
+                <Badge :variant="badgeVariant(item.category)">
+                  {{ categoryLabel(item.category) }}
+                </Badge>
+              </div>
             </div>
           </CardHeader>
-          <CardContent class="space-y-4">
-            <p class="break-all font-mono text-xs text-muted-foreground">{{ item.jar }}</p>
+          <CardContent class="flex flex-1 flex-col space-y-4">
+            <div class="space-y-1">
+              <p class="break-all font-mono text-xs text-muted-foreground">{{ item.jar }}</p>
+              <a
+                class="inline-flex items-center gap-1 text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                :href="moduleSourceUrl(item)"
+                target="_blank"
+                rel="noreferrer"
+              >
+                <ExternalLink class="size-3" />
+                Source
+              </a>
+            </div>
             <div class="flex flex-wrap gap-2">
               <Badge v-if="isPending(item.id)" variant="secondary">
                 <LoaderCircle class="animate-spin" />
@@ -113,54 +128,74 @@
                 <CircleCheck class="size-3" />
                 Loaded
               </Badge>
+              <Badge v-else-if="runtimeFor(item.id)?.built" variant="secondary">Built</Badge>
               <Badge
                 v-else-if="runtimeFor(item.id)?.available"
                 variant="secondary"
               >
                 Available
               </Badge>
-              <Badge v-else-if="runtimeFor(item.id)" variant="outline">Unavailable</Badge>
+              <Badge
+                v-else-if="runtimeFor(item.id) && item.id !== 'DiscordAuthSystem_module'"
+                variant="outline"
+              >
+                Unavailable
+              </Badge>
+              <Badge v-else-if="runtimeFor(item.id)" variant="outline">Not built</Badge>
               <Badge v-else variant="outline">
                 {{ stateFetching ? 'Checking' : stateEnabled ? 'Not checked' : 'Locked' }}
               </Badge>
             </div>
-            <div
-              v-if="item.id === 'FileAuthSystem_module' && runtimeFor(item.id)?.loaded"
-              class="space-y-3 rounded-md border bg-muted/30 p-3"
-            >
-              <div class="flex items-center justify-between gap-3">
-                <div>
-                  <p class="text-sm font-medium">autoSave</p>
-                  <p class="text-xs text-muted-foreground">
-                    Persist Database.json when LaunchServer stops.
-                  </p>
-                </div>
-                <Switch
-                  :model-value="fileAuthAutoSave"
-                  :disabled="fileAuthConfigPending || configJobPending"
-                  @update:model-value="fileAuthAutoSave = Boolean($event)"
-                />
-              </div>
-              <Button
-                class="w-full"
-                size="sm"
-                type="button"
-                variant="outline"
-                :disabled="fileAuthConfigPending || configJobPending"
-                @click="applyFileAuthConfig"
-              >
-                Save module config
-              </Button>
-            </div>
             <p
-              v-else-if="item.category === 'auth' && runtimeFor(item.id)?.loaded"
+              v-if="item.category === 'auth' && runtimeFor(item.id)?.loaded"
               class="text-xs text-muted-foreground"
             >
               Configure provider cores on the Auth page after this module is loaded.
             </p>
           </CardContent>
-          <CardFooter v-if="!runtimeFor(item.id)?.loaded">
+          <CardFooter v-if="runtimeFor(item.id)?.loaded" class="space-y-2">
+            <AlertDialog>
+              <AlertDialogTrigger as-child>
+                <Button
+                  class="w-full"
+                  type="button"
+                  variant="destructive"
+                  :disabled="!canRemove(item.id)"
+                >
+                  <LoaderCircle v-if="isPending(item.id)" class="animate-spin" />
+                  <Trash2 v-else />
+                  Remove module
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Remove {{ item.name }}?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    The module JAR and its startup entry will be removed, then LaunchServer will restart.
+                    Module configuration files will be kept.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction @click="removeModule(item.id)">Remove module</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </CardFooter>
+          <CardFooter v-else class="space-y-2">
             <Button
+              v-if="item.id === 'DiscordAuthSystem_module' && !runtimeFor(item.id)?.built"
+              class="w-full bg-white text-black hover:bg-white/90 dark:bg-white dark:text-black dark:hover:bg-white/90"
+              type="button"
+              :disabled="!stateEnabled || isBuildPending"
+              @click="buildDiscordModule"
+            >
+              <LoaderCircle v-if="isBuildPending" class="animate-spin" />
+              <Download v-else />
+              Build module
+            </Button>
+            <Button
+              v-if="item.id !== 'DiscordAuthSystem_module' || runtimeFor(item.id)?.available"
               class="w-full"
               type="button"
               :disabled="!canInstall(item.id)"
@@ -183,6 +218,17 @@
 <script setup lang="ts">
 import JobLogCard from '@/components/jobs/JobLogCard.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -193,31 +239,30 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useInstallationJob } from '@/composables/useInstallationJob'
 import { useInstallationsStore } from '@/stores/installations'
 import type {
-  FileAuthModuleConfig,
   GravitModuleCatalog,
+  GravitModuleCatalogItem,
   GravitModuleCategory,
   GravitModuleState,
   JobRecord,
 } from '@gravit-panel/shared'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useMutation, useQuery } from '@tanstack/vue-query'
 import {
   CircleCheck,
   Download,
+  ExternalLink,
   LoaderCircle,
   RefreshCw,
+  Trash2,
   TriangleAlert,
 } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { computed, ref, watch } from 'vue'
 
-const queryClient = useQueryClient()
 const { selectedInstallationId } = storeToRefs(useInstallationsStore())
-const fileAuthAutoSave = ref(true)
 const {
   activeJob,
   activeJobError,
@@ -225,7 +270,7 @@ const {
   finishJob,
 } = useInstallationJob(
   () => selectedInstallationId.value,
-  ['gravit.module.install', 'gravit.module.config.apply'],
+  ['gravit.module.install', 'gravit.module.remove', 'gravit.module.discordauthsystem.build'],
 )
 
 const getJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> => {
@@ -257,30 +302,6 @@ const {
   retry: false,
 })
 
-const fileAuthLoaded = computed(
-  () => moduleState.value?.items.find((item) => item.id === 'FileAuthSystem_module')?.loaded,
-)
-const {
-  data: fileAuthConfig,
-  error: fileAuthConfigError,
-  isFetching: fileAuthConfigPending,
-} = useQuery({
-  queryKey: computed(() => ['fileauth-module-config', selectedInstallationId.value]),
-  queryFn: () =>
-    getJson<FileAuthModuleConfig>(
-      `/api/auth/modules/fileauthsystem?installationId=${encodeURIComponent(selectedInstallationId.value)}`,
-    ),
-  enabled: computed(() => stateEnabled.value && Boolean(fileAuthLoaded.value)),
-  retry: false,
-})
-watch(
-  () => fileAuthConfig.value?.autoSave,
-  (value) => {
-    if (typeof value === 'boolean') fileAuthAutoSave.value = value
-  },
-  { immediate: true },
-)
-
 const runtimeFor = (moduleId: string) =>
   moduleState.value?.items.find((item) => item.id === moduleId)
 
@@ -293,6 +314,9 @@ const activeJobTerminal = computed(
 const isPending = (moduleId: string) =>
   Boolean(
     (!activeJobTerminal.value && activeJob.value?.input.moduleId === moduleId) ||
+      (!activeJobTerminal.value &&
+        moduleId === 'DiscordAuthSystem_module' &&
+        activeJob.value?.type === 'gravit.module.discordauthsystem.build') ||
       runtimeFor(moduleId)?.pendingJobId,
   )
 const canInstall = (moduleId: string) =>
@@ -303,12 +327,19 @@ const canInstall = (moduleId: string) =>
       !isPending(moduleId) &&
       !installPending.value,
   )
+const canRemove = (moduleId: string) =>
+  Boolean(
+    stateEnabled.value &&
+      runtimeFor(moduleId)?.loaded &&
+      !isPending(moduleId) &&
+      !removePending.value,
+  )
 const actionLabel = (moduleId: string) => {
   if (isPending(moduleId)) return 'Loading'
   const runtime = runtimeFor(moduleId)
   if (runtime?.loaded) return 'Loaded'
   if (runtime?.available) return 'Install and load'
-  if (runtime) return 'Unavailable'
+  if (runtime) return moduleId === 'DiscordAuthSystem_module' ? 'Build to enable' : 'Unavailable'
   return stateEnabled.value ? 'State not checked' : 'Locked'
 }
 const categoryLabel = (category: GravitModuleCategory) => {
@@ -321,6 +352,12 @@ const badgeVariant = (category: GravitModuleCategory) => {
   if (category === 'launcher') return 'outline' as const
   return 'default' as const
 }
+const moduleSourceUrl = (item: GravitModuleCatalogItem) =>
+  item.source.path
+    ? `${item.source.repository}/tree/${item.source.revision}/${item.source.path}`
+    : `${item.source.repository}/tree/${item.source.revision}`
+const isCommunityModule = (item: GravitModuleCatalogItem) =>
+  item.source.repository !== catalog.value?.source.repository
 
 const moduleGroups = computed(() => [
   { kind: 'server', items: catalog.value?.serverModules ?? [] },
@@ -346,40 +383,50 @@ const {
 })
 
 const {
-  error: configError,
-  isPending: configPending,
-  mutate: mutateConfig,
+  error: buildError,
+  isPending: buildPending,
+  mutate: buildMutate,
 } = useMutation({
   mutationFn: () =>
-    getJson<JobRecord>('/api/auth/modules/fileauthsystem', {
+    getJson<JobRecord>('/api/modules/discordauthsystem/build', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        installationId: selectedInstallationId.value,
-        autoSave: fileAuthAutoSave.value,
-        confirmConfigWrite: true,
-      }),
+      body: JSON.stringify(
+        { installationId: selectedInstallationId.value },
+      ),
     }),
   onSuccess: attachJob,
 })
 
-const configJobPending = computed(
+const installModule = (moduleId: string) => mutate(moduleId)
+const {
+  error: removeError,
+  isPending: removePending,
+  mutate: removeMutate,
+} = useMutation({
+  mutationFn: (moduleId: string) =>
+    getJson<JobRecord>('/api/modules/remove', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        installationId: selectedInstallationId.value,
+        moduleId,
+        confirmRemove: true,
+      }),
+    }),
+  onSuccess: attachJob,
+})
+const removeModule = (moduleId: string) => removeMutate(moduleId)
+const buildDiscordModule = () => buildMutate()
+const isBuildPending = computed(
   () =>
-    configPending.value ||
+    buildPending.value ||
     activeJob.value?.status === 'queued' ||
     activeJob.value?.status === 'running',
 )
-
-const installModule = (moduleId: string) => mutate(moduleId)
-const applyFileAuthConfig = () => mutateConfig()
 const jobFinished = async (job: JobRecord) => {
   await finishJob(job)
-  await queryClient.invalidateQueries({
-    queryKey: ['module-state', selectedInstallationId.value],
-  })
-  await queryClient.invalidateQueries({
-    queryKey: ['fileauth-module-config', selectedInstallationId.value],
-  })
+  await refetchState()
 }
 
 const pageError = computed(
@@ -387,8 +434,8 @@ const pageError = computed(
     (catalogError.value ||
       stateError.value ||
       installError.value ||
-      configError.value ||
-      fileAuthConfigError.value ||
+      removeError.value ||
+      buildError.value ||
       activeJobError.value) as Error | null,
 )
 </script>

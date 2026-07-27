@@ -3,6 +3,7 @@ import type {
   LauncherDockeredInstallInput,
   LauncherDockeredInstallResult,
   LauncherDockeredRemovalResult,
+  LaunchServerRuntimeHealth,
 } from '@gravit-panel/shared'
 import {
   access,
@@ -376,6 +377,52 @@ export class LauncherDockeredService {
     context.log('Waiting for LaunchServer control socket after restart')
     await this.readinessWaiter(installationPath, context.signal)
     context.log('LaunchServer control socket is ready after restart')
+  }
+
+  async checkLaunchServer(installation: GravitInstallation): Promise<LaunchServerRuntimeHealth> {
+    const checkedAt = new Date().toISOString()
+    const installationPath = resolve(installation.path)
+
+    try {
+      await this.validateComposeProject(installationPath)
+      const result = await this.commandRunner(
+        [
+          'docker',
+          'compose',
+          'exec',
+          '-T',
+          'gravitlauncher',
+          'test',
+          '-S',
+          '/app/data/control-file',
+        ],
+        installationPath,
+        new AbortController().signal,
+        () => {},
+      )
+      if (result.exitCode === 0) {
+        return {
+          installationId: installation.id,
+          status: 'healthy',
+          checkedAt,
+          message: 'LaunchServer control socket is ready.',
+        }
+      }
+
+      return {
+        installationId: installation.id,
+        status: 'unhealthy',
+        checkedAt,
+        message: result.output || 'LaunchServer container or control socket is unavailable.',
+      }
+    } catch (error) {
+      return {
+        installationId: installation.id,
+        status: 'unhealthy',
+        checkedAt,
+        message: error instanceof Error ? error.message : String(error),
+      }
+    }
   }
 
   private validateInput(input: LauncherDockeredInstallInput) {

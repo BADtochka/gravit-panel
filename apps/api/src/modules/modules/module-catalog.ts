@@ -2,6 +2,7 @@ import type {
   GravitModuleCatalog,
   GravitModuleCatalogItem,
   GravitModuleCategory,
+  GravitModuleItemSource,
   GravitModuleKind,
 } from '@gravit-panel/shared'
 
@@ -9,6 +10,15 @@ export const moduleCatalogSource = {
   repository: 'https://github.com/GravitLauncher/LauncherModules',
   revision: 'ebe98aa204c3282430cef4dd5bbb75ac1c7d3e0a',
 } as const
+
+export const discordAuthSystemSource = {
+  repository: 'https://github.com/BADtochka/gravit-panel',
+  revision: 'main',
+  path: 'modules/DiscordAuthSystem_module',
+} as const
+
+export const discordAuthSystemArtifactVersion = '1.0.3'
+export const discordAuthSystemJarName = 'DiscordAuthSystem_module.jar'
 
 export const moduleRelease = {
   repository: 'https://github.com/GravitLauncher/Launcher',
@@ -31,12 +41,14 @@ export const moduleCommandSource = {
   ],
 } as const
 
-const AUTH_MODULE_NAMES = new Set(['AdditionalHash', 'FileAuthSystem', 'MojangSupport'])
+const AUTH_MODULE_NAMES = new Set(['AdditionalHash', 'DiscordAuthSystem', 'FileAuthSystem', 'MojangSupport'])
 
 const module = (
   name: string,
   kind: GravitModuleKind,
   description: string,
+  sourceOverride?: GravitModuleItemSource,
+  jarOverride?: string,
 ): GravitModuleCatalogItem => {
   const suffix = kind === 'server' ? '_module' : '_lmodule'
   const directory = `${name}${suffix}`
@@ -46,15 +58,27 @@ const module = (
     id: directory,
     name,
     directory,
-    jar: `${directory}.jar`,
+    jar: jarOverride ?? `${directory}.jar`,
     kind,
     category,
     description,
+    source: sourceOverride ?? {
+      repository: moduleCatalogSource.repository,
+      revision: moduleCatalogSource.revision,
+      path: directory,
+    },
   }
 }
 
 const allServerModules = [
   module('AdditionalHash', 'server', 'Adds PHPASS password hash verification.'),
+  module(
+    'DiscordAuthSystem',
+    'server',
+    'Built-in standalone Discord OAuth auth provider with auto-register, guild checks, and safe nickname formatting.',
+    discordAuthSystemSource,
+    discordAuthSystemJarName,
+  ),
   module('FileAuthSystem', 'server', 'Provides file-backed authentication for development setups.'),
   module('FxRuntimeOptimizer', 'server', 'Optimizes JavaFX runtime packaging.'),
   module('GenerateCertificate', 'server', 'Generates certificates for launcher artifact signing.'),

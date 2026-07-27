@@ -24,11 +24,14 @@ export type JobType =
   | 'gravit.auth.user.delete'
   | 'gravit.remote-control.setup'
   | 'gravit.module.install'
+  | 'gravit.module.remove'
+  | 'gravit.module.discordauthsystem.build'
   | 'gravit.module.config.apply'
   | 'gravit.prestarter.install'
   | 'gravit.workspace.apply'
   | 'gravit.launcher.build'
   | 'gravit.launcher.customize'
+  | 'gravit.launchserver.restart'
   | 'gravit.client.build'
   | 'gravit.mods.install'
   | 'gravit.mods.update'
@@ -144,6 +147,15 @@ export interface GravitInstallation {
   updatedAt: string
 }
 
+export type LaunchServerRuntimeStatus = 'healthy' | 'unhealthy'
+
+export interface LaunchServerRuntimeHealth {
+  installationId: string
+  status: LaunchServerRuntimeStatus
+  checkedAt: string
+  message: string
+}
+
 export interface AuthProviderSummary {
   id: string
   displayName: string
@@ -160,6 +172,7 @@ export type AuthCoreRecipeId =
   | 'file'
   | 'mojang'
   | 'microsoft'
+  | 'discord'
 
 export type AuthPasswordVerifierType = 'bcrypt' | 'digest' | 'doubleDigest' | 'phpass'
 export type AuthSqlDriverPreset = 'postgresql' | 'mariadb' | 'mysql'
@@ -228,6 +241,28 @@ export interface AuthHttpCoreConfig {
   bearerToken?: string
 }
 
+export interface AuthDiscordCoreConfig {
+  clientId: string
+  clientSecret: string
+  redirectUrl: string
+  discordAuthorizeUrl: string
+  discordTokenUrl: string
+  discordApiEndpoint: string
+  requiredGuildIds: string[]
+  useGlobalNickname: boolean
+  usernameRegex: string
+  usernameFormat: string
+  autoRegister: boolean
+}
+
+export type AuthDiscordCoreInput = Omit<AuthDiscordCoreConfig, 'clientSecret'> & {
+  clientSecret?: string
+}
+
+export type AuthDiscordProviderDetail = Omit<AuthDiscordCoreConfig, 'clientSecret'> & {
+  clientSecretConfigured: boolean
+}
+
 export interface AuthMergeCoreConfig {
   list: string[]
 }
@@ -243,6 +278,7 @@ export interface AuthProviderDetail {
     holder: Omit<AuthSqlHolderConfig, 'password'> & { passwordConfigured: boolean }
   } | null
   http: Omit<AuthHttpCoreConfig, 'bearerToken'> & { bearerConfigured: boolean } | null
+  discord: AuthDiscordProviderDetail | null
   merge: AuthMergeCoreConfig | null
 }
 
@@ -256,6 +292,7 @@ export interface AuthProviderApplyInput {
   textureProvider?: AuthTextureProviderConfig
   sql?: AuthSqlCoreConfig
   http?: AuthHttpCoreConfig
+  discord?: AuthDiscordCoreInput
   merge?: AuthMergeCoreConfig
   confirmConfigWrite: true
 }
@@ -379,6 +416,12 @@ export interface GenerateCredentialEncryptionKeyInput {
 export type GravitModuleKind = 'server' | 'launcher'
 export type GravitModuleCategory = 'server' | 'launcher' | 'auth'
 
+export interface GravitModuleItemSource {
+  repository: string
+  revision: string
+  path: string
+}
+
 export interface GravitModuleCatalogItem {
   id: string
   name: string
@@ -387,6 +430,7 @@ export interface GravitModuleCatalogItem {
   kind: GravitModuleKind
   category: GravitModuleCategory
   description: string
+  source: GravitModuleItemSource
 }
 
 export interface GravitModuleSource {
@@ -421,6 +465,7 @@ export interface GravitModuleCatalog {
 export interface GravitModuleRuntimeItem {
   id: string
   available: boolean
+  built: boolean
   loaded: boolean
   pendingJobId: string | null
 }
@@ -445,6 +490,30 @@ export interface GravitModuleInstallResult {
   alreadyLoaded: boolean
   sourceRevision: string
   releaseTag: string
+}
+
+export interface GravitModuleRemoveInput {
+  installationId: string
+  moduleId: string
+  confirmRemove: true
+}
+
+export interface GravitModuleRemoveResult {
+  installationId: string
+  moduleId: string
+  moduleName: string
+  jar: string
+  restarted: true
+}
+
+export interface DiscordAuthSystemBuildInput {
+  installationId: string
+}
+
+export interface DiscordAuthSystemBuildResult {
+  jarPath: string
+  installationId?: string
+  copiedToInstallation: boolean
 }
 
 export type MinecraftLoader = 'VANILLA' | 'FABRIC' | 'FORGE' | 'NEOFORGE' | 'QUILT'

@@ -194,6 +194,21 @@ describe('API smoke routes', () => {
       id: 'FileAuthSystem_module',
       name: 'FileAuthSystem',
       category: 'auth',
+      source: {
+        repository: 'https://github.com/GravitLauncher/LauncherModules',
+        revision: body.source.revision,
+        path: 'FileAuthSystem_module',
+      },
+    }))
+    expect(body.authModules).toContainEqual(expect.objectContaining({
+      id: 'DiscordAuthSystem_module',
+      name: 'DiscordAuthSystem',
+      category: 'auth',
+      source: {
+        repository: 'https://github.com/BADtochka/gravit-panel',
+        revision: 'main',
+        path: 'modules/DiscordAuthSystem_module',
+      },
     }))
     expect(body.serverModules.some((item: { name: string }) => item.name === 'FileAuthSystem')).toBe(
       false,

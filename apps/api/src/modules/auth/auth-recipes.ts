@@ -84,4 +84,17 @@ export const authRecipes: AuthRecipe[] = [
     requiresModuleIds: [],
     source: authWikiSource,
   },
+  {
+    id: 'discord',
+    title: 'Discord OAuth',
+    description: 'Built-in standalone Discord OAuth auth provider. Requires the DiscordAuthSystem module.',
+    coreType: 'discordauthsystem',
+    moduleId: 'DiscordAuthSystem_module',
+    requiresModuleIds: ['DiscordAuthSystem_module'],
+    source: {
+      repository: 'https://github.com/BADtochka/gravit-panel',
+      revision: 'main',
+      file: 'modules/DiscordAuthSystem_module/src/main/java/pro/gravit/launchermodules/discordauthsystem/DiscordAuthCoreProvider.java',
+    },
+  },
 ]

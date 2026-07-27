@@ -1,6 +1,9 @@
 import { app } from './app'
 import { env } from './core/env'
 import { logger } from './core/logger'
+import { LauncherDockeredService } from './modules/docker/launcherdockered.service'
+import { LaunchServerStartupService } from './modules/docker/launchserver-startup.service'
+import { installationsStore } from './modules/gravit/gravit.runtime'
 
 app.listen({
   hostname: env.HOST,
@@ -8,3 +11,11 @@ app.listen({
 })
 
 logger.info(`API listening on http://${env.HOST}:${env.PORT}`)
+
+const launchServerStartup = new LaunchServerStartupService(
+  installationsStore,
+  new LauncherDockeredService(env.INSTALLATIONS_ROOT),
+)
+void launchServerStartup.recoverUnhealthyInstallations().catch((error) => {
+  logger.error('LaunchServer startup recovery could not inspect installations', error)
+})

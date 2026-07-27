@@ -101,8 +101,64 @@ describe('ModuleManagementService', () => {
     expect(state.find((module) => module.id === item.id)).toEqual({
       id: item.id,
       available: true,
+      built: false,
       loaded: true,
       pendingJobId: pendingJob.id,
+    })
+  })
+
+  test('loads the locally built DiscordAuthSystem JAR without release discovery', async () => {
+    const commands: ModuleControlCommand[] = []
+    let loaded = false
+    const service = new ModuleManagementService(
+      {
+        executeModuleCommand: async (_installation, command) => {
+          commands.push(command)
+          if (command === 'modules load /app/data/modules/DiscordAuthSystem_module.jar') {
+            loaded = true
+            return ['Module DiscordAuthSystem loaded']
+          }
+          return loaded ? ['[MODULE] DiscordAuthSystem v: 1.0'] : []
+        },
+      },
+      {
+        exists: async (_installation: GravitInstallation, path: string) =>
+          path === 'modules/DiscordAuthSystem_module.jar',
+      } as never,
+    )
+    const item = findCatalogModule('DiscordAuthSystem_module')
+    if (!item) throw new Error('Fixture module is missing')
+
+    const result = await service.install(installation, item, context)
+
+    expect(result).toMatchObject({ moduleId: 'DiscordAuthSystem_module', alreadyLoaded: false })
+    expect(commands).toEqual([
+      'modules list',
+      'modules load /app/data/modules/DiscordAuthSystem_module.jar',
+      'modules list',
+    ])
+  })
+
+  test('reports the published DiscordAuthSystem JAR as built even before it is loaded', async () => {
+    const service = new ModuleManagementService(
+      {
+        executeModuleCommand: async (_installation, command) =>
+          command === 'modules available' ? [] : [],
+      },
+      {
+        exists: async (_installation: GravitInstallation, path: string) =>
+          path === 'modules/DiscordAuthSystem_module.jar',
+      } as never,
+    )
+
+    const state = await service.getState(installation)
+
+    expect(state.find((module) => module.id === 'DiscordAuthSystem_module')).toEqual({
+      id: 'DiscordAuthSystem_module',
+      available: true,
+      built: true,
+      loaded: false,
+      pendingJobId: null,
     })
   })
 
@@ -116,6 +172,56 @@ describe('ModuleManagementService', () => {
     await expect(service.install(installation, item, context)).rejects.toThrow(
       'unsupported artifacts cannot be installed',
     )
+  })
+
+  test('removes a loaded module from startup configuration and restarts LaunchServer', async () => {
+    const operations: string[] = []
+    let modulesConfig = JSON.stringify({
+      loadModules: ['MirrorHelper_module', 'FileAuthSystem_module'],
+      loadLauncherModules: ['DiscordGame_lmodule'],
+    })
+    const service = new ModuleManagementService(
+      { executeModuleCommand: async () => [] },
+      {
+        exists: async (_installation, path) => path === 'modules/MirrorHelper_module.jar',
+        readFile: async () => modulesConfig,
+        writeFileAtomic: async (_installation, path, bytes) => {
+          operations.push(`write:${path}`)
+          modulesConfig = new TextDecoder().decode(bytes)
+        },
+        move: async (_installation, source, target) => {
+          operations.push(`move:${source}:${target.startsWith('modules/.MirrorHelper_module.jar.remove-')}`)
+        },
+        remove: async (_installation, path) => {
+          operations.push(`remove:${path.startsWith('modules/.MirrorHelper_module.jar.remove-')}`)
+        },
+      },
+      {
+        restartLaunchServer: async () => {
+          operations.push('restart')
+        },
+      },
+    )
+    const item = findCatalogModule('MirrorHelper_module')
+    if (!item) throw new Error('Fixture module is missing')
+
+    const result = await service.remove(installation, item, context)
+
+    expect(JSON.parse(modulesConfig)).toEqual({
+      loadModules: ['FileAuthSystem_module'],
+      loadLauncherModules: ['DiscordGame_lmodule'],
+    })
+    expect(operations).toEqual([
+      'write:modules.json',
+      'move:modules/MirrorHelper_module.jar:true',
+      'restart',
+      'remove:true',
+    ])
+    expect(result).toMatchObject({
+      moduleId: 'MirrorHelper_module',
+      jar: 'MirrorHelper_module.jar',
+      restarted: true,
+    })
   })
 
   test('does not confuse Sentry with SentryProGuardUpload', async () => {

@@ -17,9 +17,15 @@ import { activeJobForInstallation, jobsRunner } from '../jobs/jobs.runtime'
 import { AuthModuleConfigService } from './auth-module-config.service'
 import { AuthProviderService } from './auth-provider.service'
 import { AuthUsersService } from './auth-users.service'
+import { moduleManagement } from '../modules/modules.runtime'
 
 const lifecycle = new LauncherDockeredService(env.INSTALLATIONS_ROOT)
-const providerService = new AuthProviderService(controlFileService, undefined, undefined, lifecycle)
+const providerService = new AuthProviderService(
+  controlFileService,
+  undefined,
+  moduleManagement,
+  lifecycle,
+)
 const usersService = new AuthUsersService(controlFileService)
 const moduleConfigService = new AuthModuleConfigService()
 
@@ -126,6 +132,7 @@ export const createAuthRoutes = ({
             t.Literal('file'),
             t.Literal('mojang'),
             t.Literal('microsoft'),
+            t.Literal('discord'),
           ]),
           displayName: t.String({ minLength: 1, maxLength: 64 }),
           isDefault: t.Boolean(),
@@ -139,6 +146,7 @@ export const createAuthRoutes = ({
           ),
           sql: t.Optional(t.Any()),
           http: t.Optional(t.Any()),
+          discord: t.Optional(t.Any()),
           merge: t.Optional(
             t.Object({
               list: t.Array(authId, { minItems: 2, maxItems: 16 }),

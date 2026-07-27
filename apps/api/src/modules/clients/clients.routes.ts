@@ -1,6 +1,7 @@
 import type {
   ClientBuildInput,
   JobRecord,
+  LaunchServerRuntimeHealth,
   MinecraftLoader,
   WorkspaceApplyInput,
 } from '@gravit-panel/shared'
@@ -72,8 +73,14 @@ type ClientOperations = Pick<
   | 'buildClient'
 >
 
+type LaunchServerLifecycle = Pick<
+  LauncherDockeredService,
+  'checkLaunchServer' | 'restartLaunchServer'
+>
+
 export interface ClientsRoutesDependencies {
   service: ClientOperations
+  lifecycle: LaunchServerLifecycle
   versions: Pick<MinecraftVersionsService, 'list'>
   installations: Pick<InstallationsStore, 'get'>
   jobs: Pick<JobsRunner, 'create'>
@@ -82,6 +89,7 @@ export interface ClientsRoutesDependencies {
 
 export const createClientsRoutes = ({
   service,
+  lifecycle,
   versions,
   installations,
   jobs,
@@ -152,6 +160,15 @@ export const createClientsRoutes = ({
       const installation = findInstallation(query.installationId, set)
       if (!installation) return { message: 'LauncherDockered installation not found.' }
       return service.customizationState(installation)
+    },
+    { query: t.Object({ installationId }) },
+  )
+  .get(
+    '/launcher/health',
+    async ({ query, set }): Promise<LaunchServerRuntimeHealth | { message: string }> => {
+      const installation = findInstallation(query.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      return lifecycle.checkLaunchServer(installation)
     },
     { query: t.Object({ installationId }) },
   )
@@ -246,6 +263,30 @@ export const createClientsRoutes = ({
     { body: t.Object({ installationId }) },
   )
   .post(
+    '/launcher/restart',
+    ({ body, set }) => {
+      const installation = findInstallation(body.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = activeJob(installation.id)
+      if (conflict) {
+        set.status = 409
+        return { message: 'Another client operation is active.', jobId: conflict.id }
+      }
+      const job = jobs.create(
+        'gravit.launchserver.restart',
+        { installationId: installation.id },
+        'LaunchServer restart queued',
+        async (context) => {
+          await lifecycle.restartLaunchServer(installation, context)
+          return { installationId: installation.id, restarted: true }
+        },
+      )
+      set.status = 202
+      return job
+    },
+    { body: t.Object({ installationId }) },
+  )
+  .post(
     '/launcher/customization',
     async ({ body, set }) => {
       const installation = findInstallation(body.installationId, set)
@@ -329,6 +370,7 @@ export const createClientsRoutes = ({
 
 export const clientsRoutes = createClientsRoutes({
   service: clientBuildService,
+  lifecycle: launcherLifecycle,
   versions,
   installations: installationsStore,
   jobs: jobsRunner,

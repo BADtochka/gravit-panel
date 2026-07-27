@@ -33,6 +33,43 @@ const createContext = () => {
 const ready = async () => {}
 
 describe('LauncherDockeredService', () => {
+  test('reports an unhealthy LaunchServer when the container control socket cannot be probed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gravit-launcherdockered-health-'))
+    const installationPath = join(root, 'default')
+    await mkdir(installationPath, { recursive: true })
+    await writeFile(join(installationPath, 'docker-compose.yml'), compose)
+    const now = new Date().toISOString()
+    const installation: GravitInstallation = {
+      id: crypto.randomUUID(),
+      name: 'default',
+      path: installationPath,
+      address: 'localhost:17549',
+      projectName: 'TEST',
+      sourceRepository: launcherDockeredSource.repository,
+      sourceRevision: launcherDockeredSource.revision,
+      createdAt: now,
+      updatedAt: now,
+    }
+    const commands: string[][] = []
+    const service = new LauncherDockeredService(root, async (command) => {
+      commands.push(command)
+      return { exitCode: 1, output: 'service "gravitlauncher" is not running' }
+    }, ready)
+
+    try {
+      await expect(service.checkLaunchServer(installation)).resolves.toMatchObject({
+        installationId: installation.id,
+        status: 'unhealthy',
+        message: 'service "gravitlauncher" is not running',
+      })
+      expect(commands).toEqual([[
+        'docker', 'compose', 'exec', '-T', 'gravitlauncher', 'test', '-S', '/app/data/control-file',
+      ]])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('restarts only the LaunchServer service and waits for its control socket', async () => {
     const root = await mkdtemp(join(tmpdir(), 'gravit-launcherdockered-restart-'))
     const installationPath = join(root, 'default')

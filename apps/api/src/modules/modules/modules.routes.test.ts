@@ -28,7 +28,7 @@ const installation: GravitInstallation = {
 }
 
 const createHarness = (
-  management: Pick<ModuleManagementService, 'getState' | 'install'>,
+  management: Pick<ModuleManagementService, 'getState' | 'install' | 'remove'>,
 ) => {
   const database = new Database(':memory:')
   databases.push(database)
@@ -73,6 +73,12 @@ const installRequest = (moduleId = 'MirrorHelper_module') => ({
   body: JSON.stringify({ installationId: installation.id, moduleId }),
 })
 
+const removeRequest = (moduleId = 'MirrorHelper_module') => ({
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ installationId: installation.id, moduleId, confirmRemove: true }),
+})
+
 describe('module installation API', () => {
   test('reports state and completes one verified module install job', async () => {
     let calls = 0
@@ -81,6 +87,7 @@ describe('module installation API', () => {
         {
           id: 'MirrorHelper_module',
           available: true,
+          built: false,
           loaded: false,
           pendingJobId: null,
         },
@@ -98,6 +105,13 @@ describe('module installation API', () => {
           releaseTag: 'v5.7.9',
         }
       },
+      remove: async () => ({
+        installationId: installation.id,
+        moduleId: 'MirrorHelper_module',
+        moduleName: 'MirrorHelper',
+        jar: 'MirrorHelper_module.jar',
+        restarted: true as const,
+      }),
     }
     const { request, jobsStore } = createHarness(management)
 
@@ -137,6 +151,7 @@ describe('module installation API', () => {
           moduleId: 'MirrorHelper_module',
         } as never
       },
+      remove: async () => ({}) as never,
     }
     const { request, jobsStore } = createHarness(management)
     const first = await request('/api/modules/install', installRequest())
@@ -162,5 +177,35 @@ describe('module installation API', () => {
 
     release?.()
     expect((await waitForTerminalJob(jobsStore, firstJob.id)).status).toBe('succeeded')
+  })
+
+  test('queues a confirmed module removal job', async () => {
+    let removed = 0
+    const management = {
+      getState: async () => [],
+      install: async () => ({}) as never,
+      remove: async () => {
+        removed += 1
+        return {
+          installationId: installation.id,
+          moduleId: 'MirrorHelper_module',
+          moduleName: 'MirrorHelper',
+          jar: 'MirrorHelper_module.jar',
+          restarted: true as const,
+        }
+      },
+    }
+    const { request, jobsStore } = createHarness(management)
+
+    const response = await request('/api/modules/remove', removeRequest())
+    const queued = await response.json()
+    const completed = await waitForTerminalJob(jobsStore, queued.id)
+
+    expect(response.status).toBe(202)
+    expect(completed).toMatchObject({
+      status: 'succeeded',
+      result: { moduleId: 'MirrorHelper_module', restarted: true },
+    })
+    expect(removed).toBe(1)
   })
 })
