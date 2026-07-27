@@ -1,4 +1,5 @@
 import type { JobEvent, JobRecord } from '@gravit-panel/shared'
+import { panelFetch, panelUrl } from '@/lib/public-path'
 import { onScopeDispose, ref, watch, type WatchSource } from 'vue'
 
 interface JobEventConnection {
@@ -10,7 +11,7 @@ type ConnectToJobEvents = (jobId: string) => JobEventConnection
 type LoadJob = (jobId: string) => Promise<JobRecord>
 
 const connectToJobEvents: ConnectToJobEvents = (jobId) => {
-  const source = new EventSource(`/api/jobs/${jobId}/events`)
+  const source = new EventSource(panelUrl(`/api/jobs/${jobId}/events`))
   return {
     close: () => source.close(),
     onJob: (listener) => source.addEventListener('job', listener),
@@ -18,7 +19,7 @@ const connectToJobEvents: ConnectToJobEvents = (jobId) => {
 }
 
 const loadJob: LoadJob = async (id) => {
-  const response = await fetch(`/api/jobs/${id}`)
+  const response = await panelFetch(`/api/jobs/${id}`)
   if (!response.ok) throw new Error(`Unable to refresh job ${id}`)
   return response.json() as Promise<JobRecord>
 }

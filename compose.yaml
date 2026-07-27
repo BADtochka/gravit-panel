@@ -13,6 +13,7 @@ services:
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       PANEL_AUTH_MODE: ${PANEL_AUTH_MODE:-disabled}
+      PANEL_PUBLIC_URL: ${PANEL_PUBLIC_URL:-}
       PANEL_AUTH_REDIRECT_URI: ${PANEL_AUTH_REDIRECT_URI:-}
       PANEL_DISCORD_CLIENT_ID: ${PANEL_DISCORD_CLIENT_ID:-}
       PANEL_DISCORD_CLIENT_SECRET: ${PANEL_DISCORD_CLIENT_SECRET:-}
@@ -42,6 +43,8 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:${PANEL_PORT:-8080}:80"
+    environment:
+      PANEL_PUBLIC_PATH: ${PANEL_PUBLIC_PATH:-}
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
       interval: 15s

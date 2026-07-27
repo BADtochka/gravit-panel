@@ -16,7 +16,7 @@ const redirect = (location: string, cookies: string[] = []) => {
 }
 
 const panelRoot = (service: PanelAuthService, request: Request, suffix = '') =>
-  `${service.applicationOrigin ?? new URL(request.url).origin}/${suffix}`
+  `${service.publicUrl ?? new URL(request.url).origin}/${suffix}`
 
 export const createPanelAuthRoutes = (service: PanelAuthService) =>
   new Elysia({ prefix: '/panel-auth' })
@@ -45,7 +45,7 @@ export const createPanelAuthRoutes = (service: PanelAuthService) =>
         serializeCookie(stateCookie, state, {
           maxAgeSeconds: 10 * 60,
           secure: service.secureCookies,
-          path: '/api/panel-auth',
+          path: service.authCookiePath,
         }),
       ])
     })
@@ -53,7 +53,7 @@ export const createPanelAuthRoutes = (service: PanelAuthService) =>
       const clearState = serializeCookie(stateCookie, '', {
         maxAgeSeconds: 0,
         secure: service.secureCookies,
-        path: '/api/panel-auth',
+        path: service.authCookiePath,
       })
       const stateFromCookie = parseCookie(request.headers.get('cookie'), stateCookie)
       if (!query.code || !query.state || !stateFromCookie || query.state !== stateFromCookie) {
@@ -69,6 +69,7 @@ export const createPanelAuthRoutes = (service: PanelAuthService) =>
           serializeCookie(sessionCookie, login.session, {
             maxAgeSeconds: 7 * 24 * 60 * 60,
             secure: service.secureCookies,
+            path: service.publicPath,
           }),
         ])
       } catch (error) {
@@ -84,6 +85,7 @@ export const createPanelAuthRoutes = (service: PanelAuthService) =>
           'set-cookie': serializeCookie(sessionCookie, '', {
             maxAgeSeconds: 0,
             secure: service.secureCookies,
+            path: service.publicPath,
           }),
         },
       })

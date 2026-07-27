@@ -136,6 +136,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { useLogAutoScroll } from '@/composables/useLogAutoScroll'
+import { panelFetch, panelUrl } from '@/lib/public-path'
 import type {
   GravitInstallation,
   JobEvent,
@@ -158,7 +159,7 @@ const { autoScroll, logContainer } = useLogAutoScroll(() => events.value.length)
 let eventSource: EventSource | null = null
 
 const getJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> => {
-  const response = await fetch(input, init)
+  const response = await panelFetch(input, init)
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { message?: string } | null
     throw new Error(body?.message ?? `Request failed with status ${response.status}`)
@@ -216,7 +217,7 @@ const connectToJob = (created: JobRecord) => {
   eventSource?.close()
   events.value = []
   job.value = created
-  eventSource = new EventSource(`/api/jobs/${created.id}/events`)
+  eventSource = new EventSource(panelUrl(`/api/jobs/${created.id}/events`))
   eventSource.addEventListener('job', (rawEvent) => {
     const event = JSON.parse((rawEvent as MessageEvent<string>).data) as JobEvent
     if (events.value.some((item) => item.sequence === event.sequence)) return

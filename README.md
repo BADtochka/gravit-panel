@@ -79,6 +79,23 @@ Then set `PANEL_DISCORD_CLIENT_ID`, `PANEL_DISCORD_CLIENT_SECRET`, and
 IDs). The allowlist is required: a successful Discord login alone does not
 grant administrative access.
 
+### Hosting below a path
+
+The panel supports a public subroute such as `https://host.example/panel`.
+Set `PANEL_PUBLIC_PATH=/panel` for the `web` service and
+`PANEL_PUBLIC_URL=https://host.example/panel` for the API. The public Discord
+callback must include the same prefix:
+
+```text
+https://host.example/panel/api/panel-auth/callback
+```
+
+The reverse proxy must route `PathPrefix(/panel)` to the panel and strip
+`/panel` before forwarding it. The browser keeps the prefix for assets, API,
+SSE, router navigation, OAuth redirects, and cookies; nginx and the API still
+receive their normal root paths. For Coolify, `compose.coolify.yaml` performs
+this when `PANEL_PUBLIC_PATH=/panel` is set.
+
 The same stack starts an official `launchserver` service and its
 `launchserver-web` nginx facade at `127.0.0.1:17549`. It serves updates and
 forwards `/api` and `/webapi/` to LaunchServer. Set `LAUNCHSERVER_ADDRESS` to
@@ -113,6 +130,11 @@ Set `PANEL_DISCORD_CLIENT_ID`, `PANEL_DISCORD_CLIENT_SECRET`, and
 `PANEL_DISCORD_ALLOWED_USER_IDS` in Coolify; the last value is a comma-separated
 administrator allowlist. Do not enable either Build Variable checkbox for the
 client secret: it is needed only at runtime.
+Set `PANEL_PUBLIC_PATH=/panel` to host the panel beneath `/panel`; the Compose
+file then publishes that path, strips it in Traefik, and builds the matching
+OAuth callback automatically. Add
+`https://<generated-fqdn>/panel/api/panel-auth/callback` to Discord in that
+case.
 Create `/data/gravit-panel/launchserver` on the target Docker host before the
 first deployment. Coolify forbids `${...}` interpolation in volume paths, so
 the Coolify Compose file intentionally uses this fixed path; it must not be

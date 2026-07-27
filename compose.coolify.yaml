@@ -19,7 +19,8 @@ services:
       CREDENTIAL_ENCRYPTION_KEY: ${SERVICE_REALBASE64_32_GRAVITPANEL}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       PANEL_AUTH_MODE: discord
-      PANEL_AUTH_REDIRECT_URI: https://${SERVICE_FQDN_PANELWEB}/api/panel-auth/callback
+      PANEL_PUBLIC_URL: https://${SERVICE_FQDN_PANELWEB}${PANEL_PUBLIC_PATH:-}
+      PANEL_AUTH_REDIRECT_URI: https://${SERVICE_FQDN_PANELWEB}${PANEL_PUBLIC_PATH:-}/api/panel-auth/callback
       PANEL_DISCORD_CLIENT_ID: ${PANEL_DISCORD_CLIENT_ID:?Set the Discord OAuth2 client ID}
       PANEL_DISCORD_CLIENT_SECRET: ${PANEL_DISCORD_CLIENT_SECRET:?Set the Discord OAuth2 client secret}
       PANEL_DISCORD_ALLOWED_USER_IDS: ${PANEL_DISCORD_ALLOWED_USER_IDS:?Set at least one allowed Discord user ID}
@@ -48,7 +49,13 @@ services:
       - "80"
     environment:
       # Creates the Coolify wildcard-domain route used by the panel OAuth callback.
-      SERVICE_URL_PANELWEB_80: /
+      SERVICE_URL_PANELWEB_80: ${PANEL_PUBLIC_PATH:-/}
+      PANEL_PUBLIC_PATH: ${PANEL_PUBLIC_PATH:-}
+    labels:
+      # Empty path uses a non-matching prefix. Set PANEL_PUBLIC_PATH=/panel to
+      # expose the panel under /panel and strip it before forwarding to nginx.
+      - "traefik.http.middlewares.gravit-panel-strip.stripprefix.prefixes=${PANEL_PUBLIC_PATH:-/__gravit-panel-disabled__}"
+      - "coolify.traefik.middlewares=gravit-panel-strip@docker"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
       interval: 15s

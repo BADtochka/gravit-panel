@@ -114,6 +114,7 @@ import { Button } from '@/components/ui/button'
 import JobCancelButton from '@/components/jobs/JobCancelButton.vue'
 import { Switch } from '@/components/ui/switch'
 import { useLogAutoScroll } from '@/composables/useLogAutoScroll'
+import { panelFetch, panelUrl } from '@/lib/public-path'
 import type { JobEvent, JobRecord, JobStatus, JobsResponse } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { Play, RefreshCw } from '@lucide/vue'
@@ -127,7 +128,7 @@ const streamState = ref<'idle' | 'connecting' | 'live' | 'reconnecting' | 'close
 let eventSource: EventSource | null = null
 
 const getJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> => {
-  const response = await fetch(input, init)
+  const response = await panelFetch(input, init)
   if (!response.ok) throw new Error(`Request failed with status ${response.status}`)
   return response.json() as Promise<T>
 }
@@ -161,7 +162,7 @@ const connectToJob = (jobId: string) => {
   if (!jobId) return
 
   const seen = new Set<number>()
-  eventSource = new EventSource(`/api/jobs/${jobId}/events`)
+  eventSource = new EventSource(panelUrl(`/api/jobs/${jobId}/events`))
   eventSource.onopen = () => {
     streamState.value = 'live'
   }

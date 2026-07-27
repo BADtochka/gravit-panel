@@ -19,6 +19,7 @@ export const env = {
     .map((origin) => origin.trim())
     .filter(Boolean),
   PANEL_AUTH_MODE: panelAuthMode,
+  PANEL_PUBLIC_URL: Bun.env.PANEL_PUBLIC_URL,
   PANEL_AUTH_REDIRECT_URI: Bun.env.PANEL_AUTH_REDIRECT_URI,
   PANEL_DISCORD_CLIENT_ID: Bun.env.PANEL_DISCORD_CLIENT_ID,
   PANEL_DISCORD_CLIENT_SECRET: Bun.env.PANEL_DISCORD_CLIENT_SECRET,

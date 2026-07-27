@@ -8,9 +8,10 @@ import ModulesView from './views/ModulesView.vue'
 import ProfileCreationView from './views/ProfileCreationView.vue'
 import StatusView from './views/StatusView.vue'
 import UsersView from './views/UsersView.vue'
+import { panelPublicPath } from './lib/public-path'
 
 export const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(panelPublicPath || '/'),
   routes: [
     { path: '/', name: 'profile-creation', component: ProfileCreationView },
     { path: '/status', component: StatusView },

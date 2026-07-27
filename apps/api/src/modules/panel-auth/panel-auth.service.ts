@@ -9,6 +9,7 @@ const sessionLifetimeMs = 7 * 24 * 60 * 60 * 1000
 
 export interface PanelAuthConfiguration {
   mode: string
+  publicUrl?: string
   redirectUri?: string
   discordClientId?: string
   discordClientSecret?: string
@@ -70,7 +71,7 @@ export class PanelAuthService {
   get configured() {
     return (
       this.enabled &&
-      Boolean(this.applicationOrigin) &&
+      Boolean(this.publicUrl) &&
       Boolean(this.configuration.discordClientId) &&
       Boolean(this.configuration.discordClientSecret) &&
       this.configuration.allowedDiscordUserIds.length > 0
@@ -81,13 +82,27 @@ export class PanelAuthService {
     return this.configuration.secureCookies
   }
 
-  get applicationOrigin() {
-    if (!this.configuration.redirectUri) return null
+  get publicUrl() {
+    const configuredUrl = this.configuration.publicUrl ?? this.inferPublicUrlFromRedirect()
+    if (!configuredUrl) return null
     try {
-      return new URL(this.configuration.redirectUri).origin
+      const url = new URL(configuredUrl)
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+      if (url.search || url.hash) return null
+      const pathname = url.pathname === '/' ? '' : url.pathname.replace(/\/+$/, '')
+      return `${url.origin}${pathname}`
     } catch {
       return null
     }
+  }
+
+  get publicPath() {
+    if (!this.publicUrl) return '/'
+    return new URL(this.publicUrl).pathname || '/'
+  }
+
+  get authCookiePath() {
+    return `${this.publicPath === '/' ? '' : this.publicPath}/api/panel-auth`
   }
 
   get status() {
@@ -211,6 +226,19 @@ export class PanelAuthService {
     const now = this.clock().toISOString()
     this.database.query('DELETE FROM panel_oauth_states WHERE expires_at <= ?').run(now)
     this.database.query('DELETE FROM panel_sessions WHERE expires_at <= ?').run(now)
+  }
+
+  private inferPublicUrlFromRedirect() {
+    if (!this.configuration.redirectUri) return null
+    try {
+      const url = new URL(this.configuration.redirectUri)
+      const callbackPath = '/api/panel-auth/callback'
+      if (!url.pathname.endsWith(callbackPath)) return url.origin
+      const publicPath = url.pathname.slice(0, -callbackPath.length).replace(/\/+$/, '')
+      return `${url.origin}${publicPath}`
+    } catch {
+      return null
+    }
   }
 
   private requireConfigured() {

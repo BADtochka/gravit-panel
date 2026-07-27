@@ -82,4 +82,16 @@ describe('PanelAuthService', () => {
     expect(cookie).toContain('Secure')
     expect(parseCookie(cookie, 'session')).toBe('opaque-value')
   })
+
+  test('keeps redirects and cookies within a configured public subroute', () => {
+    const service = new PanelAuthService(database, {
+      ...configuration,
+      publicUrl: 'https://panel.example.com/panel/',
+      redirectUri: 'https://panel.example.com/panel/api/panel-auth/callback',
+    })
+
+    expect(service.publicUrl).toBe('https://panel.example.com/panel')
+    expect(service.publicPath).toBe('/panel')
+    expect(service.authCookiePath).toBe('/panel/api/panel-auth')
+  })
 })

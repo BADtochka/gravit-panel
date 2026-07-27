@@ -26,6 +26,8 @@ CMD ["bun", "run", "--filter", "@gravit-panel/api", "start"]
 FROM nginx:1.27-alpine AS web-runtime
 COPY deploy/nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
+COPY deploy/nginx/40-panel-runtime-config.sh /docker-entrypoint.d/40-panel-runtime-config.sh
+RUN chmod 0555 /docker-entrypoint.d/40-panel-runtime-config.sh
 EXPOSE 80
 
 FROM nginx:1.27-alpine AS launchserver-web-runtime

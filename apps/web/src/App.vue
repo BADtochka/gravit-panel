@@ -17,7 +17,7 @@
         <p v-if="authErrorMessage" class="mt-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
           {{ authErrorMessage }}
         </p>
-        <Button as="a" href="/api/panel-auth/login" class="mt-6 w-full">
+        <Button as="a" :href="panelUrl('/api/panel-auth/login')" class="mt-6 w-full">
           Continue with Discord
         </Button>
       </section>
@@ -166,6 +166,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { resolveInstallationRedirect } from '@/lib/installation-routing'
+import { panelFetch, panelUrl } from '@/lib/public-path'
 import { useTheme } from '@/lib/theme'
 import { useInstallationsStore } from '@/stores/installations'
 import type { GravitInstallation } from '@gravit-panel/shared'
@@ -212,7 +213,7 @@ const route = useRoute()
 const router = useRouter()
 
 const getPanelAuthSession = async () => {
-  const response = await fetch('/api/panel-auth/session')
+  const response = await panelFetch('/api/panel-auth/session')
   if (!response.ok) throw new Error(`Authentication request failed with status ${response.status}`)
   return response.json() as Promise<PanelAuthSession>
 }
@@ -234,12 +235,12 @@ const authErrorMessage = computed(() => {
 })
 
 const logout = async () => {
-  await fetch('/api/panel-auth/logout', { method: 'POST' })
-  window.location.assign('/')
+  await panelFetch('/api/panel-auth/logout', { method: 'POST' })
+  window.location.assign(panelUrl('/'))
 }
 
 const getInstallations = async () => {
-  const response = await fetch('/api/docker/installations')
+  const response = await panelFetch('/api/docker/installations')
   if (!response.ok) throw new Error(`Projects request failed with status ${response.status}`)
   return response.json() as Promise<InstallationsResponse>
 }
