@@ -27,3 +27,7 @@ FROM nginx:1.27-alpine AS web-runtime
 COPY deploy/nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 EXPOSE 80
+
+FROM nginx:1.27-alpine AS launchserver-web-runtime
+COPY deploy/launchserver/nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80

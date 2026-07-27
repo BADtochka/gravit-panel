@@ -9,6 +9,8 @@ import { gravitRoutes } from './modules/gravit/gravit.routes'
 import { jobsRoutes } from './modules/jobs/jobs.routes'
 import { modsRoutes } from './modules/mods/mods.routes'
 import { modulesRoutes } from './modules/modules/modules.routes'
+import { createPanelAuthGuard, createPanelAuthRoutes } from './modules/panel-auth/panel-auth.routes'
+import { panelAuthService } from './modules/panel-auth/panel-auth.runtime'
 import { setupRoutes } from './modules/setup/setup.routes'
 
 export const app = new Elysia({ prefix: '/api' })
@@ -17,6 +19,7 @@ export const app = new Elysia({ prefix: '/api' })
       origin: env.CORS_ORIGINS,
     }),
   )
+  .onBeforeHandle(createPanelAuthGuard(panelAuthService))
   .use(
     swagger({
       documentation: {
@@ -33,6 +36,7 @@ export const app = new Elysia({ prefix: '/api' })
     version: '0.1.0',
     time: new Date().toISOString(),
   }))
+  .use(createPanelAuthRoutes(panelAuthService))
   .use(setupRoutes)
   .use(dockerRoutes)
   .use(authRoutes)

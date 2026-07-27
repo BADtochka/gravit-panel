@@ -1,7 +1,8 @@
 # Deploy this file with Coolify's Docker Compose build pack. Configure the
-# PANEL_DATA_DIR variable in Coolify as an absolute path on the Docker host.
-# Do not replace it with a named volume: the panel starts nested Compose
-# projects and Docker must be able to resolve their bind mounts on the host.
+# Data lives at a fixed absolute host path because Coolify rejects variable
+# interpolation in bind-mount paths as a command-injection safeguard. Do not
+# replace this bind mount with a named volume: the panel starts nested Compose
+# projects and Docker must resolve their bind mounts on the host.
 name: gravit-panel
 
 services:
@@ -11,15 +12,22 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 3000
-      DATABASE_PATH: ${PANEL_DATA_DIR:?Set PANEL_DATA_DIR to an absolute host directory}/gravit-panel.sqlite
-      INSTALLATIONS_ROOT: ${PANEL_DATA_DIR:?Set PANEL_DATA_DIR to an absolute host directory}/installations
-      MODULE_ARTIFACTS_DIR: ${PANEL_DATA_DIR:?Set PANEL_DATA_DIR to an absolute host directory}/modules
-      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+      DATABASE_PATH: /data/gravit-panel/gravit-panel.sqlite
+      INSTALLATIONS_ROOT: /data/gravit-panel/installations
+      MODULE_ARTIFACTS_DIR: /data/gravit-panel/modules
+      # Coolify generates a stable base64-encoded 32-byte key per resource.
+      CREDENTIAL_ENCRYPTION_KEY: ${SERVICE_REALBASE64_32_GRAVITPANEL}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      PANEL_AUTH_MODE: discord
+      PANEL_AUTH_REDIRECT_URI: https://${SERVICE_FQDN_PANELWEB}/api/panel-auth/callback
+      PANEL_DISCORD_CLIENT_ID: ${PANEL_DISCORD_CLIENT_ID:?Set the Discord OAuth2 client ID}
+      PANEL_DISCORD_CLIENT_SECRET: ${PANEL_DISCORD_CLIENT_SECRET:?Set the Discord OAuth2 client secret}
+      PANEL_DISCORD_ALLOWED_USER_IDS: ${PANEL_DISCORD_ALLOWED_USER_IDS:?Set at least one allowed Discord user ID}
+      PANEL_AUTH_COOKIE_SECURE: 'true'
     volumes:
       - type: bind
-        source: ${PANEL_DATA_DIR:?Set PANEL_DATA_DIR to an absolute host directory}
-        target: ${PANEL_DATA_DIR:?Set PANEL_DATA_DIR to an absolute host directory}
+        source: /data/gravit-panel
+        target: /data/gravit-panel
       - type: bind
         source: /var/run/docker.sock
         target: /var/run/docker.sock
@@ -38,6 +46,9 @@ services:
         condition: service_healthy
     expose:
       - "80"
+    environment:
+      # Creates the Coolify wildcard-domain route used by the panel OAuth callback.
+      SERVICE_URL_PANELWEB_80: /
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
       interval: 15s
@@ -51,29 +62,29 @@ services:
     stdin_open: true
     tty: true
     environment:
-      ADDRESS: ${LAUNCHSERVER_ADDRESS:?Set LAUNCHSERVER_ADDRESS to its public domain}
+      # The generated FQDN is attached to launchserver-web below.
+      ADDRESS: ${SERVICE_FQDN_LAUNCHSERVERWEB}
       PROJECTNAME: ${LAUNCHSERVER_PROJECT_NAME:-main}
       JAVA_OPTS: ${LAUNCHSERVER_JAVA_OPTS:-}
     volumes:
       - type: bind
-        source: ${PANEL_DATA_DIR:?Set PANEL_DATA_DIR to an absolute host directory}/launchserver
+        source: /data/gravit-panel/launchserver
         target: /app/data
 
   launchserver-web:
-    image: nginx:1.27-alpine
+    image: ${PANEL_LAUNCHSERVER_WEB_IMAGE:-ghcr.io/badtochka/gravit-panel-launchserver-web:latest}
     restart: unless-stopped
     depends_on:
       launchserver:
         condition: service_started
     expose:
       - "80"
+    environment:
+      # Creates a Coolify wildcard-domain route to this service's port 80.
+      SERVICE_URL_LAUNCHSERVERWEB_80: /
     volumes:
       - type: bind
-        source: ./deploy/launchserver/nginx.conf
-        target: /etc/nginx/conf.d/default.conf
-        read_only: true
-      - type: bind
-        source: ${PANEL_DATA_DIR:?Set PANEL_DATA_DIR to an absolute host directory}/launchserver
+        source: /data/gravit-panel/launchserver
         target: /volume
         read_only: true
     healthcheck:

@@ -53,4 +53,22 @@ export const schema = `
     source_revision TEXT NOT NULL,
     configured_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS panel_oauth_states (
+    state_hash TEXT PRIMARY KEY,
+    expires_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS panel_sessions (
+    session_hash TEXT PRIMARY KEY,
+    discord_id TEXT NOT NULL,
+    username TEXT NOT NULL,
+    global_name TEXT,
+    avatar_hash TEXT,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS panel_sessions_expires_at_idx
+    ON panel_sessions (expires_at);
 `

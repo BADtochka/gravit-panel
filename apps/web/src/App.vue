@@ -1,6 +1,29 @@
 <template>
   <div class="min-h-screen bg-background text-foreground">
-    <div v-if="installationsLoading" class="grid min-h-screen place-items-center">
+    <div v-if="authLoading" class="grid min-h-screen place-items-center">
+      <div class="flex items-center gap-2 text-sm text-muted-foreground">
+        <LoaderCircle class="size-4 animate-spin" />
+        Checking access…
+      </div>
+    </div>
+
+    <main v-else-if="loginRequired" class="grid min-h-screen place-items-center p-4">
+      <section class="w-full max-w-md rounded-xl border bg-card p-6 shadow-sm">
+        <p class="text-sm font-medium text-muted-foreground">Gravit Panel</p>
+        <h1 class="mt-2 text-2xl font-semibold tracking-tight">Sign in to continue</h1>
+        <p class="mt-3 text-sm leading-6 text-muted-foreground">
+          This panel is restricted to Discord accounts approved by its administrator.
+        </p>
+        <p v-if="authErrorMessage" class="mt-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+          {{ authErrorMessage }}
+        </p>
+        <Button as="a" href="/api/panel-auth/login" class="mt-6 w-full">
+          Continue with Discord
+        </Button>
+      </section>
+    </main>
+
+    <div v-else-if="installationsLoading" class="grid min-h-screen place-items-center">
       <div class="flex items-center gap-2 text-sm text-muted-foreground">
         <LoaderCircle class="size-4 animate-spin" />
         Loading projects…
@@ -109,8 +132,17 @@
               <Moon v-else class="size-4" aria-hidden="true" />
             </Button>
             <span class="hidden rounded-md border px-2 py-1 text-xs text-muted-foreground sm:inline">
-              Local
+              {{ panelAuth?.user?.globalName ?? panelAuth?.user?.username ?? 'Local' }}
             </span>
+            <Button
+              v-if="panelAuth?.enabled"
+              variant="outline"
+              size="sm"
+              type="button"
+              @click="logout"
+            >
+              Sign out
+            </Button>
           </div>
         </header>
 
@@ -160,12 +192,51 @@ interface InstallationsResponse {
   items: GravitInstallation[]
 }
 
+interface PanelAuthSession {
+  enabled: boolean
+  configured: boolean
+  authenticated: boolean
+  user: {
+    discordId: string
+    username: string
+    globalName: string | null
+    avatarHash: string | null
+  } | null
+}
+
 const { theme, toggleTheme } = useTheme()
 const installationsStore = useInstallationsStore()
 const { installations, selectedInstallation } = storeToRefs(installationsStore)
 const mobileNavOpen = ref(false)
 const route = useRoute()
 const router = useRouter()
+
+const getPanelAuthSession = async () => {
+  const response = await fetch('/api/panel-auth/session')
+  if (!response.ok) throw new Error(`Authentication request failed with status ${response.status}`)
+  return response.json() as Promise<PanelAuthSession>
+}
+
+const { data: panelAuth, isLoading: authLoading } = useQuery({
+  queryKey: ['panel-auth-session'],
+  queryFn: getPanelAuthSession,
+})
+const loginRequired = computed(
+  () => Boolean(panelAuth.value?.enabled) && !panelAuth.value?.authenticated,
+)
+const authErrorMessage = computed(() => {
+  const error = route.query.authError
+  if (error === 'not-authorized') return 'This Discord account is not on the access list.'
+  if (error === 'state') return 'The sign-in request expired. Please try again.'
+  if (error === 'configuration') return 'Discord sign-in is not configured yet.'
+  if (error === 'discord') return 'Discord sign-in failed. Please try again.'
+  return null
+})
+
+const logout = async () => {
+  await fetch('/api/panel-auth/logout', { method: 'POST' })
+  window.location.assign('/')
+}
 
 const getInstallations = async () => {
   const response = await fetch('/api/docker/installations')
@@ -176,6 +247,9 @@ const getInstallations = async () => {
 const { data, isLoading: installationsLoading } = useQuery({
   queryKey: ['docker-installations'],
   queryFn: getInstallations,
+  enabled: computed(
+    () => panelAuth.value !== undefined && (!panelAuth.value.enabled || panelAuth.value.authenticated),
+  ),
 })
 watch(
   [() => data.value?.items, () => route.path],

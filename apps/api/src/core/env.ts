@@ -1,6 +1,7 @@
 import { dirname, join, resolve } from 'node:path'
 
 const databasePath = Bun.env.DATABASE_PATH ?? './data/gravit-panel.sqlite'
+const panelAuthMode = Bun.env.PANEL_AUTH_MODE ?? 'disabled'
 
 export const env = {
   HOST: Bun.env.HOST ?? '127.0.0.1',
@@ -17,4 +18,16 @@ export const env = {
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean),
+  PANEL_AUTH_MODE: panelAuthMode,
+  PANEL_AUTH_REDIRECT_URI: Bun.env.PANEL_AUTH_REDIRECT_URI,
+  PANEL_DISCORD_CLIENT_ID: Bun.env.PANEL_DISCORD_CLIENT_ID,
+  PANEL_DISCORD_CLIENT_SECRET: Bun.env.PANEL_DISCORD_CLIENT_SECRET,
+  PANEL_DISCORD_ALLOWED_USER_IDS: (Bun.env.PANEL_DISCORD_ALLOWED_USER_IDS ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean),
+  PANEL_AUTH_COOKIE_SECURE:
+    Bun.env.PANEL_AUTH_COOKIE_SECURE === undefined
+      ? Bun.env.NODE_ENV === 'production'
+      : Bun.env.PANEL_AUTH_COOKIE_SECURE !== 'false',
 }

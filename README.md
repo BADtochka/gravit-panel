@@ -44,11 +44,13 @@ docker compose --env-file .env pull
 docker compose --env-file .env up -d
 ```
 
-GitHub Actions publishes `ghcr.io/badtochka/gravit-panel-api` and
-`ghcr.io/badtochka/gravit-panel-web` after every push to `main`. Compose uses
-their `latest` tags by default; set `PANEL_API_IMAGE` and `PANEL_WEB_IMAGE` to
-matching `sha-<commit>` tags for a pinned rollout. If the GHCR packages remain
-private, configure registry credentials on the deployment host or in Coolify.
+GitHub Actions publishes `ghcr.io/badtochka/gravit-panel-api`,
+`ghcr.io/badtochka/gravit-panel-web`, and
+`ghcr.io/badtochka/gravit-panel-launchserver-web` after every push to `main`.
+Compose uses their `latest` tags by default; set the corresponding
+`PANEL_*_IMAGE` variables to matching `sha-<commit>` tags for a pinned rollout.
+If the GHCR packages remain private, configure registry credentials on the
+deployment host or in Coolify.
 
 `compose.yaml` exposes the web service only as `127.0.0.1:8080` by default.
 Use an HTTPS reverse proxy to publish it. `PANEL_DATA_DIR` must be a host bind
@@ -61,6 +63,21 @@ installations.
 Set `CREDENTIAL_ENCRYPTION_KEY` to a separately backed-up 32-byte base64 key
 if you do not want to use the generated persistent key. `CORS_ORIGINS` can stay
 empty while the browser reaches the API through the same panel origin.
+
+### Panel Discord access
+
+Set `PANEL_AUTH_MODE=discord` to protect the panel with Discord OAuth. Configure
+an OAuth2 application in the Discord Developer Portal with the `identify` scope
+and add this exact redirect URI:
+
+```text
+https://panel.example.com/api/panel-auth/callback
+```
+
+Then set `PANEL_DISCORD_CLIENT_ID`, `PANEL_DISCORD_CLIENT_SECRET`, and
+`PANEL_DISCORD_ALLOWED_USER_IDS` (a comma-separated allowlist of Discord user
+IDs). The allowlist is required: a successful Discord login alone does not
+grant administrative access.
 
 The same stack starts an official `launchserver` service and its
 `launchserver-web` nginx facade at `127.0.0.1:17549`. It serves updates and
@@ -76,19 +93,32 @@ Coolify:
 
 | Variable | Value |
 | --- | --- |
-| `PANEL_DATA_DIR` | An absolute permanent path on the Docker host, for example `/data/gravit-panel` |
-| `LAUNCHSERVER_ADDRESS` | Required public game domain, for example `launcher.example.com` |
-| `CREDENTIAL_ENCRYPTION_KEY` | Optional, base64-encoded 32-byte key stored as a Coolify secret |
 | `CORS_ORIGINS` | Optional; normally empty for the same-origin web/API setup |
 
 Assign the panel domain to the `web` service on port `80`, and the game domain
-to `launchserver-web` on port `80`. Coolify pulls the published panel images,
-runs the declared health checks, and terminates TLS at its proxy. The `api` and
-`launchserver` services are not published directly.
-Create `PANEL_DATA_DIR/launchserver` on the target Docker host before the first
-deployment; it must not be a path inside Coolify's temporary source checkout.
-Protect the application with an external identity layer before assigning a
-public domain, because access to this panel is privileged.
+to `launchserver-web` on port `80`. The Coolify Compose configuration also
+creates a wildcard FQDN for `launchserver-web` and passes it to LaunchServer as
+its `ADDRESS`; it generates and persists the panel's base64 encryption key.
+Both values use Coolify magic environment variables, so do not define
+`LAUNCHSERVER_ADDRESS` or `CREDENTIAL_ENCRYPTION_KEY` in Coolify. Coolify pulls
+the published panel images, runs the declared health checks, and terminates TLS
+at its proxy. The `api` and `launchserver` services are not published directly.
+The LaunchServer nginx configuration is included in the published
+`gravit-panel-launchserver-web` image, so an image-only deployment does not
+need a checked-out `deploy/` directory.
+The panel service also receives a generated Coolify FQDN. In the Discord
+Developer Portal, add the exact redirect URI shown by
+`SERVICE_FQDN_PANELWEB` as `https://<generated-fqdn>/api/panel-auth/callback`.
+Set `PANEL_DISCORD_CLIENT_ID`, `PANEL_DISCORD_CLIENT_SECRET`, and
+`PANEL_DISCORD_ALLOWED_USER_IDS` in Coolify; the last value is a comma-separated
+administrator allowlist. Do not enable either Build Variable checkbox for the
+client secret: it is needed only at runtime.
+Create `/data/gravit-panel/launchserver` on the target Docker host before the
+first deployment. Coolify forbids `${...}` interpolation in volume paths, so
+the Coolify Compose file intentionally uses this fixed path; it must not be
+inside Coolify's temporary source checkout.
+Keep the Discord allowlist limited to panel administrators: this panel has
+privileged Docker access.
 
 The Coolify domain publishes the panel only. A configured Discord OAuth
 callback for a LaunchServer still needs the game domain's proxy to forward
