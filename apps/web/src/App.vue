@@ -40,7 +40,7 @@
       <aside class="fixed inset-y-0 left-0 hidden w-64 border-r bg-card md:block">
         <div class="flex h-16 items-center gap-3 border-b px-4">
           <img
-            src="/gravit-panel-icon.png"
+            :src="panelUrl('/gravit-panel-icon.png')"
             alt=""
             class="size-10 shrink-0 rounded-xl"
             aria-hidden="true"
@@ -84,7 +84,7 @@
               <SheetContent side="left" class="w-72 gap-0 p-0 sm:max-w-72">
                 <SheetHeader class="flex h-16 flex-row items-center gap-3 border-b px-4 text-left">
                   <img
-                    src="/gravit-panel-icon.png"
+                    :src="panelUrl('/gravit-panel-icon.png')"
                     alt=""
                     class="size-10 shrink-0 rounded-xl"
                     aria-hidden="true"

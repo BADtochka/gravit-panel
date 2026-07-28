@@ -223,7 +223,7 @@
         </CardContent>
         <CardFooter>
           <Button as-child variant="outline" class="w-full">
-            <a :href="artifact.downloadPath"><Download /> Download</a>
+            <a :href="panelUrl(artifact.downloadPath)"><Download /> Download</a>
           </Button>
         </CardFooter>
       </Card>
@@ -247,6 +247,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useInstallationJob } from '@/composables/useInstallationJob'
+import { panelUrl } from '@/lib/public-path'
 import { useInstallationsStore } from '@/stores/installations'
 import type {
   ClientPreparationState, JobRecord, LauncherArtifact, LauncherCustomizationState,

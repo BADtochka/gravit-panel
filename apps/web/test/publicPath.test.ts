@@ -17,6 +17,11 @@ describe('panel public path', () => {
     globalThis.window = { __GRAVIT_PANEL_CONFIG__: { publicPath: '/panel/' } } as Window & typeof globalThis
     const { panelUrl } = await import(`../src/lib/public-path.ts?subroute=${crypto.randomUUID()}`)
     expect(panelUrl('/api/health')).toBe('/panel/api/health')
+    expect(panelUrl('/api/clients/launcher/artifacts/windows-x64?installationId=example')).toBe(
+      '/panel/api/clients/launcher/artifacts/windows-x64?installationId=example',
+    )
+    expect(panelUrl('/gravit-panel-icon.png')).toBe('/panel/gravit-panel-icon.png')
+    expect(panelUrl('/panel/api/health')).toBe('/panel/api/health')
     expect(panelUrl('https://discord.com/api')).toBe('https://discord.com/api')
   })
 })
