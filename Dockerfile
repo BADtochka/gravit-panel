@@ -17,7 +17,7 @@ RUN bun run --filter @gravit-panel/web build
 # the Docker CLI and Compose plugin. It must be given the host Docker socket at
 # runtime; see compose.yaml before exposing this service to the Internet.
 FROM build AS api-runtime
-RUN apk add --no-cache docker-cli docker-cli-compose
+RUN apk add --no-cache docker-cli docker-cli-compose git
 ENV NODE_ENV=production
 WORKDIR /app
 EXPOSE 3000
