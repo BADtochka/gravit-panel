@@ -5,6 +5,7 @@ import type {
   ServerBootstrapIssueResult,
 } from '@gravit-panel/shared'
 import { createHash } from 'node:crypto'
+import { Buffer } from 'node:buffer'
 import {
   copyFile,
   mkdir,
@@ -120,13 +121,21 @@ export class ServerBootstrapService {
 
   createDraft(installation: GravitInstallation, bindingId: string) {
     const binding = this.requireBinding(installation, bindingId)
+    if (!binding.eulaAcceptedAt) {
+      throw new Error('Minecraft EULA must be accepted before preparing the first installation')
+    }
     return this.drafts.create({
       bindingId,
       installationId: installation.id,
       profileName: binding.profileName,
       serverName: binding.name,
-      config: { eulaAcceptedAt: new Date().toISOString() },
+      config: { eulaAcceptedAt: binding.eulaAcceptedAt },
     })
+  }
+
+  acceptEula(installation: GravitInstallation, bindingId: string) {
+    this.requireBinding(installation, bindingId)
+    return this.bindings.acceptEula(bindingId)
   }
 
   async prepare(
@@ -152,7 +161,15 @@ export class ServerBootstrapService {
         throw new Error('Server binding bootstrap settings are incomplete')
       }
       const pack = binding.packVersionId ? this.packs.get(binding.packVersionId) : null
-      if (binding.packVersionId && (!pack || pack.installationId !== installation.id)) {
+      if (
+        binding.packVersionId &&
+        (
+          !pack ||
+          pack.installationId !== installation.id ||
+          pack.profileName !== binding.profileName ||
+          (pack.bindingId !== null && pack.bindingId !== binding.id)
+        )
+      ) {
         throw new Error('Selected server pack version does not exist')
       }
       if (
@@ -222,8 +239,14 @@ export class ServerBootstrapService {
         await copyFile(authlibPath, join(staging, 'LauncherAuthlib.jar'))
         if (pack) {
           const archivePath = this.packs.archivePath(pack.id)
+          const manifest = this.packs.manifest(pack.id)
           if (!archivePath) throw new Error('Published server pack archive is missing')
+          if (!manifest?.files) throw new Error('Published server pack manifest is missing')
           await copyFile(archivePath, join(staging, 'server-pack.tar.gz'))
+          await writeFile(
+            join(staging, 'server-pack-files'),
+            `${manifest.files.map((item) => item.path).join('\n')}\n`,
+          )
         }
         await writeFile(
           join(staging, 'bootstrap-manifest.json'),
@@ -293,7 +316,23 @@ export class ServerBootstrapService {
     }
   }
 
-  async claim(installation: GravitInstallation, claim: string) {
+  loader(claim: string) {
+    const publicUrl = this.requirePublicUrl()
+    const startUrl = `${publicUrl}/api/server-bootstrap/${claim}/start`
+    const curl = publicUrl.startsWith('https:')
+      ? "curl --proto '=https' --tlsv1.2"
+      : 'curl'
+    return `#!/usr/bin/env bash
+set -Eeuo pipefail
+TMP="$(mktemp /tmp/gravit-bootstrap-stage2.XXXXXXXX)"
+cleanup() { rm -f "$TMP"; }
+trap cleanup EXIT
+${curl} -fsSL -X POST ${shellQuote(startUrl)} -o "$TMP"
+bash "$TMP"
+`
+  }
+
+  async start(installation: GravitInstallation, claim: string) {
     const row = this.drafts.beginClaim(claim)
     if (!row || row.installation_id !== installation.id) return null
     try {
@@ -304,10 +343,8 @@ export class ServerBootstrapService {
         config.profileUuid,
         config.binding.authId!,
       )
-      const access = this.drafts.completeClaim(row.id)
-      return this.renderScript(row.id, config, token, access.artifactToken, access.reportToken)
+      return this.renderScript(row.id, config, token, claim)
     } catch (error) {
-      this.drafts.restoreClaim(row.id)
       throw error
     }
   }
@@ -316,8 +353,8 @@ export class ServerBootstrapService {
     return this.drafts.claimInstallationId(claim)
   }
 
-  artifact(token: string, kind: 'bundle' | 'jre-x64' | 'jre-aarch64') {
-    const row = this.drafts.artifact(token)
+  artifact(claim: string, kind: 'bundle' | 'jre-x64' | 'jre-aarch64') {
+    const row = this.drafts.artifactByClaim(claim)
     if (!row) return null
     const path =
       kind === 'bundle'
@@ -334,10 +371,156 @@ export class ServerBootstrapService {
     return path && digest ? { path, digest } : null
   }
 
-  report(token: string, status: 'installed' | 'failed', error?: string) {
-    const draft = this.drafts.report(token, status, error)
-    if (draft) this.bindings.setState(draft.bindingId, status)
+  report(
+    claim: string,
+    status: 'installed' | 'failed',
+    error?: string,
+    updaterToken?: string,
+  ) {
+    const row = this.drafts.internalByClaim(claim)
+    const config = row ? JSON.parse(row.config_json) as BootstrapConfig : null
+    const draft = this.drafts.reportClaim(claim, status, error)
+    if (draft) {
+      this.bindings.setState(draft.bindingId, status)
+      if (status === 'installed' && updaterToken) {
+        this.bindings.saveUpdaterToken(
+          draft.bindingId,
+          createHash('sha256').update(updaterToken).digest('hex'),
+        )
+      }
+      if (status === 'installed' && config?.binding.packVersionId) {
+        this.bindings.reportPack(
+          draft.bindingId,
+          config.binding.packVersionId,
+        )
+      }
+    }
     return draft
+  }
+
+  revoke(installation: GravitInstallation, draftId: string) {
+    const row = this.drafts.internal(draftId)
+    if (!row || row.installation_id !== installation.id) {
+      throw new Error('Bootstrap draft not found')
+    }
+    return this.drafts.revoke(draftId)
+  }
+
+  updaterBinding(token: string) {
+    if (!token) return null
+    const binding = this.bindings.getByUpdaterTokenHash(
+      createHash('sha256').update(token).digest('hex'),
+    )
+    return binding?.id ? this.bindings.touchUpdater(binding.id) : null
+  }
+
+  updaterScript(token: string) {
+    const binding = this.updaterBinding(token)
+    if (!binding?.id || !binding.packVersionId) return null
+    if (binding.appliedPackVersionId === binding.packVersionId) return null
+    const version = this.packs.get(binding.packVersionId)
+    const manifest = this.packs.manifest(binding.packVersionId)
+    if (!version || version.bindingId !== binding.id || !manifest?.files) {
+      throw new Error('Desired server pack is unavailable')
+    }
+    const files = manifest.files.map((item) => item.path)
+    const encodedFiles = Buffer.from(`${files.join('\n')}\n`).toString('base64')
+    const publicUrl = this.requirePublicUrl()
+    const curl = publicUrl.startsWith('https:')
+      ? "curl --proto '=https' --tlsv1.2"
+      : 'curl'
+    const serviceName = `gravit-${binding.id.slice(0, 8)}`
+    const archiveUrl = `${publicUrl}/api/server-agent/archive/${version.id}`
+    const reportUrl = `${publicUrl}/api/server-agent/report`
+    return `#!/usr/bin/env bash
+set -Eeuo pipefail
+WORKDIR="$(readlink -f /var/lib/gravit-panel/servers/${binding.id})"
+STATE="$WORKDIR/.gravit-panel"
+NEW_LIST="$STATE/server-pack-files.new"
+OLD_LIST="$STATE/server-pack-files"
+ROLLBACK_LIST="$STATE/server-pack-files.rollback"
+ARCHIVE="$STATE/download/server-pack-${version.id}.tar.gz"
+BACKUP="$STATE/backups/pack-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+mkdir -p "$STATE/download" "$STATE/backups"
+printf '%s' ${shellQuote(encodedFiles)} | base64 -d > "$NEW_LIST"
+cp "$NEW_LIST" "$ROLLBACK_LIST"
+${curl} -fL --retry 3 \
+  -H "authorization: Bearer $UPDATER_TOKEN" -o "$ARCHIVE" ${shellQuote(archiveUrl)}
+echo ${shellQuote(version.sha256)}"  $ARCHIVE" | sha256sum -c -
+touch "$OLD_LIST"
+EXISTING="$(mktemp)"
+while IFS= read -r path; do
+  [[ -z "$path" || ! -f "$WORKDIR/$path" ]] || printf '%s\\n' "$path" >> "$EXISTING"
+done < "$OLD_LIST"
+if [[ -s "$EXISTING" ]]; then
+  tar -czf "$BACKUP" -C "$WORKDIR" --files-from="$EXISTING"
+else
+  tar -czf "$BACKUP" --files-from=/dev/null
+fi
+rm -f "$EXISTING"
+systemctl stop ${serviceName}.service
+apply_failed=false
+while IFS= read -r path; do
+  [[ -z "$path" ]] || rm -f "$WORKDIR/$path"
+done < "$OLD_LIST"
+tar -xzf "$ARCHIVE" --no-same-owner -C "$WORKDIR" || apply_failed=true
+if [[ "$apply_failed" == false ]]; then
+  mv "$NEW_LIST" "$OLD_LIST"
+  chown -R "$(stat -c %u "$WORKDIR")":"$(stat -c %g "$WORKDIR")" "$WORKDIR"
+  systemctl start ${serviceName}.service || apply_failed=true
+fi
+if [[ "$apply_failed" == true ]]; then
+  while IFS= read -r path; do
+    [[ -z "$path" ]] || rm -f "$WORKDIR/$path"
+  done < "$ROLLBACK_LIST"
+  tar -xzf "$BACKUP" -C "$WORKDIR" || true
+  rm -f "$NEW_LIST"
+  systemctl start ${serviceName}.service >/dev/null 2>&1 || true
+  curl -fsS -X POST -H "authorization: Bearer $UPDATER_TOKEN" \
+    -H 'content-type: application/json' \
+    --data ${shellQuote(JSON.stringify({
+      packVersionId: version.id,
+      status: 'failed',
+      error: 'Server pack apply failed',
+    }))} ${shellQuote(reportUrl)} >/dev/null 2>&1 || true
+  exit 1
+fi
+rm -f "$ROLLBACK_LIST"
+curl -fsS -X POST -H "authorization: Bearer $UPDATER_TOKEN" \
+  -H 'content-type: application/json' \
+  --data ${shellQuote(JSON.stringify({
+    packVersionId: version.id,
+    status: 'installed',
+  }))} ${shellQuote(reportUrl)} >/dev/null
+`
+  }
+
+  updaterArchive(token: string, versionId: string) {
+    const binding = this.updaterBinding(token)
+    const version = this.packs.get(versionId)
+    if (
+      !binding?.id ||
+      !version ||
+      binding.packVersionId !== version.id ||
+      version.bindingId !== binding.id
+    ) return null
+    const path = this.packs.archivePath(versionId)
+    return path ? { path, digest: version.sha256 } : null
+  }
+
+  reportUpdater(
+    token: string,
+    packVersionId: string,
+    status: 'installed' | 'failed',
+    error?: string,
+  ) {
+    const binding = this.updaterBinding(token)
+    if (!binding?.id || binding.packVersionId !== packVersionId) return null
+    return this.bindings.reportPack(
+      binding.id,
+      status === 'installed' ? packVersionId : null,
+      status === 'failed' ? error ?? 'Server pack apply failed' : undefined,
+    )
   }
 
   private requireBinding(installation: GravitInstallation, bindingId: string) {
@@ -476,13 +659,15 @@ export class ServerBootstrapService {
     draftId: string,
     config: BootstrapConfig,
     serverToken: string,
-    artifactToken: string,
-    reportToken: string,
+    claim: string,
   ) {
     const publicUrl = this.requirePublicUrl()
+    const curl = publicUrl.startsWith('https:')
+      ? "curl --proto '=https' --tlsv1.2"
+      : 'curl'
     const internal = this.drafts.internal(draftId)!
-    const artifactBase = `${publicUrl}/api/server-bootstrap/artifacts/${artifactToken}`
-    const reportUrl = `${publicUrl}/api/server-bootstrap/report/${reportToken}`
+    const artifactBase = `${publicUrl}/api/server-bootstrap/${claim}/artifacts`
+    const reportUrl = `${publicUrl}/api/server-bootstrap/${claim}/report`
     const args = config.binding.gameArgs.map(shellQuote).join(' ')
     const jvmOptions = [
       `-Xms${config.binding.xms}`,
@@ -492,8 +677,11 @@ export class ServerBootstrapService {
       '-Dlauncher.useSlf4j=true',
     ].join(' ')
     const serviceName = `gravit-${config.binding.id!.slice(0, 8)}`
+    const updaterServiceName = `${serviceName}-pack-update`
+    const updaterUrl = `${publicUrl}/api/server-agent/update`
     const packCommand = config.hasServerPack
-      ? 'tar -xzf "$PAYLOAD/server-pack.tar.gz" --no-same-owner -C "$WORKDIR"'
+      ? `tar -xzf "$PAYLOAD/server-pack.tar.gz" --no-same-owner -C "$WORKDIR"
+install -m 0600 "$PAYLOAD/server-pack-files" "$WORKDIR/.gravit-panel/server-pack-files"`
       : ':'
     const coreCommand =
       config.coreInstall === 'vanilla'
@@ -515,27 +703,28 @@ REPORT_URL=${shellQuote(reportUrl)}
 PAYLOAD=
 BACKUP=
 UNIT_TMP_DIR=
+WORKDIR=
 UPDATE=false
 report_failure() {
   local code="$?"
+  set +e
   [[ -z "$PAYLOAD" ]] || rm -rf "$PAYLOAD"
   [[ -z "$UNIT_TMP_DIR" ]] || rm -rf "$UNIT_TMP_DIR"
-  if [[ -n "$BACKUP" && -f "$BACKUP" ]]; then
+  if [[ -n "$WORKDIR" && -n "$BACKUP" && -f "$BACKUP" ]]; then
     tar -xzf "$BACKUP" -C "$WORKDIR" || true
     systemctl start ${serviceName}.service >/dev/null 2>&1 || true
   fi
   curl -fsS -X POST -H 'content-type: application/json' \\
     --data "{\\"status\\":\\"failed\\",\\"error\\":\\"installer exited with code $code\\"}" \\
     "$REPORT_URL" >/dev/null 2>&1 || true
-  exit "$code"
 }
-trap report_failure ERR
+trap report_failure EXIT
 
 if [[ "$EUID" -ne 0 || -z "\${SUDO_USER:-}" || "$SUDO_USER" == root ]]; then
   echo "Run this command from a non-root account through sudo." >&2
   exit 1
 fi
-for command in curl tar sha256sum systemctl systemd-analyze install ln sed; do
+for command in curl tar sha256sum systemctl systemd-analyze install ln sed base64 head tr; do
   command -v "$command" >/dev/null || { echo "Missing dependency: $command" >&2; exit 1; }
 done
 
@@ -583,9 +772,9 @@ case "$ARCH" in
 esac
 BUNDLE="$WORKDIR/.gravit-panel/download/bundle.tar.gz"
 JRE_ARCHIVE="$WORKDIR/.gravit-panel/download/jre.tar.gz"
-curl --proto '=https' --tlsv1.2 -fL --retry 3 -o "$BUNDLE" ${shellQuote(`${artifactBase}/bundle`)}
+${curl} -fL --retry 3 -o "$BUNDLE" ${shellQuote(`${artifactBase}/bundle`)}
 echo ${shellQuote(internal.bundle_sha256!)}"  $BUNDLE" | sha256sum -c -
-curl --proto '=https' --tlsv1.2 -fL --retry 3 -o "$JRE_ARCHIVE" "${
+${curl} -fL --retry 3 -o "$JRE_ARCHIVE" "${
       artifactBase
     }/$JRE_KIND"
 echo "$JRE_SHA  $JRE_ARCHIVE" | sha256sum -c -
@@ -655,21 +844,79 @@ KillSignal=SIGINT
 [Install]
 WantedBy=multi-user.target
 SYSTEMD_UNIT
-if ! systemd-analyze verify "$UNIT_TMP"; then
-  echo "Generated systemd unit is invalid:" >&2
-  sed -n '1,160p' "$UNIT_TMP" >&2
+UPDATER_ROOT=/usr/local/lib/gravit-panel/${config.binding.id!}
+UPDATER_ENV=/etc/gravit-panel/servers/${config.binding.id!}.env
+UPDATER_TOKEN="$(head -c 32 /dev/urandom | base64 | tr -d '\\n')"
+install -d -m 0755 "$UPDATER_ROOT" /etc/gravit-panel/servers
+cat > "$UPDATER_ENV" <<UPDATER_ENV_FILE
+UPDATER_TOKEN=$UPDATER_TOKEN
+UPDATER_URL=${updaterUrl}
+UPDATER_ENV_FILE
+chmod 0600 "$UPDATER_ENV"
+cat > "$UPDATER_ROOT/update.sh" <<'UPDATER_SCRIPT'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+set -a
+source /etc/gravit-panel/servers/${config.binding.id!}.env
+set +a
+TMP="$(mktemp /tmp/gravit-pack-update.XXXXXXXX)"
+cleanup() { rm -f "$TMP"; }
+trap cleanup EXIT
+STATUS="$(${curl} -sS -o "$TMP" -w '%{http_code}' \
+  -H "authorization: Bearer $UPDATER_TOKEN" "$UPDATER_URL")"
+case "$STATUS" in
+  204) exit 0 ;;
+  200) bash "$TMP" ;;
+  *) cat "$TMP" >&2; echo "Pack updater failed with HTTP $STATUS" >&2; exit 1 ;;
+esac
+UPDATER_SCRIPT
+chmod 0755 "$UPDATER_ROOT/update.sh"
+UPDATER_UNIT_TMP="$UNIT_TMP_DIR/${updaterServiceName}.service"
+UPDATER_TIMER_TMP="$UNIT_TMP_DIR/${updaterServiceName}.timer"
+cat > "$UPDATER_UNIT_TMP" <<UPDATER_SERVICE
+[Unit]
+Description=Update Gravit server pack
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$UPDATER_ROOT/update.sh
+UPDATER_SERVICE
+cat > "$UPDATER_TIMER_TMP" <<UPDATER_TIMER
+[Unit]
+Description=Poll Gravit Panel for server pack updates
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+RandomizedDelaySec=15
+Persistent=true
+Unit=${updaterServiceName}.service
+
+[Install]
+WantedBy=timers.target
+UPDATER_TIMER
+if ! systemd-analyze verify "$UNIT_TMP" "$UPDATER_UNIT_TMP" "$UPDATER_TIMER_TMP"; then
+  echo "Generated systemd units are invalid:" >&2
+  sed -n '1,200p' "$UNIT_TMP" "$UPDATER_UNIT_TMP" "$UPDATER_TIMER_TMP" >&2
   exit 1
 fi
 install -m 0644 "$UNIT_TMP" /etc/systemd/system/${serviceName}.service
+install -m 0644 "$UPDATER_UNIT_TMP" /etc/systemd/system/${updaterServiceName}.service
+install -m 0644 "$UPDATER_TIMER_TMP" /etc/systemd/system/${updaterServiceName}.timer
 rm -rf "$UNIT_TMP_DIR"
 UNIT_TMP_DIR=
 systemctl daemon-reload
 systemctl enable --now ${serviceName}.service
+systemctl enable --now ${updaterServiceName}.timer
 systemctl is-active --quiet ${serviceName}.service
-trap - ERR
 rm -rf "$PAYLOAD"
-curl -fsS -X POST -H 'content-type: application/json' \\
-  --data '{"status":"installed"}' "$REPORT_URL" >/dev/null || true
+PAYLOAD=
+curl -f --retry 3 -sS -X POST -H 'content-type: application/json' \\
+  --data "{\\"status\\":\\"installed\\",\\"updaterToken\\":\\"$UPDATER_TOKEN\\"}" \
+  "$REPORT_URL" >/dev/null
+trap - EXIT
 echo "Server installed and started as ${serviceName}.service"
 `
   }

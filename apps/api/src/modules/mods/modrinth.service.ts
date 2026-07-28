@@ -19,6 +19,7 @@ interface SearchResponse {
     downloads: number
     versions: string[]
     categories: string[]
+    client_side?: 'required' | 'optional' | 'unsupported' | 'unknown'
     server_side?: 'required' | 'optional' | 'unsupported' | 'unknown'
   }>
 }
@@ -47,6 +48,8 @@ export interface ModrinthVersion {
 interface ModrinthProjectDetail {
   id: string
   slug: string
+  title?: string
+  client_side: 'required' | 'optional' | 'unsupported' | 'unknown'
   server_side: 'required' | 'optional' | 'unsupported' | 'unknown'
 }
 
@@ -84,6 +87,7 @@ export class ModrinthService {
           downloads: item.downloads,
           versions: item.versions,
           loaders: item.categories,
+          clientSide: item.client_side,
           serverSide: item.server_side,
         }),
       ),
@@ -119,9 +123,19 @@ export class ModrinthService {
   }
 
   async resolveServerInstall(slug: string, minecraftVersion: string, loader: string) {
+    return this.resolveInstall(slug, minecraftVersion, loader, 'server')
+  }
+
+  async resolveInstall(
+    slug: string,
+    minecraftVersion: string,
+    loader: string,
+    target: 'client' | 'server',
+  ) {
     const resolved: Array<{
       projectId: string
       slug: string
+      title: string
       version: ModrinthVersion
       file: ModrinthVersion['files'][number]
     }> = []
@@ -138,8 +152,9 @@ export class ModrinthService {
         throw new Error(`${projectRef} is not available from the pinned Modrinth API`)
       }
       const project = (await projectResponse.json()) as ModrinthProjectDetail
-      if (project.server_side === 'unsupported') {
-        throw new Error(`${project.slug} is marked as unsupported on dedicated servers`)
+      const side = target === 'server' ? project.server_side : project.client_side
+      if (side === 'unsupported') {
+        throw new Error(`${project.slug} is marked as unsupported on the ${target}`)
       }
       const versionsUrl = new URL(
         `${modrinthSource.api}/project/${encodeURIComponent(project.id)}/version`,
@@ -174,7 +189,13 @@ export class ModrinthService {
       }
       const file = version.files.find((item) => item.primary) ?? version.files[0]
       if (!file) throw new Error(`${project.slug} version does not contain a downloadable file`)
-      resolved.push({ projectId: project.id, slug: project.slug, version, file })
+      resolved.push({
+        projectId: project.id,
+        slug: project.slug,
+        title: project.title ?? project.slug,
+        version,
+        file,
+      })
     }
     await visit(slug)
     return resolved

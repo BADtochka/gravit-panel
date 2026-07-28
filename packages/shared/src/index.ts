@@ -654,6 +654,11 @@ export interface ProfileServerBinding extends ProfileServer {
   profileName: string
   authId: string | null
   packVersionId: string | null
+  appliedPackVersionId: string | null
+  eulaAcceptedAt: string | null
+  updaterInstalledAt: string | null
+  updaterLastSeenAt: string | null
+  updaterError: string | null
   xms: string | null
   xmx: string | null
   jvmArgs: string[]
@@ -689,6 +694,7 @@ export interface ServerPackVersion {
   id: string
   installationId: string
   profileName: string
+  bindingId: string | null
   minecraftVersion: string
   loader: MinecraftLoader
   loaderVersion: string | null
@@ -725,7 +731,7 @@ export interface ServerBootstrapDraft {
 export interface ServerBootstrapIssueResult {
   draft: ServerBootstrapDraft
   command: string
-  expiresAt: string
+  expiresAt: string | null
 }
 
 export interface ClientProfileUpdateInput {
@@ -798,7 +804,16 @@ export interface ModrinthProject {
   downloads: number
   versions: string[]
   loaders: string[]
+  clientSide?: 'required' | 'optional' | 'unsupported' | 'unknown'
   serverSide?: 'required' | 'optional' | 'unsupported' | 'unknown'
+}
+
+export type ClientModMode = 'required' | 'optional' | 'none'
+
+export interface ModInstallSelection {
+  slug: string
+  clientMode: ClientModMode
+  serverBindingIds: string[]
 }
 
 export interface InstalledMod {
@@ -817,6 +832,7 @@ export interface ModInstallInput {
   minecraftVersion: string
   loader: Exclude<MinecraftLoader, 'VANILLA'>
   slugs: string[]
+  selections?: ModInstallSelection[]
 }
 
 export const workspaceApps: WorkspaceApp[] = [

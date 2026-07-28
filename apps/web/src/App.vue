@@ -182,6 +182,7 @@ import {
   Moon,
   PackageSearch,
   Rocket,
+  ServerCog,
   Sun,
   Users,
 } from '@lucide/vue'
@@ -272,6 +273,7 @@ const navItems = [
   { to: '/users', label: 'Users', icon: Users },
   { to: '/launcher', label: 'Launcher', icon: Rocket },
   { to: '/clients', label: 'Clients', icon: Boxes },
+  { to: '/servers', label: 'Servers', icon: ServerCog },
   { to: '/mods', label: 'Mods', icon: PackageSearch },
 ]
 </script>

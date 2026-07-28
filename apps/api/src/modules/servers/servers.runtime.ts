@@ -20,6 +20,7 @@ export const serverBindingService = new ServerBindingService(
 )
 export const serverPackService = new ServerPackService(
   serverPackStore,
+  serverBindingsStore,
   clientBuildService,
   serverModrinthService,
 )

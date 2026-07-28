@@ -5,6 +5,7 @@ import JobsView from './views/JobsView.vue'
 import LauncherView from './views/LauncherView.vue'
 import LaunchServerSetupView from './views/LaunchServerSetupView.vue'
 import ModsView from './views/ModsView.vue'
+import ServersView from './views/ServersView.vue'
 import ModulesView from './views/ModulesView.vue'
 import StatusView from './views/StatusView.vue'
 import UsersView from './views/UsersView.vue'
@@ -22,5 +23,6 @@ export const router = createRouter({
     { path: '/launcher', component: LauncherView },
     { path: '/clients', component: ClientsView },
     { path: '/mods', component: ModsView },
+    { path: '/servers', component: ServersView },
   ],
 })

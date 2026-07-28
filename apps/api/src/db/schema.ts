@@ -86,6 +86,12 @@ export const schema = `
     xmx TEXT NOT NULL,
     jvm_args_json TEXT NOT NULL,
     game_args_json TEXT NOT NULL,
+    eula_accepted_at TEXT,
+    applied_pack_version_id TEXT,
+    updater_token_hash TEXT,
+    updater_installed_at TEXT,
+    updater_last_seen_at TEXT,
+    updater_error TEXT,
     deployment_state TEXT NOT NULL CHECK (
       deployment_state IN ('pending', 'ready', 'requires-update', 'installed', 'failed')
     ),
@@ -101,6 +107,7 @@ export const schema = `
     id TEXT PRIMARY KEY,
     installation_id TEXT NOT NULL REFERENCES gravit_installations(id) ON DELETE CASCADE,
     profile_name TEXT NOT NULL,
+    binding_id TEXT REFERENCES server_bindings(id) ON DELETE CASCADE,
     minecraft_version TEXT NOT NULL,
     loader TEXT NOT NULL,
     loader_version TEXT,

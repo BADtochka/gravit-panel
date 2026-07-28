@@ -5,6 +5,7 @@ import type {
 import { createHash } from 'node:crypto'
 import {
   lstat,
+  cp,
   mkdir,
   readdir,
   readFile,
@@ -19,6 +20,7 @@ import type { ClientBuildService } from '../clients/client-build.service'
 import type { JobTaskContext } from '../jobs/jobs.runner'
 import type { ModrinthService } from '../mods/modrinth.service'
 import type { ServerPackStore } from './server-pack.store'
+import type { ServerBindingsStore } from './server-bindings.store'
 
 const profilePattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/
 const maximumFileBytes = env.SERVER_PACK_MAX_FILE_BYTES
@@ -48,13 +50,14 @@ const safeTimestamp = () => new Date().toISOString().replaceAll(':', '-').replac
 export class ServerPackService {
   constructor(
     private readonly store: ServerPackStore,
+    private readonly bindings: ServerBindingsStore,
     private readonly clients: Pick<ClientBuildService, 'getProfile'>,
     private readonly modrinth: ModrinthService,
   ) {}
 
-  async listFiles(installation: GravitInstallation, profileName: string) {
-    const root = this.workspace(installation, profileName)
-    await mkdir(root, { recursive: true })
+  async listFiles(installation: GravitInstallation, bindingId: string) {
+    const binding = this.requireBinding(installation, bindingId)
+    const root = await this.ensureWorkspace(installation, bindingId)
     const files: ServerPackFile[] = []
     const walk = async (directory: string) => {
       for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -77,20 +80,20 @@ export class ServerPackService {
     }
     await walk(root)
     files.sort((left, right) => left.path.localeCompare(right.path))
-    return { items: files, versions: this.store.list(installation.id, profileName) }
+    return { items: files, versions: this.store.list(installation.id, bindingId) }
   }
 
   async putFile(
     installation: GravitInstallation,
-    profileName: string,
+    bindingId: string,
     relativePath: string,
     bytes: Uint8Array,
   ) {
     if (!bytes.length || bytes.length > maximumFileBytes) {
       throw new Error(`Server pack file must be between 1 byte and ${maximumFileBytes} bytes`)
     }
-    const target = this.safePath(installation, profileName, relativePath)
-    const root = this.workspace(installation, profileName)
+    const target = this.safePath(installation, bindingId, relativePath)
+    const root = await this.ensureWorkspace(installation, bindingId)
     await mkdir(dirname(target), { recursive: true })
     const pending = join(root, `.gravit-panel-${crypto.randomUUID()}.pending`)
     await writeFile(pending, bytes, { mode: 0o600 })
@@ -101,15 +104,17 @@ export class ServerPackService {
 
   async removeFile(
     installation: GravitInstallation,
-    profileName: string,
+    bindingId: string,
     relativePath: string,
   ) {
-    const source = this.safePath(installation, profileName, relativePath)
+    const source = this.safePath(installation, bindingId, relativePath)
     if (!(await lstat(source)).isFile()) throw new Error('Server pack path is not a file')
     const trash = join(
       installation.path,
       'server-packs',
-      profileName,
+      this.requireBinding(installation, bindingId).profileName,
+      'bindings',
+      bindingId,
       '.trash',
       `${safeTimestamp()}-${crypto.randomUUID()}-${basename(source)}`,
     )
@@ -120,10 +125,11 @@ export class ServerPackService {
 
   async installMod(
     installation: GravitInstallation,
-    profileName: string,
+    bindingId: string,
     slug: string,
   ) {
-    const profile = await this.clients.getProfile(installation, profileName)
+    const binding = this.requireBinding(installation, bindingId)
+    const profile = await this.clients.getProfile(installation, binding.profileName)
     if (!profile.minecraftVersion || !profile.loader || profile.loader === 'VANILLA') {
       throw new Error('Profile must use a supported mod loader')
     }
@@ -138,7 +144,7 @@ export class ServerPackService {
       installed.push(
         await this.putFile(
           installation,
-          profileName,
+          bindingId,
           `mods/${item.file.filename}`,
           bytes,
         ),
@@ -149,9 +155,11 @@ export class ServerPackService {
 
   async publish(
     installation: GravitInstallation,
-    profileName: string,
+    bindingId: string,
     context: JobTaskContext,
   ) {
+    const binding = this.requireBinding(installation, bindingId)
+    const profileName = binding.profileName
     const profile = await this.clients.getProfile(installation, profileName)
     if (!profile.minecraftVersion || !profile.loader) {
       throw new Error('Profile compatibility metadata is incomplete')
@@ -160,11 +168,18 @@ export class ServerPackService {
       throw new Error('Exact loader version cannot be derived from the profile')
     }
     context.progress(15, 'Hashing server pack workspace')
-    const state = await this.listFiles(installation, profileName)
+    const state = await this.listFiles(installation, bindingId)
     const totalSize = state.items.reduce((sum, file) => sum + file.size, 0)
     if (totalSize > maximumPackBytes) throw new Error('Server pack exceeds configured size limit')
-    const root = this.workspace(installation, profileName)
-    const versionRoot = join(installation.path, 'server-packs', profileName, 'versions')
+    const root = await this.ensureWorkspace(installation, bindingId)
+    const versionRoot = join(
+      installation.path,
+      'server-packs',
+      profileName,
+      'bindings',
+      bindingId,
+      'versions',
+    )
     await mkdir(versionRoot, { recursive: true })
     const pending = join(versionRoot, `.pending-${crypto.randomUUID()}.tar.gz`)
     const manifest = {
@@ -210,6 +225,7 @@ export class ServerPackService {
     const version = this.store.create({
       installationId: installation.id,
       profileName,
+      bindingId,
       minecraftVersion: profile.minecraftVersion,
       loader: profile.loader,
       loaderVersion: profile.loaderVersion,
@@ -227,14 +243,25 @@ export class ServerPackService {
     return this.store.archivePath(id)
   }
 
-  private workspace(installation: GravitInstallation, profileName: string) {
+  private workspace(
+    installation: GravitInstallation,
+    profileName: string,
+    bindingId: string,
+  ) {
     if (!profilePattern.test(profileName)) throw new Error('Profile name is invalid')
-    return join(installation.path, 'server-packs', profileName, 'workspace')
+    return join(
+      installation.path,
+      'server-packs',
+      profileName,
+      'bindings',
+      bindingId,
+      'workspace',
+    )
   }
 
   private safePath(
     installation: GravitInstallation,
-    profileName: string,
+    bindingId: string,
     relativePath: string,
   ) {
     if (
@@ -247,10 +274,64 @@ export class ServerPackService {
     if (reservedRoots.has(first) || first.startsWith('.gravit-panel')) {
       throw new Error('Path is reserved by the bootstrap installer')
     }
-    const root = resolve(this.workspace(installation, profileName))
+    const binding = this.requireBinding(installation, bindingId)
+    const root = resolve(this.workspace(installation, binding.profileName, bindingId))
     const target = resolve(root, relativePath)
     if (!target.startsWith(`${root}${sep}`)) throw new Error('Server pack path escapes workspace')
     return target
+  }
+
+  private requireBinding(installation: GravitInstallation, bindingId: string) {
+    const binding = this.bindings.get(bindingId)
+    if (!binding || binding.installationId !== installation.id || !binding.id) {
+      throw new Error('Managed server binding not found')
+    }
+    return binding
+  }
+
+  private async ensureWorkspace(
+    installation: GravitInstallation,
+    bindingId: string,
+  ) {
+    const binding = this.requireBinding(installation, bindingId)
+    const root = this.workspace(installation, binding.profileName, bindingId)
+    const marker = join(dirname(root), '.workspace-initialized')
+    await mkdir(root, { recursive: true })
+    try {
+      if ((await lstat(marker)).isFile()) return root
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
+    }
+    const selectedArchive = binding.packVersionId
+      ? this.store.archivePath(binding.packVersionId)
+      : null
+    if (selectedArchive) {
+      const process = Bun.spawn(
+        ['tar', '-xzf', selectedArchive, '--no-same-owner', '-C', root],
+        { stdout: 'pipe', stderr: 'pipe' },
+      )
+      if (await process.exited !== 0) {
+        throw new Error(
+          `Failed to initialize server pack workspace: ${await new Response(process.stderr).text()}`,
+        )
+      }
+    } else {
+      const legacy = join(
+        installation.path,
+        'server-packs',
+        binding.profileName,
+        'workspace',
+      )
+      try {
+        if ((await lstat(legacy)).isDirectory()) {
+          await cp(legacy, root, { recursive: true, force: false })
+        }
+      } catch (error) {
+        if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
+      }
+    }
+    await writeFile(marker, `${new Date().toISOString()}\n`, { mode: 0o600 })
+    return root
   }
 
   private async assertPackSize(root: string) {

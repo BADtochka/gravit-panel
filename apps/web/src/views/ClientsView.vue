@@ -89,22 +89,6 @@
       </CardFooter>
     </Card>
 
-    <ProfileServersCard
-      v-if="!creatingProfile && selectedProfile"
-      :disabled="operationPending"
-      :installation-id="installationId"
-      :profile="selectedProfile"
-      @job="attachJob"
-    />
-
-    <ServerPackCard
-      v-if="!creatingProfile && selectedProfile"
-      :disabled="operationPending"
-      :installation-id="installationId"
-      :profile="selectedProfile"
-      @job="attachJob"
-    />
-
     <Card>
       <CardHeader>
         <div class="flex items-start justify-between gap-3">
@@ -185,8 +169,6 @@
 
 <script setup lang="ts">
 import MinecraftVersionCombobox from '@/components/clients/MinecraftVersionCombobox.vue'
-import ProfileServersCard from '@/components/clients/ProfileServersCard.vue'
-import ServerPackCard from '@/components/clients/ServerPackCard.vue'
 import JobLogCard from '@/components/jobs/JobLogCard.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
@@ -247,11 +229,6 @@ const {
     'gravit.client.build',
     'gravit.profile.update',
     'gravit.profile.remove',
-    'gravit.server.binding.apply',
-    'gravit.server.binding.remove',
-    'gravit.server-pack.modify',
-    'gravit.server-pack.publish',
-    'gravit.server-bootstrap.prepare',
   ],
 )
 const clientName = ref('')
@@ -475,15 +452,6 @@ const jobFinished = async (job: JobRecord) => {
     }),
     queryClient.invalidateQueries({
       queryKey: ['installed-mods', installationId.value, affectedName],
-    }),
-    queryClient.invalidateQueries({
-      queryKey: ['server-bindings', installationId.value, affectedName],
-    }),
-    queryClient.invalidateQueries({
-      queryKey: ['server-pack', installationId.value, affectedName],
-    }),
-    queryClient.invalidateQueries({
-      queryKey: ['server-bootstrap'],
     }),
   ])
   if (

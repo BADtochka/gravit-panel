@@ -5,8 +5,7 @@
         <div>
           <CardTitle class="text-base">Server pack</CardTitle>
           <CardDescription>
-            Server-only mods, plugins, and configuration files. Publish an immutable version before
-            generating a bootstrap command.
+            Files for {{ serverName }}. Every change publishes and assigns an immutable version.
           </CardDescription>
         </div>
         <Badge v-if="latestVersion" variant="secondary">v{{ latestVersion.versionNumber }}</Badge>
@@ -49,59 +48,6 @@
         </Button>
       </div>
 
-      <div
-        v-if="profile.loader && profile.loader !== 'VANILLA'"
-        class="space-y-3"
-      >
-        <div class="grid gap-3 md:grid-cols-[1fr_auto]">
-          <div>
-          <label class="text-xs font-medium" for="server-mod-slug">Search server-side Modrinth mods</label>
-          <Input
-            id="server-mod-slug"
-            v-model="searchTerm"
-            class="mt-1"
-            placeholder="Search by name or paste a slug"
-          />
-          </div>
-          <Button
-            class="self-end"
-            :disabled="!validSlug || pending"
-            type="button"
-            variant="outline"
-            @click="installMod(searchTerm)"
-          >
-            <PackagePlus class="size-4" />
-            Add slug
-          </Button>
-        </div>
-        <div
-          v-if="search?.items.length"
-          class="grid gap-2 md:grid-cols-2"
-        >
-          <div
-            v-for="project in search.items.slice(0, 6)"
-            :key="project.projectId"
-            class="flex items-center justify-between gap-3 rounded-md border p-3"
-          >
-            <div class="min-w-0">
-              <p class="truncate text-sm font-medium">{{ project.title }}</p>
-              <p class="truncate text-xs text-muted-foreground">
-                {{ project.slug }} · server {{ project.serverSide ?? 'unknown' }}
-              </p>
-            </div>
-            <Button
-              size="sm"
-              type="button"
-              variant="ghost"
-              :disabled="pending"
-              @click="installMod(project.slug)"
-            >
-              Add
-            </Button>
-          </div>
-        </div>
-      </div>
-
       <div class="rounded-lg border">
         <div
           v-if="!pack?.items.length"
@@ -118,32 +64,44 @@
             <p class="truncate font-mono text-xs">{{ file.path }}</p>
             <p class="text-xs text-muted-foreground">{{ formatBytes(file.size) }}</p>
           </div>
-          <Button
-            :disabled="pending"
-            size="sm"
-            type="button"
-            variant="ghost"
-            @click="remove(file.path)"
-          >
-            <Trash2 class="size-4" />
-          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger as-child>
+              <Button :disabled="pending" size="sm" type="button" variant="ghost">
+                <Trash2 class="size-4" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove {{ file.path }}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  The file moves to recoverable trash and a new pack version is assigned.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction @click="remove(file.path)">Move to trash</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
     </CardContent>
-    <CardFooter class="flex flex-wrap items-center justify-between gap-3">
+    <CardFooter>
       <p class="text-xs text-muted-foreground">
-        Published versions remain available to existing bindings.
+        Latest desired version: {{ latestVersion ? `v${latestVersion.versionNumber}` : 'empty' }}.
+        The installed updater applies it automatically.
       </p>
-      <Button :disabled="pending" type="button" @click="publish">
-        <Archive class="size-4" />
-        Publish version
-      </Button>
     </CardFooter>
   </Card>
 </template>
 
 <script setup lang="ts">
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -151,26 +109,23 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import type {
-  ClientProfileDescriptor,
   JobRecord,
-  ModrinthProject,
   ServerPackFile,
   ServerPackVersion,
 } from '@gravit-panel/shared'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { Archive, PackagePlus, Trash2, TriangleAlert, Upload } from '@lucide/vue'
+import { useMutation, useQuery } from '@tanstack/vue-query'
+import { Trash2, TriangleAlert, Upload } from '@lucide/vue'
 import { computed, ref } from 'vue'
 
 const props = defineProps<{
   installationId: string
-  profile: ClientProfileDescriptor
+  bindingId: string
+  serverName: string
   disabled: boolean
 }>()
 const emit = defineEmits<{ job: [job: JobRecord] }>()
-const queryClient = useQueryClient()
 const uploadPath = ref('')
 const selectedFile = ref<File | null>(null)
-const searchTerm = ref('')
 
 const getJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> => {
   const response = await fetch(input, init)
@@ -181,59 +136,35 @@ const getJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise
   return response.json() as Promise<T>
 }
 
-const queryKey = computed(() => ['server-pack', props.installationId, props.profile.name])
+const queryKey = computed(() => ['server-pack', props.installationId, props.bindingId])
 const { data: pack, error: queryError } = useQuery({
   queryKey,
   queryFn: () => getJson<{ items: ServerPackFile[]; versions: ServerPackVersion[] }>(
-    `/api/servers/profiles/${encodeURIComponent(props.profile.name)}/pack?installationId=${encodeURIComponent(props.installationId)}`,
+    `/api/servers/bindings/${props.bindingId}/pack?installationId=${encodeURIComponent(props.installationId)}`,
   ),
-  enabled: computed(() => Boolean(props.installationId && props.profile.name)),
+  enabled: computed(() => Boolean(props.installationId && props.bindingId)),
 })
 const latestVersion = computed(() => pack.value?.versions[0] ?? null)
-const { data: search } = useQuery({
-  queryKey: computed(() => [
-    'server-mod-search',
-    props.profile.minecraftVersion,
-    props.profile.loader,
-    searchTerm.value,
-  ]),
-  queryFn: () => getJson<{ items: ModrinthProject[] }>(
-    `/api/servers/modrinth/search?query=${encodeURIComponent(searchTerm.value)}` +
-    `&minecraftVersion=${encodeURIComponent(props.profile.minecraftVersion!)}` +
-    `&loader=${encodeURIComponent(props.profile.loader!)}`,
-  ),
-  enabled: computed(
-    () => Boolean(
-      searchTerm.value.trim().length >= 2 &&
-      props.profile.minecraftVersion &&
-      props.profile.loader &&
-      ['FABRIC', 'FORGE', 'NEOFORGE'].includes(props.profile.loader),
-    ),
-  ),
-  staleTime: 60_000,
-})
-const refresh = () => queryClient.invalidateQueries({ queryKey: queryKey.value })
-
 const uploadMutation = useMutation({
   mutationFn: async () => {
     const form = new FormData()
     form.set('installationId', props.installationId)
     form.set('path', uploadPath.value)
     form.set('file', selectedFile.value!)
-    return getJson('/api/servers/profiles/' + encodeURIComponent(props.profile.name) + '/pack/files', {
+    return getJson<JobRecord>(`/api/servers/bindings/${props.bindingId}/pack/files`, {
       method: 'POST',
       body: form,
     })
   },
-  onSuccess: async () => {
+  onSuccess: async (job) => {
     selectedFile.value = null
     uploadPath.value = ''
-    await refresh()
+    emit('job', job)
   },
 })
 const removeMutation = useMutation({
-  mutationFn: (path: string) => getJson(
-    `/api/servers/profiles/${encodeURIComponent(props.profile.name)}/pack/files/remove`,
+  mutationFn: (path: string) => getJson<JobRecord>(
+    `/api/servers/bindings/${props.bindingId}/pack/files/remove`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -244,15 +175,6 @@ const removeMutation = useMutation({
       }),
     },
   ),
-  onSuccess: refresh,
-})
-const jobMutation = useMutation({
-  mutationFn: (request: { path: string; body: Record<string, unknown> }) =>
-    getJson<JobRecord>(request.path, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(request.body),
-    }),
   onSuccess: (job) => emit('job', job),
 })
 const selectFile = (event: Event) => {
@@ -260,28 +182,15 @@ const selectFile = (event: Event) => {
   if (selectedFile.value && !uploadPath.value) uploadPath.value = selectedFile.value.name
 }
 const upload = () => uploadMutation.mutate()
-const remove = (path: string) => {
-  if (window.confirm(`Move ${path} to recoverable server pack trash?`)) {
-    removeMutation.mutate(path)
-  }
-}
-const installMod = (slug: string) => jobMutation.mutate({
-  path: `/api/servers/profiles/${encodeURIComponent(props.profile.name)}/pack/mods`,
-  body: { installationId: props.installationId, slug },
-})
-const publish = () => jobMutation.mutate({
-  path: `/api/servers/profiles/${encodeURIComponent(props.profile.name)}/pack/publish`,
-  body: { installationId: props.installationId },
-})
-const validSlug = computed(() => /^[a-z0-9][a-z0-9_-]{0,63}$/.test(searchTerm.value))
+const remove = (path: string) => removeMutation.mutate(path)
 const pending = computed(
   () => props.disabled || uploadMutation.isPending.value ||
-    removeMutation.isPending.value || jobMutation.isPending.value,
+    removeMutation.isPending.value,
 )
 const error = computed(
   () => (
     queryError.value || uploadMutation.error.value ||
-    removeMutation.error.value || jobMutation.error.value
+    removeMutation.error.value
   ) as Error | null,
 )
 const formatBytes = (value: number) =>

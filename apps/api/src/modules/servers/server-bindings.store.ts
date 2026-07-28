@@ -19,6 +19,12 @@ interface BindingRow {
   xmx: string
   jvm_args_json: string
   game_args_json: string
+  eula_accepted_at: string | null
+  applied_pack_version_id: string | null
+  updater_token_hash: string | null
+  updater_installed_at: string | null
+  updater_last_seen_at: string | null
+  updater_error: string | null
   deployment_state: ServerBindingDeploymentState
   created_at: string
   updated_at: string
@@ -43,6 +49,11 @@ const toBinding = (row: BindingRow): ProfileServerBinding => ({
   socketPing: true,
   authId: row.auth_id,
   packVersionId: row.pack_version_id,
+  appliedPackVersionId: row.applied_pack_version_id,
+  eulaAcceptedAt: row.eula_accepted_at,
+  updaterInstalledAt: row.updater_installed_at,
+  updaterLastSeenAt: row.updater_last_seen_at,
+  updaterError: row.updater_error,
   xms: row.xms,
   xmx: row.xmx,
   jvmArgs: parseArgs(row.jvm_args_json),
@@ -148,6 +159,75 @@ export class ServerBindingsStore {
     this.db.query(`
       UPDATE server_bindings SET deployment_state = ?, updated_at = ? WHERE id = ?
     `).run(state, new Date().toISOString(), id)
+    return this.get(id)
+  }
+
+  acceptEula(id: string) {
+    this.db.query(`
+      UPDATE server_bindings
+      SET eula_accepted_at = COALESCE(eula_accepted_at, ?), updated_at = ?
+      WHERE id = ?
+    `).run(new Date().toISOString(), new Date().toISOString(), id)
+    return this.get(id)
+  }
+
+  setDesiredPack(id: string, packVersionId: string) {
+    this.db.query(`
+      UPDATE server_bindings
+      SET pack_version_id = ?, deployment_state = 'requires-update', updated_at = ?
+      WHERE id = ?
+    `).run(packVersionId, new Date().toISOString(), id)
+    return this.get(id)
+  }
+
+  saveUpdaterToken(id: string, tokenHash: string) {
+    const now = new Date().toISOString()
+    this.db.query(`
+      UPDATE server_bindings SET
+        updater_token_hash = ?, updater_installed_at = ?,
+        updater_last_seen_at = ?, updater_error = NULL, updated_at = ?
+      WHERE id = ?
+    `).run(tokenHash, now, now, now, id)
+    return this.get(id)
+  }
+
+  getByUpdaterTokenHash(tokenHash: string) {
+    const row = this.db
+      .query<BindingRow, [string]>(
+        'SELECT * FROM server_bindings WHERE updater_token_hash = ?',
+      )
+      .get(tokenHash)
+    return row ? toBinding(row) : null
+  }
+
+  touchUpdater(id: string) {
+    const now = new Date().toISOString()
+    this.db.query(`
+      UPDATE server_bindings
+      SET updater_last_seen_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run(now, now, id)
+    return this.get(id)
+  }
+
+  reportPack(id: string, packVersionId: string | null, error?: string) {
+    const now = new Date().toISOString()
+    this.db.query(`
+      UPDATE server_bindings SET
+        applied_pack_version_id = CASE WHEN ? IS NULL THEN applied_pack_version_id ELSE ? END,
+        updater_last_seen_at = ?, updater_error = ?,
+        deployment_state = CASE WHEN ? IS NULL THEN 'installed' ELSE 'failed' END,
+        updated_at = ?
+      WHERE id = ?
+    `).run(
+      packVersionId,
+      packVersionId,
+      now,
+      error?.slice(0, 2000) ?? null,
+      error ?? null,
+      now,
+      id,
+    )
     return this.get(id)
   }
 

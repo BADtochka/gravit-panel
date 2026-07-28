@@ -11,6 +11,27 @@ if (env.DATABASE_PATH !== ':memory:') {
 export const database = new Database(env.DATABASE_PATH, { create: true })
 database.exec(schema)
 
+const ensureColumn = (table: string, column: string, declaration: string) => {
+  const columns = database
+    .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
+    .all()
+  if (!columns.some((item) => item.name === column)) {
+    database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`)
+  }
+}
+
+ensureColumn('server_bindings', 'eula_accepted_at', 'TEXT')
+ensureColumn('server_bindings', 'applied_pack_version_id', 'TEXT')
+ensureColumn('server_bindings', 'updater_token_hash', 'TEXT')
+ensureColumn('server_bindings', 'updater_installed_at', 'TEXT')
+ensureColumn('server_bindings', 'updater_last_seen_at', 'TEXT')
+ensureColumn('server_bindings', 'updater_error', 'TEXT')
+ensureColumn('server_pack_versions', 'binding_id', 'TEXT REFERENCES server_bindings(id) ON DELETE CASCADE')
+database.exec(`
+  CREATE INDEX IF NOT EXISTS server_pack_versions_binding_idx
+  ON server_pack_versions (binding_id, version_number DESC)
+`)
+
 const jobsTable = database
   .query<{ sql: string }, []>(
     "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'",

@@ -112,30 +112,84 @@
             </Button>
           </div>
           <div v-if="searchResults?.items.length" class="max-h-[32rem] space-y-2 overflow-auto pr-1">
-            <label
+            <div
               v-for="item in searchResults.items"
               :key="item.projectId"
-              class="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-accent"
+              class="block rounded-md border p-3 hover:bg-accent"
             >
-              <Checkbox
-                :model-value="selectedSlugs.includes(item.slug)"
-                class="mt-1"
-                @update:model-value="toggleSelected(item.slug)"
-              />
-              <img v-if="item.iconUrl" :src="item.iconUrl" alt="" class="size-10 rounded-md" />
-              <div class="min-w-0 flex-1">
-                <p class="font-medium">{{ item.title }}</p>
-                <p class="line-clamp-2 text-xs text-muted-foreground">{{ item.description }}</p>
-                <p class="mt-1 text-xs text-muted-foreground">{{ item.author }} · {{ formatDownloads(item.downloads) }}</p>
+              <div class="flex cursor-pointer items-start gap-3">
+                <Checkbox
+                  :model-value="selectedSlugs.includes(item.slug)"
+                  class="mt-1"
+                  @update:model-value="toggleSelected(item)"
+                />
+                <img v-if="item.iconUrl" :src="item.iconUrl" alt="" class="size-10 rounded-md" />
+                <div class="min-w-0 flex-1">
+                  <p class="font-medium">{{ item.title }}</p>
+                  <p class="line-clamp-2 text-xs text-muted-foreground">{{ item.description }}</p>
+                  <p class="mt-1 text-xs text-muted-foreground">
+                    {{ item.author }} · {{ formatDownloads(item.downloads) }}
+                  </p>
+                </div>
               </div>
-            </label>
+              <div
+                v-if="selectedSlugs.includes(item.slug)"
+                class="mt-3 space-y-3 border-t pt-3 text-xs"
+              >
+                <div class="flex flex-wrap gap-4">
+                  <label class="flex items-center gap-2">
+                    <Checkbox
+                      :model-value="targetFor(item).clientMode === 'required'"
+                      :disabled="item.clientSide === 'unsupported'"
+                      @update:model-value="setClientMode(item, $event ? 'required' : 'none')"
+                    />
+                    Client
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <Checkbox
+                      :model-value="targetFor(item).clientMode === 'optional'"
+                      :disabled="item.clientSide === 'unsupported'"
+                      @update:model-value="setClientMode(item, $event ? 'optional' : 'none')"
+                    />
+                    Optional client
+                  </label>
+                  <Badge variant="outline">
+                    client {{ item.clientSide ?? 'unknown' }} · server
+                    {{ item.serverSide ?? 'unknown' }}
+                  </Badge>
+                </div>
+                <div>
+                  <p class="mb-2 font-medium">Install on servers</p>
+                  <p
+                    v-if="!managedServers.length"
+                    class="text-muted-foreground"
+                  >
+                    No managed servers for this profile.
+                  </p>
+                  <div class="flex flex-wrap gap-3">
+                    <label
+                      v-for="server in managedServers"
+                      :key="server.id!"
+                      class="flex items-center gap-2"
+                    >
+                      <Checkbox
+                        :model-value="targetFor(item).serverBindingIds.includes(server.id!)"
+                        :disabled="item.serverSide === 'unsupported'"
+                        @update:model-value="toggleServerTarget(item, server.id!)"
+                      />
+                      {{ server.name }}
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           <p v-else-if="searchResults" class="py-8 text-center text-sm text-muted-foreground">No compatible mods found.</p>
         </CardContent>
         <CardFooter>
           <Button
             class="w-full"
-            :disabled="!selectedSlugs.length || !targetReady || operationPending"
+            :disabled="!selectedSlugs.length || !selectedTargetsReady || !targetReady || operationPending"
             @click="installSelected"
           >
             <Download /> Install selected ({{ selectedSlugs.length }})
@@ -223,15 +277,16 @@ import { useClientProfiles } from '@/composables/useClientProfiles'
 import { useLaunchServerStore } from '@/stores/launchserver'
 import { useProfilesStore } from '@/stores/profiles'
 import type {
-  InstalledMod, JobRecord, MinecraftLoader,
-  MinecraftVersionCatalog, ModrinthProject,
+  ClientModMode, InstalledMod, JobRecord, MinecraftLoader,
+  MinecraftVersionCatalog, ModInstallSelection, ModrinthProject,
+  ProfileServerBinding,
 } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
   Download, Lock, Power, RefreshCw, Search, Trash2, TriangleAlert, Unlock,
 } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 
 const loaders = ['VANILLA', 'FABRIC', 'FORGE', 'NEOFORGE', 'QUILT'] as const
 const queryClient = useQueryClient()
@@ -242,6 +297,7 @@ const loader = ref<MinecraftLoader>('FABRIC')
 const constraintsLocked = ref(true)
 const searchText = ref('')
 const selectedSlugs = ref<string[]>([])
+const selectionTargets = reactive<Record<string, ModInstallSelection>>({})
 const {
   activeJob,
   activeJobError,
@@ -302,6 +358,7 @@ watch(profiles, () => {
 }, { immediate: true })
 watch(profile, () => {
   selectedSlugs.value = []
+  Object.keys(selectionTargets).forEach((key) => delete selectionTargets[key])
   if (constraintsLocked.value) applyProfileParameters()
 })
 watch(constraintsLocked, (locked) => {
@@ -330,6 +387,17 @@ const {
   enabled: stateReady,
   retry: false,
 })
+const { data: serverBindings } = useQuery({
+  queryKey: computed(() => ['server-bindings', installationId.value, profile.value]),
+  queryFn: () => getJson<{ items: ProfileServerBinding[] }>(
+    `/api/servers/profiles/${encodeURIComponent(profile.value)}/bindings` +
+    `?installationId=${encodeURIComponent(installationId.value)}`,
+  ),
+  enabled: stateReady,
+})
+const managedServers = computed(
+  () => serverBindings.value?.items.filter((item) => item.managed && item.id) ?? [],
+)
 
 const {
   data: searchResults, error: searchError, isPending: searchPending, mutate: runSearch,
@@ -337,15 +405,57 @@ const {
   mutationFn: () => getJson<{ items: ModrinthProject[] }>(
     `/api/mods/search?query=${encodeURIComponent(searchText.value)}&minecraftVersion=${encodeURIComponent(version.value)}&loader=${loader.value}`,
   ),
-  onSuccess: () => { selectedSlugs.value = [] },
+  onSuccess: () => {
+    selectedSlugs.value = []
+    Object.keys(selectionTargets).forEach((key) => delete selectionTargets[key])
+  },
 })
 const canSearch = computed(() => Boolean(searchText.value.trim() && targetReady.value))
 const searchMods = () => { if (canSearch.value) runSearch() }
-const toggleSelected = (slug: string) => {
-  selectedSlugs.value = selectedSlugs.value.includes(slug)
-    ? selectedSlugs.value.filter((item) => item !== slug)
-    : [...selectedSlugs.value, slug]
+const defaultTargets = (item: ModrinthProject): ModInstallSelection => ({
+  slug: item.slug,
+  clientMode:
+    item.clientSide === 'required'
+      ? 'required'
+      : item.clientSide === 'optional'
+        ? 'optional'
+        : 'none',
+  serverBindingIds:
+    item.serverSide === 'required'
+      ? managedServers.value.flatMap((server) => server.id ? [server.id] : [])
+      : [],
+})
+const targetFor = (item: ModrinthProject) =>
+  selectionTargets[item.slug] ?? (selectionTargets[item.slug] = defaultTargets(item))
+const toggleSelected = (item: ModrinthProject) => {
+  if (selectedSlugs.value.includes(item.slug)) {
+    selectedSlugs.value = selectedSlugs.value.filter((slug) => slug !== item.slug)
+    delete selectionTargets[item.slug]
+  } else {
+    selectedSlugs.value = [...selectedSlugs.value, item.slug]
+    selectionTargets[item.slug] = defaultTargets(item)
+  }
 }
+const setClientMode = (item: ModrinthProject, mode: ClientModMode) => {
+  targetFor(item).clientMode = mode
+}
+const toggleServerTarget = (item: ModrinthProject, bindingId: string) => {
+  const target = targetFor(item)
+  target.serverBindingIds = target.serverBindingIds.includes(bindingId)
+    ? target.serverBindingIds.filter((id) => id !== bindingId)
+    : [...target.serverBindingIds, bindingId]
+}
+const selectedTargetsReady = computed(
+  () =>
+    selectedSlugs.value.length > 0 &&
+    selectedSlugs.value.every((slug) => {
+      const target = selectionTargets[slug]
+      return Boolean(
+        target &&
+        (target.clientMode !== 'none' || target.serverBindingIds.length > 0),
+      )
+    }),
+)
 
 const {
   mutate: runOperation, isPending: operationPending, error: operationError,
@@ -364,6 +474,7 @@ const installSelected = () => runOperation({
     minecraftVersion: version.value,
     loader: loader.value,
     slugs: selectedSlugs.value,
+    selections: selectedSlugs.value.map((slug) => selectionTargets[slug]!),
   },
 })
 const toggleMod = (item: InstalledMod) => runOperation({
@@ -389,6 +500,8 @@ const jobFinished = async (job: JobRecord) => {
   await queryClient.invalidateQueries({
     queryKey: ['installed-mods', installationId.value, profile.value],
   })
+  await queryClient.invalidateQueries({ queryKey: ['server-pack'] })
+  await queryClient.invalidateQueries({ queryKey: ['server-bindings'] })
 }
 const pageError = computed(
   () => (

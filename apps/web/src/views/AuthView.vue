@@ -388,6 +388,20 @@
       </div>
     </div>
 
+    <AlertDialog v-model:open="guildValidationOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Invalid Discord guild ID</AlertDialogTitle>
+          <AlertDialogDescription>
+            Guild ID must be a numeric Discord snowflake containing 10 to 22 digits.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogAction>OK</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
     <JobLogCard :job="activeJob" title="Authentication job" @finished="jobFinished" />
   </section>
 </template>
@@ -491,6 +505,7 @@ const discord = reactive<AuthDiscordCoreConfig>({
 })
 const discordGuildInput = ref('')
 const discordModalOpen = ref(false)
+const guildValidationOpen = ref(false)
 const discordClientSecretConfigured = ref(false)
 const fileAuthAutoSave = ref(true)
 const defaultDiscordRedirectUrl = computed(() =>
@@ -661,7 +676,7 @@ const addDiscordGuild = () => {
   const id = discordGuildInput.value.trim()
   if (!id) return
   if (!/^\d{10,22}$/.test(id)) {
-    alert('Guild ID must be a numeric Discord snowflake')
+    guildValidationOpen.value = true
     return
   }
   if (!discord.requiredGuildIds.includes(id)) {

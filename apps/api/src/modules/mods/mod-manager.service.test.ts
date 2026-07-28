@@ -126,4 +126,91 @@ describe('ModManagerService', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  test('installs selected client files and publishes each server pack only once', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gravit-mod-targets-'))
+    const installation = installationFor(root)
+    const bindingId = crypto.randomUUID()
+    const installedOnServer: string[] = []
+    let published = 0
+    let reloaded = 0
+    const service = new ModManagerService(
+      {} as ControlFileService,
+      {
+        resolveInstall: async (slug: string) => [{
+          projectId: slug,
+          slug,
+          title: slug,
+          version: {},
+          file: {
+            filename: `${slug}.jar`,
+            size: 3,
+            hashes: { sha1: '', sha512: '' },
+          },
+        }],
+        download: async () => new TextEncoder().encode('mod'),
+      } as unknown as ModrinthService,
+      localVolume,
+      {
+        upsertOptionalMods: async () => ({ profile: {} }),
+        reloadProfileUpdates: async () => {
+          reloaded += 1
+        },
+      } as never,
+      {
+        installMod: async (
+          _installation: GravitInstallation,
+          _bindingId: string,
+          slug: string,
+        ) => {
+          installedOnServer.push(slug)
+          return { installed: [] }
+        },
+        publish: async () => {
+          published += 1
+          return { version: { id: crypto.randomUUID() } }
+        },
+      } as never,
+      {
+        get: () => ({
+          id: bindingId,
+          installationId: installation.id,
+          profileName: 'fabric',
+        }),
+        setDesiredPack: () => null,
+      } as never,
+    )
+
+    try {
+      await service.install(
+        installation,
+        {
+          installationId: installation.id,
+          profile: 'fabric',
+          minecraftVersion: '1.21.1',
+          loader: 'FABRIC',
+          slugs: ['sodium', 'lithium'],
+          selections: [
+            { slug: 'sodium', clientMode: 'required', serverBindingIds: [bindingId] },
+            { slug: 'lithium', clientMode: 'required', serverBindingIds: [bindingId] },
+          ],
+        },
+        context,
+      )
+
+      expect(await readFile(
+        join(root, 'launcher', 'updates', 'fabric', 'mods', 'sodium.jar'),
+        'utf8',
+      )).toBe('mod')
+      expect(await readFile(
+        join(root, 'launcher', 'updates', 'fabric', 'mods', 'lithium.jar'),
+        'utf8',
+      )).toBe('mod')
+      expect(reloaded).toBe(1)
+      expect(installedOnServer).toEqual(['sodium', 'lithium'])
+      expect(published).toBe(1)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

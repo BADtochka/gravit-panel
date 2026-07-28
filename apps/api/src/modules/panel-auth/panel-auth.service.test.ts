@@ -7,6 +7,7 @@ import {
   parseCookie,
   serializeCookie,
 } from './panel-auth.service'
+import { createPanelAuthGuard } from './panel-auth.routes'
 
 const configuration = {
   mode: 'discord',
@@ -95,5 +96,29 @@ describe('PanelAuthService', () => {
     expect(service.publicPath).toBe('/panel')
     expect(service.redirectUri).toBe('https://panel.example.com/panel/api/panel-auth/callback')
     expect(service.authCookiePath).toBe('/panel/api/panel-auth')
+  })
+
+  test('allows token-authenticated bootstrap and server agent routes without a panel session', () => {
+    const service = new PanelAuthService(database, configuration)
+    const guard = createPanelAuthGuard(service)
+    const claim = 'a'.repeat(43)
+    const publicPaths = [
+      `/api/server-bootstrap/${claim}`,
+      `/api/server-bootstrap/${claim}/start`,
+      `/api/server-bootstrap/${claim}/artifacts/bundle`,
+      `/api/server-bootstrap/${claim}/report`,
+      '/api/server-agent/update',
+      '/api/server-agent/report',
+      '/api/server-agent/archive/66b1003b-0454-4581-9423-91a62c2f197f',
+    ]
+
+    for (const path of publicPaths) {
+      expect(guard({ request: new Request(`https://panel.example.com${path}`) })).toBeUndefined()
+    }
+    const protectedResult = guard({
+      request: new Request('https://panel.example.com/api/servers'),
+    })
+    expect(protectedResult).toBeInstanceOf(Response)
+    expect((protectedResult as Response).status).toBe(401)
   })
 })

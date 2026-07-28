@@ -127,6 +127,7 @@ interface LaunchProfileConfig {
   classPath?: unknown
   assetDir?: unknown
   assetIndex?: unknown
+  updateOptional?: unknown
 }
 
 interface LaunchProfileServer {
@@ -431,6 +432,96 @@ export class ClientBuildService {
       profile: profileDescriptor(name, next),
       backupPath: join(launcherRoot(installation), backupRelativePath),
     }
+  }
+
+  async upsertOptionalMods(
+    installation: GravitInstallation,
+    name: string,
+    inputs: Array<{
+      projectId: string
+      title: string
+      filename: string
+      sourcePath: string
+      enabledByDefault?: boolean
+    }>,
+    context: JobTaskContext,
+  ) {
+    this.validateProfile(name)
+    const path = join('profiles', `${name}.json`)
+    const current = await this.readProfileConfig(installation, name)
+    const existing = Array.isArray(current.profile.updateOptional)
+      ? current.profile.updateOptional.filter(
+          (item): item is Record<string, unknown> =>
+            Boolean(item && typeof item === 'object' && !Array.isArray(item)),
+        )
+      : []
+    const optionalNames = new Set(inputs.map((input) => `modrinth:${input.projectId}`))
+    const nextOptional = existing.filter(
+      (item) => typeof item.name !== 'string' || !optionalNames.has(item.name),
+    )
+    for (const input of inputs) {
+      nextOptional.push({
+        name: `modrinth:${input.projectId}`,
+        info: input.title,
+        category: 'Mods',
+        visible: true,
+        mark: input.enabledByDefault ?? false,
+        actions: [{
+          type: 'file',
+          files: {
+            [input.sourcePath]: `mods/${input.filename}`,
+          },
+        }],
+      })
+    }
+    const next = { ...current.profile, updateOptional: nextOptional }
+    const backupRelativePath = join(
+      '.gravit-panel-profile-backups',
+      `${name}.optional-${safeTimestamp()}.json`,
+    )
+    await this.volume.copy(installation, path, backupRelativePath)
+    await this.volume.writeFileAtomic(
+      installation,
+      path,
+      new TextEncoder().encode(`${JSON.stringify(next, null, 2)}\n`),
+      '0644',
+    )
+    try {
+      await this.reloadProfilesAndUpdates(installation, context, 80)
+    } catch (error) {
+      await this.volume.writeFileAtomic(
+        installation,
+        path,
+        new TextEncoder().encode(current.raw),
+        '0644',
+      )
+      await this.reloadProfilesAndUpdates(installation, context, 90).catch(() => {})
+      throw error
+    }
+    return { profile: profileDescriptor(name, next) }
+  }
+
+  async upsertOptionalMod(
+    installation: GravitInstallation,
+    name: string,
+    input: {
+      projectId: string
+      title: string
+      filename: string
+      sourcePath: string
+      enabledByDefault?: boolean
+    },
+    context: JobTaskContext,
+  ) {
+    return this.upsertOptionalMods(installation, name, [input], context)
+  }
+
+  async reloadProfileUpdates(
+    installation: GravitInstallation,
+    context: JobTaskContext,
+    progress = 90,
+  ) {
+    await this.reloadProfilesAndUpdates(installation, context, progress)
   }
 
   async updateProfile(

@@ -22,7 +22,7 @@ const installation: GravitInstallation = {
   updatedAt: '2026-07-28T00:00:00.000Z',
 }
 
-test('server bootstrap claim is one-time and renders a secret only after claim', async () => {
+test('server bootstrap claim survives downloads and ends only after a terminal report', async () => {
   const db = new Database(':memory:')
   db.exec(schema)
   db.query(`
@@ -79,6 +79,13 @@ test('server bootstrap claim is one-time and renders a secret only after claim',
     },
     'https://panel.example.com/panel',
   )
+  expect(() => service.createDraft(installation, binding.id!)).toThrow(
+    'Minecraft EULA must be accepted',
+  )
+  const accepted = bindings.acceptEula(binding.id!)
+  const acceptedAgain = bindings.acceptEula(binding.id!)
+  expect(accepted?.eulaAcceptedAt).toBeTruthy()
+  expect(acceptedAgain?.eulaAcceptedAt).toBe(accepted?.eulaAcceptedAt)
   const draft = service.createDraft(installation, binding.id!)
   drafts.ready(draft.id, {
     bundlePath: '/tmp/bundle.tar.gz',
@@ -109,7 +116,12 @@ test('server bootstrap claim is one-time and renders a secret only after claim',
   expect(claim).toBeTruthy()
   expect(service.claimInstallationId(claim!)).toBe(installation.id)
 
-  const script = await service.claim(installation, claim!)
+  const loader = service.loader(claim!)
+  expect(loader).toContain(`server-bootstrap/${claim}/start`)
+  expect(loader).not.toContain('header.payload.signature')
+  expect(service.claimInstallationId(claim!)).toBe(installation.id)
+
+  const script = await service.start(installation, claim!)
   expect(script).toContain('SERVERWRAPPER_CHECK_SERVER_TOKEN')
   expect(script).toContain('header.payload.signature')
   expect(script).toContain('SERVICE_UID="$(id -u "$SERVICE_USER")"')
@@ -127,6 +139,8 @@ test('server bootstrap claim is one-time and renders a secret only after claim',
   } finally {
     await rm(scriptDirectory, { recursive: true, force: true })
   }
-  expect(await service.claim(installation, claim!)).toBeNull()
+  expect(await service.start(installation, claim!)).not.toBeNull()
+  expect(service.report(claim!, 'installed', undefined, 'u'.repeat(48))).not.toBeNull()
+  expect(await service.start(installation, claim!)).toBeNull()
   expect(JSON.stringify(drafts.internal(draft.id))).not.toContain('header.payload.signature')
 })

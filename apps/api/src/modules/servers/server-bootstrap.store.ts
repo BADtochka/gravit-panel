@@ -151,85 +151,61 @@ export class ServerBootstrapStore {
       throw new Error('Bootstrap draft is not ready for issuance')
     }
     const claim = randomToken()
-    const expiresAt = new Date(Date.now() + 15 * 60_000).toISOString()
     this.db.query(`
       UPDATE server_bootstrap_drafts SET
-        status = 'issued', claim_hash = ?, claim_expires_at = ?,
+        status = 'issued', claim_hash = ?, claim_expires_at = NULL,
         artifact_hash = NULL, artifact_expires_at = NULL, report_hash = NULL,
         issued_at = ?
       WHERE id = ?
-    `).run(hashToken(claim), expiresAt, new Date().toISOString(), id)
-    return { claim, expiresAt, draft: this.get(id)! }
+    `).run(hashToken(claim), new Date().toISOString(), id)
+    return { claim, expiresAt: null, draft: this.get(id)! }
   }
 
   beginClaim(claim: string) {
-    const now = new Date().toISOString()
     const row = this.db
-      .query<DraftRow, [string, string]>(`
+      .query<DraftRow, [string]>(`
         SELECT * FROM server_bootstrap_drafts
-        WHERE claim_hash = ? AND status = 'issued' AND claim_expires_at > ?
+        WHERE claim_hash = ? AND status IN ('issued', 'claimed')
       `)
-      .get(hashToken(claim), now)
+      .get(hashToken(claim))
     if (!row) return null
-    const locked = this.db.query(`
+    this.db.query(`
       UPDATE server_bootstrap_drafts SET status = 'claimed', claimed_at = ?
-      WHERE id = ? AND status = 'issued'
-    `).run(now, row.id)
-    return locked.changes === 1 ? this.row(row.id) : null
+      WHERE id = ? AND status IN ('issued', 'claimed')
+    `).run(new Date().toISOString(), row.id)
+    return this.row(row.id)
   }
 
   claimInstallationId(claim: string) {
     return this.db
-      .query<{ installation_id: string }, [string, string]>(`
+      .query<{ installation_id: string }, [string]>(`
         SELECT installation_id FROM server_bootstrap_drafts
-        WHERE claim_hash = ? AND status = 'issued' AND claim_expires_at > ?
+        WHERE claim_hash = ? AND status IN ('issued', 'claimed')
       `)
-      .get(hashToken(claim), new Date().toISOString())?.installation_id ?? null
+      .get(hashToken(claim))?.installation_id ?? null
   }
 
-  completeClaim(id: string) {
-    const artifactToken = randomToken()
-    const reportToken = randomToken()
-    const artifactExpiresAt = new Date(Date.now() + 30 * 60_000).toISOString()
-    this.db.query(`
-      UPDATE server_bootstrap_drafts SET
-        artifact_hash = ?, artifact_expires_at = ?, report_hash = ?,
-        claim_hash = NULL, claim_expires_at = NULL
-      WHERE id = ? AND status = 'claimed'
-    `).run(
-      hashToken(artifactToken),
-      artifactExpiresAt,
-      hashToken(reportToken),
-      id,
-    )
-    return { artifactToken, reportToken, artifactExpiresAt }
-  }
-
-  restoreClaim(id: string) {
-    this.db.query(`
-      UPDATE server_bootstrap_drafts SET status = 'issued', claimed_at = NULL
-      WHERE id = ? AND status = 'claimed'
-    `).run(id)
-  }
-
-  artifact(token: string) {
+  artifactByClaim(claim: string) {
     return this.db
-      .query<DraftRow, [string, string]>(`
+      .query<DraftRow, [string]>(`
         SELECT * FROM server_bootstrap_drafts
-        WHERE artifact_hash = ? AND artifact_expires_at > ?
-          AND status IN ('claimed', 'installed')
+        WHERE claim_hash = ? AND status IN ('issued', 'claimed')
       `)
-      .get(hashToken(token), new Date().toISOString())
+      .get(hashToken(claim))
   }
 
-  report(token: string, status: 'installed' | 'failed', error?: string) {
-    const row = this.db
-      .query<DraftRow, [string]>('SELECT * FROM server_bootstrap_drafts WHERE report_hash = ?')
-      .get(hashToken(token))
+  internalByClaim(claim: string) {
+    return this.artifactByClaim(claim)
+  }
+
+  reportClaim(claim: string, status: 'installed' | 'failed', error?: string) {
+    const row = this.artifactByClaim(claim)
     if (!row) return null
     this.db.query(`
       UPDATE server_bootstrap_drafts SET
-        status = ?, error = ?, installed_at = ?, report_hash = NULL
+        status = ?, error = ?, installed_at = ?,
+        claim_hash = NULL, claim_expires_at = NULL,
+        artifact_hash = NULL, artifact_expires_at = NULL, report_hash = NULL
       WHERE id = ?
     `).run(
       status,
@@ -238,6 +214,17 @@ export class ServerBootstrapStore {
       row.id,
     )
     return this.get(row.id)
+  }
+
+  revoke(id: string, reason = 'Bootstrap command revoked') {
+    this.db.query(`
+      UPDATE server_bootstrap_drafts SET
+        status = 'failed', error = ?,
+        claim_hash = NULL, claim_expires_at = NULL,
+        artifact_hash = NULL, artifact_expires_at = NULL, report_hash = NULL
+      WHERE id = ? AND status IN ('ready', 'issued', 'claimed')
+    `).run(reason, id)
+    return this.get(id)
   }
 
   private row(id: string) {

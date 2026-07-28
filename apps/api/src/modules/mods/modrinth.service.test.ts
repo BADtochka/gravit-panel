@@ -18,6 +18,8 @@ describe('ModrinthService', () => {
             downloads: 10,
             versions: ['1.21.4'],
             categories: ['fabric'],
+            client_side: 'required',
+            server_side: 'optional',
           },
         ],
       })
@@ -31,6 +33,8 @@ describe('ModrinthService', () => {
     expect(url.searchParams.get('facets')).toContain('project_type:mod')
     expect(url.searchParams.get('facets')).toContain('versions:1.21.4')
     expect(result.items[0]?.slug).toBe('sodium')
+    expect(result.items[0]?.clientSide).toBe('required')
+    expect(result.items[0]?.serverSide).toBe('optional')
   })
 
   test('verifies sha512 before returning a downloaded mod', async () => {

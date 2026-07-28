@@ -6,9 +6,21 @@ import type { JobsRunner } from '../jobs/jobs.runner'
 import { activeJobForInstallation, jobsRunner } from '../jobs/jobs.runtime'
 import { ModManagerService } from './mod-manager.service'
 import { ModrinthService, modrinthSource } from './modrinth.service'
+import { clientBuildService } from '../clients/clients.routes'
+import {
+  serverBindingsStore,
+  serverPackService,
+} from '../servers/servers.runtime'
 
 const modrinth = new ModrinthService()
-const manager = new ModManagerService(controlFileService, modrinth)
+const manager = new ModManagerService(
+  controlFileService,
+  modrinth,
+  undefined,
+  clientBuildService,
+  serverPackService,
+  serverBindingsStore,
+)
 const installationId = t.String({ format: 'uuid' })
 const profile = t.String({
   minLength: 1,
@@ -107,6 +119,15 @@ export const createModsRoutes = ({
         minecraftVersion,
         loader,
         slugs: t.Array(slug, { minItems: 1, maxItems: 64 }),
+        selections: t.Optional(t.Array(t.Object({
+          slug,
+          clientMode: t.Union([
+            t.Literal('required'),
+            t.Literal('optional'),
+            t.Literal('none'),
+          ]),
+          serverBindingIds: t.Array(t.String({ format: 'uuid' }), { maxItems: 32 }),
+        }), { minItems: 1, maxItems: 64 })),
       }),
     },
   )

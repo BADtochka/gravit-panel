@@ -5,6 +5,7 @@ interface VersionRow {
   id: string
   installation_id: string
   profile_name: string
+  binding_id: string | null
   minecraft_version: string
   loader: MinecraftLoader
   loader_version: string | null
@@ -21,6 +22,7 @@ const toVersion = (row: VersionRow): ServerPackVersion => ({
   id: row.id,
   installationId: row.installation_id,
   profileName: row.profile_name,
+  bindingId: row.binding_id,
   minecraftVersion: row.minecraft_version,
   loader: row.loader,
   loaderVersion: row.loader_version,
@@ -34,14 +36,14 @@ const toVersion = (row: VersionRow): ServerPackVersion => ({
 export class ServerPackStore {
   constructor(private readonly db: Database) {}
 
-  list(installationId: string, profileName: string) {
+  list(installationId: string, bindingId: string) {
     return this.db
       .query<VersionRow, [string, string]>(`
         SELECT * FROM server_pack_versions
-        WHERE installation_id = ? AND profile_name = ?
+        WHERE installation_id = ? AND binding_id = ?
         ORDER BY version_number DESC
       `)
-      .all(installationId, profileName)
+      .all(installationId, bindingId)
       .map(toVersion)
   }
 
@@ -54,9 +56,18 @@ export class ServerPackStore {
     return this.getRow(id)?.archive_path ?? null
   }
 
+  manifest(id: string) {
+    const row = this.getRow(id)
+    if (!row) return null
+    return JSON.parse(row.manifest_json) as {
+      files?: Array<{ path: string; size: number; sha256: string }>
+    }
+  }
+
   create(input: {
     installationId: string
     profileName: string
+    bindingId: string
     minecraftVersion: string
     loader: MinecraftLoader
     loaderVersion: string | null
@@ -78,14 +89,15 @@ export class ServerPackStore {
     const createdAt = new Date().toISOString()
     this.db.query(`
       INSERT INTO server_pack_versions (
-        id, installation_id, profile_name, minecraft_version, loader,
+        id, installation_id, profile_name, binding_id, minecraft_version, loader,
         loader_version, version_number, file_count, size, sha256,
         archive_path, manifest_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       input.installationId,
       input.profileName,
+      input.bindingId,
       input.minecraftVersion,
       input.loader,
       input.loaderVersion,

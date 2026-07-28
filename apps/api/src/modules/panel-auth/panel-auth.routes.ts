@@ -99,7 +99,8 @@ export const createPanelAuthGuard = (service: PanelAuthService) => {
     if (
       publicPaths.has(path) ||
       path.startsWith('/api/panel-auth/') ||
-      /^\/api\/server-bootstrap\/(?:[A-Za-z0-9_-]{32,128}|artifacts\/[A-Za-z0-9_-]{32,128}\/(?:bundle|jre-x64|jre-aarch64)|report\/[A-Za-z0-9_-]{32,128})$/.test(path)
+      /^\/api\/server-bootstrap\/[A-Za-z0-9_-]{32,128}(?:\/start|\/report|\/artifacts\/(?:bundle|jre-x64|jre-aarch64))?$/.test(path) ||
+      /^\/api\/server-agent\/(?:update|report|archive\/[0-9a-f-]{36})$/.test(path)
     ) return
     const session = service.session(parseCookie(request.headers.get('cookie'), sessionCookie))
     if (session) return

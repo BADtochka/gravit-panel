@@ -53,18 +53,6 @@
             </SelectContent>
           </Select>
         </div>
-        <div>
-          <label class="text-xs font-medium" for="binding-pack">Server pack version</label>
-          <Select v-model="packSelection">
-            <SelectTrigger id="binding-pack" class="mt-1 w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">No server pack</SelectItem>
-              <SelectItem v-for="version in pack?.versions" :key="version.id" :value="version.id">
-                v{{ version.versionNumber }} · {{ version.fileCount }} files
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="text-xs font-medium" for="binding-xms">Xms</label>
@@ -148,33 +136,122 @@
                 type="button"
                 variant="outline"
                 :disabled="pending"
-                @click="prepare(binding)"
+                @click="requestPrepare(binding)"
               >
                 <Terminal class="size-4" />
                 Prepare install
               </Button>
-              <Button
-                v-if="binding.managed"
-                size="sm"
-                type="button"
-                variant="ghost"
-                :disabled="pending"
-                @click="remove(binding)"
-              >
-                <Trash2 class="size-4" />
-              </Button>
+              <AlertDialog v-if="binding.managed">
+                <AlertDialogTrigger as-child>
+                  <Button size="sm" type="button" variant="ghost" :disabled="pending">
+                    <Trash2 class="size-4" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Remove {{ binding.name }}?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      The server disappears from the launcher profile. Its native JWT cannot be
+                      revoked separately.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction @click="remove(binding)">Remove server</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           </div>
-          <div v-if="binding.id && readyDraft(binding.id)" class="rounded-md bg-muted p-3">
+          <div v-if="binding.id && activeDraft(binding.id)" class="rounded-md bg-muted p-3">
             <div class="flex flex-wrap items-center justify-between gap-2">
-              <p class="text-xs text-muted-foreground">Bundle ready. The command expires in 15 minutes and is shown once.</p>
-              <Button size="sm" type="button" :disabled="pending" @click="issue(readyDraft(binding.id)!)">
-                Generate curl command
-              </Button>
+              <p class="text-xs text-muted-foreground">
+                <template v-if="activeDraft(binding.id)?.status === 'ready'">
+                  Bundle ready for command generation.
+                </template>
+                <template v-else>
+                  Command active. It remains valid until install success, failure, revoke, or a
+                  binding change.
+                </template>
+              </p>
+              <div class="flex gap-2">
+                <Button
+                  v-if="activeDraft(binding.id)?.status === 'ready'"
+                  size="sm"
+                  type="button"
+                  :disabled="pending"
+                  @click="issue(activeDraft(binding.id)!)"
+                >
+                  Generate curl command
+                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger as-child>
+                    <Button size="sm" type="button" variant="outline" :disabled="pending">
+                      Revoke
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Revoke this bootstrap command?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Existing curl commands for this prepared bundle will stop working.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction @click="revoke(activeDraft(binding.id)!)">
+                        Revoke command
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
             </div>
           </div>
+          <div
+            v-if="binding.managed && binding.id && binding.updaterInstalledAt"
+            class="rounded-md border p-3"
+          >
+            <p class="text-xs font-medium">Manual pack update</p>
+            <code class="mt-2 block overflow-x-auto rounded bg-muted p-2 text-xs">
+              sudo systemctl start gravit-{{ binding.id.slice(0, 8) }}-pack-update.service
+            </code>
+            <p class="mt-2 text-xs text-muted-foreground">
+              Applied: {{ binding.appliedPackVersionId ? 'current version reported' : 'not reported' }}
+              · last poll {{ binding.updaterLastSeenAt ?? 'never' }}
+            </p>
+            <p v-if="binding.updaterError" class="mt-2 text-xs text-destructive">
+              Last update failed: {{ binding.updaterError }}
+            </p>
+          </div>
+          <ServerPackCard
+            v-if="binding.managed && binding.id"
+            :binding-id="binding.id"
+            :disabled="pending"
+            :installation-id="installationId"
+            :server-name="binding.name"
+            @job="emit('job', $event)"
+          />
         </div>
       </div>
+
+      <AlertDialog v-model:open="eulaOpen">
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Accept the Minecraft EULA?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This confirmation is stored for this server and is not requested again for future
+              install or pack update commands.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction :disabled="pending" @click="acceptEulaAndPrepare">
+              Accept and prepare
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div v-if="issuedCommand" class="space-y-2 rounded-lg border border-primary/40 p-4">
         <p class="text-sm font-medium">One-time bootstrap command</p>
@@ -189,7 +266,13 @@
 </template>
 
 <script setup lang="ts">
+import ServerPackCard from '@/components/clients/ServerPackCard.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -205,8 +288,6 @@ import type {
   ProfileServerBinding,
   ServerBootstrapDraft,
   ServerBootstrapIssueResult,
-  ServerPackFile,
-  ServerPackVersion,
 } from '@gravit-panel/shared'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
@@ -223,9 +304,11 @@ const emit = defineEmits<{ job: [job: JobRecord] }>()
 const queryClient = useQueryClient()
 const editing = ref<'new' | string | null>(null)
 const issuedCommand = ref('')
+const eulaOpen = ref(false)
+const pendingPrepareBinding = ref<ProfileServerBinding | null>(null)
 const jvmArgs = ref('')
 const gameArgs = ref('nogui')
-const packSelection = ref('none')
+const currentPackVersionId = ref<string | null>(null)
 const form = reactive({
   name: '',
   serverAddress: '',
@@ -250,6 +333,7 @@ const { data: bindings, error: bindingError } = useQuery({
   queryFn: () => getJson<{ items: ProfileServerBinding[] }>(
     `/api/servers/profiles/${encodeURIComponent(props.profile.name)}/bindings?installationId=${encodeURIComponent(props.installationId)}`,
   ),
+  refetchInterval: 5000,
 })
 const { data: auth } = useQuery({
   queryKey: computed(() => ['auth-configuration', props.installationId]),
@@ -260,12 +344,6 @@ const { data: auth } = useQuery({
 watch(auth, (value) => {
   if (!form.authId) form.authId = value?.providers.find((item) => item.isDefault)?.id ?? value?.providers[0]?.id ?? ''
 }, { immediate: true })
-const { data: pack } = useQuery({
-  queryKey: computed(() => ['server-pack', props.installationId, props.profile.name]),
-  queryFn: () => getJson<{ items: ServerPackFile[]; versions: ServerPackVersion[] }>(
-    `/api/servers/profiles/${encodeURIComponent(props.profile.name)}/pack?installationId=${encodeURIComponent(props.installationId)}`,
-  ),
-})
 const managedIds = computed(
   () => bindings.value?.items.flatMap((item) => item.id ? [item.id] : []) ?? [],
 )
@@ -278,10 +356,14 @@ const draftQueries = useQueries({
     refetchInterval: 5000,
   }))),
 })
-const readyDraft = (bindingId: string) =>
+const activeDraft = (bindingId: string) =>
   draftQueries.value
     .find((query) => query.data?.items.some((item) => item.bindingId === bindingId))
-    ?.data?.items.find((item) => item.bindingId === bindingId && item.status === 'ready') ?? null
+    ?.data?.items.find(
+      (item) =>
+        item.bindingId === bindingId &&
+        ['ready', 'issued', 'claimed'].includes(item.status),
+    ) ?? null
 
 const jobMutation = useMutation({
   mutationFn: (request: { path: string; body: Record<string, unknown>; nestedJob?: boolean }) =>
@@ -309,6 +391,39 @@ const issueMutation = useMutation({
     void queryClient.invalidateQueries({ queryKey: ['server-bootstrap'] })
   },
 })
+const revokeMutation = useMutation({
+  mutationFn: (draft: ServerBootstrapDraft) => getJson(
+    `/api/servers/bootstrap/${draft.id}/revoke`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        installationId: props.installationId,
+        confirmRevoke: true,
+      }),
+    },
+  ),
+  onSuccess: () => {
+    issuedCommand.value = ''
+    void queryClient.invalidateQueries({ queryKey: ['server-bootstrap'] })
+  },
+})
+const eulaMutation = useMutation({
+  mutationFn: (binding: ProfileServerBinding) => getJson(
+    `/api/servers/bindings/${binding.id}/eula`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ installationId: props.installationId, accepted: true }),
+    },
+  ),
+  onSuccess: async (_, binding) => {
+    eulaOpen.value = false
+    pendingPrepareBinding.value = null
+    await queryClient.invalidateQueries({ queryKey: bindingKey.value })
+    prepare({ ...binding, eulaAcceptedAt: new Date().toISOString() })
+  },
+})
 const startCreate = () => {
   editing.value = 'new'
   Object.assign(form, {
@@ -320,7 +435,7 @@ const startCreate = () => {
     xms: '1G',
     xmx: '4G',
   })
-  packSelection.value = pack.value?.versions[0]?.id ?? 'none'
+  currentPackVersionId.value = null
   jvmArgs.value = ''
   gameArgs.value = 'nogui'
 }
@@ -335,7 +450,7 @@ const edit = (binding: ProfileServerBinding) => {
     xms: binding.xms ?? '1G',
     xmx: binding.xmx ?? '4G',
   })
-  packSelection.value = binding.packVersionId ?? 'none'
+  currentPackVersionId.value = binding.packVersionId
   jvmArgs.value = binding.jvmArgs.join(' ')
   gameArgs.value = binding.gameArgs.join(' ')
 }
@@ -354,7 +469,7 @@ const splitArgs = (value: string) => value.trim() ? value.trim().split(/\s+/) : 
 const body = () => ({
   installationId: props.installationId,
   ...form,
-  packVersionId: packSelection.value === 'none' ? null : packSelection.value,
+  packVersionId: currentPackVersionId.value,
   jvmArgs: splitArgs(jvmArgs.value),
   gameArgs: splitArgs(gameArgs.value),
 })
@@ -365,21 +480,35 @@ const save = () => jobMutation.mutate({
   body: body(),
 })
 const remove = (binding: ProfileServerBinding) => {
-  if (!binding.id || !window.confirm(`Remove ${binding.name}? The native JWT will not be revoked.`)) return
+  if (!binding.id) return
   jobMutation.mutate({
     path: `/api/servers/bindings/${binding.id}/remove`,
     body: { installationId: props.installationId, confirmRemove: true },
   })
 }
 const prepare = (binding: ProfileServerBinding) => {
-  if (!binding.id || !window.confirm('I accept the Minecraft EULA and want to prepare this installation.')) return
+  if (!binding.id) return
   jobMutation.mutate({
     path: `/api/servers/bindings/${binding.id}/bootstrap/prepare`,
-    body: { installationId: props.installationId, confirmEula: true },
+    body: { installationId: props.installationId },
     nestedJob: true,
   })
 }
+const requestPrepare = (binding: ProfileServerBinding) => {
+  if (binding.eulaAcceptedAt) {
+    prepare(binding)
+    return
+  }
+  pendingPrepareBinding.value = binding
+  eulaOpen.value = true
+}
+const acceptEulaAndPrepare = async () => {
+  const binding = pendingPrepareBinding.value
+  if (!binding?.id) return
+  eulaMutation.mutate(binding)
+}
 const issue = (draft: ServerBootstrapDraft) => issueMutation.mutate(draft)
+const revoke = (draft: ServerBootstrapDraft) => revokeMutation.mutate(draft)
 const copyCommand = () => navigator.clipboard.writeText(issuedCommand.value)
 const canSave = computed(
   () => Boolean(
@@ -389,9 +518,20 @@ const canSave = computed(
   ),
 )
 const pending = computed(
-  () => props.disabled || jobMutation.isPending.value || issueMutation.isPending.value,
+  () =>
+    props.disabled ||
+    jobMutation.isPending.value ||
+    issueMutation.isPending.value ||
+    revokeMutation.isPending.value ||
+    eulaMutation.isPending.value,
 )
 const error = computed(
-  () => (bindingError.value || jobMutation.error.value || issueMutation.error.value) as Error | null,
+  () => (
+    bindingError.value ||
+    jobMutation.error.value ||
+    issueMutation.error.value ||
+    revokeMutation.error.value ||
+    eulaMutation.error.value
+  ) as Error | null,
 )
 </script>

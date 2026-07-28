@@ -12,6 +12,9 @@ import {
 } from '../docker/container-volume.service'
 import type { ClientControlCommand, ControlFileService } from '../gravit/control-file.service'
 import type { JobTaskContext } from '../jobs/jobs.runner'
+import type { ClientBuildService } from '../clients/client-build.service'
+import type { ServerPackService } from '../servers/server-pack.service'
+import type { ServerBindingsStore } from '../servers/server-bindings.store'
 import { ModrinthService, modrinthSource } from './modrinth.service'
 
 const profilePattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/
@@ -26,6 +29,12 @@ export class ModManagerService {
     private readonly control: ControlFileService,
     private readonly modrinth: ModrinthService,
     private readonly volume: VolumeFileOperations = new ContainerVolumeService(),
+    private readonly clients?: Pick<
+      ClientBuildService,
+      'upsertOptionalMods' | 'reloadProfileUpdates'
+    >,
+    private readonly serverPacks?: Pick<ServerPackService, 'installMod' | 'publish'>,
+    private readonly serverBindings?: Pick<ServerBindingsStore, 'get' | 'setDesiredPack'>,
   ) {}
 
   async list(installation: GravitInstallation, profile: string) {
@@ -77,6 +86,123 @@ export class ModManagerService {
     context: JobTaskContext,
   ) {
     this.validateProfile(input.profile)
+    if (input.selections?.length) {
+      const requestedSlugs = new Set(input.slugs)
+      const selectedSlugs = new Set(input.selections.map((item) => item.slug))
+      if (
+        requestedSlugs.size !== input.slugs.length ||
+        selectedSlugs.size !== input.selections.length ||
+        requestedSlugs.size !== selectedSlugs.size ||
+        [...requestedSlugs].some((slug) => !selectedSlugs.has(slug))
+      ) {
+        throw new Error('Selected mods and destination assignments do not match')
+      }
+      if (!this.clients || !this.serverPacks || !this.serverBindings) {
+        throw new Error('Unified mod destinations are unavailable')
+      }
+      const clientSelections = input.selections.filter(
+        (item) => item.clientMode !== 'none',
+      )
+      if (
+        input.selections.some(
+          (item) => item.clientMode === 'none' && item.serverBindingIds.length === 0,
+        )
+      ) {
+        throw new Error('Every selected mod must have at least one install destination')
+      }
+      let requiredClientChanged = false
+      const optionalClientMods = new Map<string, {
+        projectId: string
+        title: string
+        filename: string
+        sourcePath: string
+      }>()
+      for (const selection of clientSelections) {
+        const resolved = await this.modrinth.resolveInstall(
+          selection.slug,
+          input.minecraftVersion,
+          input.loader,
+          'client',
+        )
+        for (const item of resolved) {
+          const bytes = await this.modrinth.download(item.file)
+          if (selection.clientMode === 'required') {
+            await this.volume.writeFileAtomic(
+              installation,
+              posix.join(
+                this.modsRelativeDirectory(input.profile),
+                item.file.filename,
+              ),
+              bytes,
+              '0644',
+            )
+            requiredClientChanged = true
+          } else {
+            const sourcePath = posix.join(
+              '.gravit-panel-optional',
+              'mods',
+              item.projectId,
+              item.file.filename,
+            )
+            await this.volume.writeFileAtomic(
+              installation,
+              posix.join('updates', input.profile, sourcePath),
+              bytes,
+              '0644',
+            )
+            optionalClientMods.set(item.projectId, {
+              projectId: item.projectId,
+              title: item.title,
+              filename: item.file.filename,
+              sourcePath,
+            })
+          }
+        }
+      }
+      if (optionalClientMods.size) {
+        await this.clients.upsertOptionalMods(
+          installation,
+          input.profile,
+          [...optionalClientMods.values()],
+          context,
+        )
+      }
+      if (requiredClientChanged) {
+        await this.clients.reloadProfileUpdates(installation, context, 85)
+      }
+      const serverSelections = new Map<string, Set<string>>()
+      for (const selection of input.selections) {
+        for (const bindingId of new Set(selection.serverBindingIds)) {
+          const binding = this.serverBindings.get(bindingId)
+          if (
+            !binding ||
+            binding.installationId !== installation.id ||
+            binding.profileName !== input.profile
+          ) throw new Error('Selected server does not belong to the target profile')
+          const slugs = serverSelections.get(bindingId) ?? new Set<string>()
+          slugs.add(selection.slug)
+          serverSelections.set(bindingId, slugs)
+        }
+      }
+      for (const [bindingId, slugs] of serverSelections) {
+        for (const slug of slugs) {
+          await this.serverPacks.installMod(installation, bindingId, slug)
+        }
+        const published = await this.serverPacks.publish(
+          installation,
+          bindingId,
+          context,
+        )
+        this.serverBindings.setDesiredPack(bindingId, published.version.id)
+      }
+      context.progress(95, 'Selected client and server mod destinations updated')
+      return {
+        installationId: installation.id,
+        profile: input.profile,
+        selections: input.selections,
+        source: modrinthSource,
+      }
+    }
     context.progress(10, 'Verifying selected mods against Modrinth')
     const expectedProjects = await this.modrinth.assertInstallable(
       input.slugs,

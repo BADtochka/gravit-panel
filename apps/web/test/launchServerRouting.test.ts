@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { resolveLaunchServerRedirect } from '../src/lib/launchserver-routing'
 
 describe('LaunchServer-aware routing', () => {
-  test.each(['/clients', '/launcher', '/mods', '/modules', '/auth', '/jobs'])(
+  test.each(['/clients', '/servers', '/launcher', '/mods', '/modules', '/auth', '/jobs'])(
     'preserves %s after LaunchServer loads during a page reload',
     (path) => {
       expect(resolveLaunchServerRedirect(path, true)).toBeNull()
