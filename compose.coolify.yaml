@@ -52,11 +52,19 @@ services:
       SERVICE_URL_PANELWEB_80: ${PANEL_PUBLIC_PATH:-/}
       PANEL_PUBLIC_PATH: ${PANEL_PUBLIC_PATH:-}
     labels:
-      # Normalise /panel to /panel/ before StripPrefix so relative Vite assets
-      # are resolved below the public route. An empty path never matches.
+      # Coolify inserts its generated StripPrefix before middleware declared
+      # through coolify.traefik.middlewares. A dedicated exact-path router
+      # therefore normalises /panel before that generated chain runs.
       - "traefik.http.middlewares.gravit-panel-trailing.redirectregex.regex=^https?://([^/]+)${PANEL_PUBLIC_PATH:-/__gravit-panel-disabled__}$$"
       - "traefik.http.middlewares.gravit-panel-trailing.redirectregex.replacement=https://$${1}${PANEL_PUBLIC_PATH:-/__gravit-panel-disabled__}/"
       - "traefik.http.middlewares.gravit-panel-trailing.redirectregex.permanent=true"
+      - "traefik.http.routers.gravit-panel-bare.rule=Host(`${SERVICE_FQDN_PANELWEB}`) && Path(`${PANEL_PUBLIC_PATH:-/__gravit-panel-disabled__}`)"
+      - "traefik.http.routers.gravit-panel-bare.entrypoints=https"
+      - "traefik.http.routers.gravit-panel-bare.tls=true"
+      - "traefik.http.routers.gravit-panel-bare.priority=1000"
+      - "traefik.http.routers.gravit-panel-bare.middlewares=gravit-panel-trailing"
+      - "traefik.http.routers.gravit-panel-bare.service=gravit-panel-bare"
+      - "traefik.http.services.gravit-panel-bare.loadbalancer.server.port=80"
       # Set PANEL_PUBLIC_PATH=/panel to expose the panel below /panel and
       # remove that prefix before forwarding the request to nginx.
       - "traefik.http.middlewares.gravit-panel-strip.stripprefix.prefixes=${PANEL_PUBLIC_PATH:-/__gravit-panel-disabled__}"
