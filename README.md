@@ -116,13 +116,15 @@ Coolify:
 | `CORS_ORIGINS` | Optional; normally empty for the same-origin web/API setup |
 
 Assign the panel domain to the `web` service on port `80`, and the game domain
-to `launchserver-web` on port `80`. The Coolify Compose configuration also
-creates a wildcard FQDN for `launchserver-web` and passes it to LaunchServer as
-its `ADDRESS`; it generates and persists the panel's base64 encryption key.
-Both values use Coolify magic environment variables, so do not define
-`LAUNCHSERVER_ADDRESS` or `CREDENTIAL_ENCRYPTION_KEY` in Coolify. Coolify pulls
-the published panel images, runs the declared health checks, and terminates TLS
-at its proxy. The `api` and `launchserver` services are not published directly.
+to `launchserver-web` on port `80`. The Coolify Compose configuration creates a
+wildcard FQDN for `launchserver-web` as the fallback `ADDRESS`. If the game is
+published through your own domain (for example `mine.example.com`), set
+`LAUNCHSERVER_ADDRESS=mine.example.com` in Coolify — without a scheme or path.
+The panel synchronizes persisted launcher URLs to that value on every
+LaunchServer start. `CREDENTIAL_ENCRYPTION_KEY` still uses a Coolify magic
+environment variable and must not be defined manually. Coolify pulls the
+published panel images, runs the declared health checks, and terminates TLS at
+its proxy. The `api` and `launchserver` services are not published directly.
 The LaunchServer nginx configuration is included in the published
 `gravit-panel-launchserver-web` image, so an image-only deployment does not
 need a checked-out `deploy/` directory.

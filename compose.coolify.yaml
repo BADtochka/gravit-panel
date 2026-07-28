@@ -72,13 +72,14 @@ services:
       start_period: 10s
 
   launchserver:
-    image: ghcr.io/gravitlauncher/launcher:v5.7.9
+    image: ${PANEL_LAUNCHSERVER_IMAGE:-ghcr.io/badtochka/gravit-panel-launchserver:latest}
     restart: unless-stopped
     stdin_open: true
     tty: true
     environment:
-      # The generated FQDN is attached to launchserver-web below.
-      ADDRESS: ${SERVICE_FQDN_LAUNCHSERVERWEB}
+      # Use a custom game domain when it is routed to launchserver-web; otherwise
+      # fall back to the Coolify-generated FQDN for that service.
+      ADDRESS: ${LAUNCHSERVER_ADDRESS:-${SERVICE_FQDN_LAUNCHSERVERWEB}}
       PROJECTNAME: ${LAUNCHSERVER_PROJECT_NAME:-main}
       JAVA_OPTS: ${LAUNCHSERVER_JAVA_OPTS:-}
     volumes:

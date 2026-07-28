@@ -55,7 +55,7 @@ services:
       start_period: 10s
 
   launchserver:
-    image: ghcr.io/gravitlauncher/launcher:v5.7.9
+    image: ${PANEL_LAUNCHSERVER_IMAGE:-ghcr.io/badtochka/gravit-panel-launchserver:latest}
     restart: unless-stopped
     stdin_open: true
     tty: true
