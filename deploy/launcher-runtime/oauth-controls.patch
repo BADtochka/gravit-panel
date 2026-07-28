@@ -1,0 +1,58 @@
+diff --git a/src/main/java/pro/gravit/launcher/gui/scenes/login/LoginScene.java b/src/main/java/pro/gravit/launcher/gui/scenes/login/LoginScene.java
+index 8152e91..cf7a91b 100644
+--- a/src/main/java/pro/gravit/launcher/gui/scenes/login/LoginScene.java
++++ b/src/main/java/pro/gravit/launcher/gui/scenes/login/LoginScene.java
+@@ -11,6 +11,7 @@ import javafx.util.StringConverter;
+ import pro.gravit.launcher.base.events.request.GetAvailabilityAuthRequestEvent;
+ import pro.gravit.launcher.core.api.method.AuthMethod;
+ import pro.gravit.launcher.core.api.model.Texture;
++import pro.gravit.launcher.core.api.method.details.AuthWebDetails;
+ import pro.gravit.launcher.core.backend.LauncherBackendAPIHolder;
+ import pro.gravit.launcher.core.backend.UserSettings;
+ import pro.gravit.launcher.gui.core.JavaFXApplication;
+@@ -180,8 +181,23 @@ public class LoginScene extends FxScene {
+         this.authList.selectionModelProperty().get().select(authAvailability);
+         authFlow.init(authAvailability);
++        updateCredentialControls();
+         logger.trace("Selected auth: {}", authAvailability.getName());
+     }
+ 
++    private boolean isWebAuthMethod() {
++        return authAvailability != null
++                && authAvailability.getDetails().stream().anyMatch(AuthWebDetails.class::isInstance);
++    }
++
++    private void updateCredentialControls() {
++        boolean webAuth = isWebAuthMethod();
++        savePasswordCheckBox.setVisible(!webAuth);
++        savePasswordCheckBox.setManaged(!webAuth);
++        if (webAuth) {
++            savePasswordCheckBox.setSelected(true);
++        }
++    }
++
+     public void addAuthAvailability(AuthMethod authAvailability) {
+         authList.getItems().add(authAvailability);
+         logger.trace("Added {}: {}", authAvailability.getName(), authAvailability.getDisplayName());
+@@ -214,7 +230,7 @@ public class LoginScene extends FxScene {
+     public void onSuccessLogin(AuthFlow.SuccessAuth successAuth) {
+         var user = successAuth.user();
+         application.authService.setUser(user);
+-        boolean savePassword = savePasswordCheckBox.isSelected();
++        boolean savePassword = isWebAuthMethod() || savePasswordCheckBox.isSelected();
+ 
+         if (savePassword) {
+             application.runtimeSettings.login = successAuth.recentLogin();
+diff --git a/build.gradle.kts b/build.gradle.kts
+--- a/build.gradle.kts
++++ b/build.gradle.kts
+@@ -9,7 +9,9 @@ java {
+ }
+ 
+ tasks.jar {
+     archiveFileName.set(project.name+".jar")
++    isPreserveFileTimestamps = false
++    isReproducibleFileOrder = true
+     manifest {
+         attributes(
+             "Module-Main-Class" to "pro.gravit.launcher.gui.JavaRuntimeModule",

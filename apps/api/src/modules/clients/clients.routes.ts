@@ -13,6 +13,7 @@ import type { InstallationsStore } from '../gravit/installations.store'
 import type { JobsRunner } from '../jobs/jobs.runner'
 import { activeJobForInstallation, jobsRunner } from '../jobs/jobs.runtime'
 import { ClientBuildService } from './client-build.service'
+import { LauncherRuntimeService } from './launcher-runtime.service'
 import {
   launcherBuildSource,
   launcherRuntimeRelease,
@@ -23,12 +24,19 @@ import {
 import { MinecraftVersionsService } from './minecraft-versions.service'
 
 const launcherLifecycle = new LauncherDockeredService(env.INSTALLATIONS_ROOT)
+const launcherRuntimeService = new LauncherRuntimeService(
+  controlFileService,
+  undefined,
+  undefined,
+  undefined,
+  launcherLifecycle,
+)
 export const clientBuildService = new ClientBuildService(
   controlFileService,
   undefined,
   undefined,
   undefined,
-  undefined,
+  launcherRuntimeService,
   undefined,
   launcherLifecycle,
 )

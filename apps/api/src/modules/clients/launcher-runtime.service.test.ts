@@ -6,6 +6,7 @@ import {
   LauncherRuntimeService,
   type RuntimeVolumeOperations,
 } from './launcher-runtime.service'
+import { sha256Bytes } from './verified-artifact'
 
 const installation: GravitInstallation = {
   id: crypto.randomUUID(),
@@ -25,11 +26,20 @@ const context = (): JobTaskContext => ({
   progress: () => {},
 })
 
+const patchedModuleBytes = new Uint8Array([7, 8, 9])
+const patchedModuleSha256 = sha256Bytes(patchedModuleBytes)
+const patchedModule = async () => ({
+  bytes: patchedModuleBytes,
+  sha256: patchedModuleSha256,
+})
+
 const volumeHarness = () => {
   const paths = new Map<string, 'file' | 'directory'>()
   const files = new Map<string, string>()
+  const digests = new Map<string, string>()
   const volume: RuntimeVolumeOperations = {
     exists: async (_installation, path, kind = 'file') => paths.get(path) === kind,
+    sha256: async (_installation, path) => digests.get(path) ?? null,
     readFile: async (_installation, path) => {
       const value = files.get(path)
       if (value === undefined) throw new Error(`Missing fixture file: ${path}`)
@@ -38,6 +48,7 @@ const volumeHarness = () => {
     writeFileAtomic: async (_installation, path, bytes) => {
       paths.set(path, 'file')
       files.set(path, new TextDecoder().decode(bytes))
+      digests.set(path, sha256Bytes(bytes))
     },
     extractZipToNewDirectory: async (_installation, _archive, target) => {
       paths.set(target, 'directory')
@@ -65,21 +76,29 @@ const volumeHarness = () => {
       const fileEntries = [...files.entries()].filter(
         ([path]) => path === source || path.startsWith(`${source}/`),
       )
+      const digestEntries = [...digests.entries()].filter(
+        ([path]) => path === source || path.startsWith(`${source}/`),
+      )
       entries.forEach(([path]) => paths.delete(path))
       fileEntries.forEach(([path]) => files.delete(path))
+      digestEntries.forEach(([path]) => digests.delete(path))
       entries.forEach(([path, kind]) => {
         paths.set(`${target}${path.slice(source.length)}`, kind)
       })
       fileEntries.forEach(([path, contents]) => {
         files.set(`${target}${path.slice(source.length)}`, contents)
       })
+      digestEntries.forEach(([path, digest]) => {
+        digests.set(`${target}${path.slice(source.length)}`, digest)
+      })
     },
     remove: async (_installation, path) => {
       paths.delete(path)
       files.delete(path)
+      digests.delete(path)
     },
   }
-  return { files, paths, volume }
+  return { digests, files, paths, volume }
 }
 
 describe('LauncherRuntimeService', () => {
@@ -105,11 +124,12 @@ describe('LauncherRuntimeService', () => {
         downloads.push(url)
         return new Uint8Array([1, 2, 3])
       },
+      patchedModule,
     )
 
     const result = await service.ensureInstalled(installation, context())
 
-    expect(downloads).toHaveLength(2)
+    expect(downloads).toHaveLength(1)
     expect(paths.get('JavaRuntime.jar')).toBe('file')
     expect(paths.get('runtime')).toBe('directory')
     expect(paths.has('.gravit-panel-runtime.zip')).toBe(false)
@@ -136,8 +156,9 @@ describe('LauncherRuntimeService', () => {
   })
 
   test('keeps an installed and loaded runtime without downloading or loading twice', async () => {
-    const { files, paths, volume } = volumeHarness()
+    const { digests, files, paths, volume } = volumeHarness()
     paths.set('JavaRuntime.jar', 'file')
+    digests.set('JavaRuntime.jar', patchedModuleSha256)
     paths.set('runtime', 'directory')
     paths.set('runtime/runtime_en.properties', 'file')
     paths.set('runtime/scenes/login/login.fxml', 'file')
@@ -167,6 +188,7 @@ describe('LauncherRuntimeService', () => {
         downloads += 1
         return new Uint8Array()
       },
+      patchedModule,
     )
 
     const result = await service.ensureInstalled(installation, context())
@@ -186,8 +208,9 @@ describe('LauncherRuntimeService', () => {
   })
 
   test('replaces an incomplete runtime directory while retaining its snapshot', async () => {
-    const { paths, volume } = volumeHarness()
+    const { digests, paths, volume } = volumeHarness()
     paths.set('JavaRuntime.jar', 'file')
+    digests.set('JavaRuntime.jar', patchedModuleSha256)
     paths.set('runtime', 'directory')
     const service = new LauncherRuntimeService(
       {
@@ -197,6 +220,7 @@ describe('LauncherRuntimeService', () => {
       },
       volume,
       async () => new Uint8Array([1, 2, 3]),
+      patchedModule,
     )
 
     const result = await service.ensureInstalled(installation, context())
@@ -206,5 +230,63 @@ describe('LauncherRuntimeService', () => {
     expect(
       [...paths.keys()].some((path) => path.startsWith('runtime.backup-')),
     ).toBe(true)
+  })
+
+  test('replaces a loaded upstream runtime and restarts LaunchServer once', async () => {
+    const { digests, files, paths, volume } = volumeHarness()
+    paths.set('JavaRuntime.jar', 'file')
+    files.set('JavaRuntime.jar', 'upstream')
+    digests.set('JavaRuntime.jar', 'f'.repeat(64))
+    paths.set('runtime', 'directory')
+    paths.set('runtime/runtime_en.properties', 'file')
+    paths.set('runtime/scenes/login/login.fxml', 'file')
+    paths.set('runtime/overlay/webauth/webauth.fxml', 'file')
+    files.set(
+      'runtime/runtime_en.properties',
+      [
+        'runtime.scenes.login.savePassword=SAVE PASSWORD',
+        'runtime.overlay.webauth.webauth.description=Copy the code below',
+        '',
+      ].join('\n'),
+    )
+    files.set('runtime/scenes/login/login.fxml', '<AnchorPane />')
+    files.set(
+      'runtime/overlay/webauth/webauth.fxml',
+      '<Label id="link" styleClass="tooltip" />',
+    )
+    const commands: ModuleControlCommand[] = []
+    let restarts = 0
+    const service = new LauncherRuntimeService(
+      {
+        executeModuleCommand: async (_installation, command) => {
+          commands.push(command)
+          return ['[LAUNCHER MODULE] JavaRuntime.jar sig: NOT_SIGNED']
+        },
+      },
+      volume,
+      async () => {
+        throw new Error('resources must not be downloaded')
+      },
+      patchedModule,
+      {
+        restartLaunchServer: async () => {
+          restarts += 1
+        },
+      },
+    )
+
+    const result = await service.ensureInstalled(installation, context())
+
+    expect(restarts).toBe(1)
+    expect(commands).toEqual(['modules list', 'modules list'])
+    expect(digests.get('JavaRuntime.jar')).toBe(patchedModuleSha256)
+    expect(
+      [...paths.keys()].some((path) =>
+        path.startsWith('JavaRuntime.jar.backup-'),
+      ),
+    ).toBe(true)
+    expect(result.alreadyInstalled).toBe(false)
+    expect(result.alreadyLoaded).toBe(true)
+    expect(result.moduleSha256).toBe(patchedModuleSha256)
   })
 })

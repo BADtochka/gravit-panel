@@ -292,9 +292,12 @@ repair profiles created before this rule by restarting once when the verified
 Launcher builds install the GUI module and resources from
 `GravitLauncher/LauncherRuntime@v5.0.7`
 (`755e5509b1f573817a977b4180a2f84517619025`), the release declared compatible
-with GravitLauncher `5.7.9`. `JavaRuntime.jar` must match SHA-256
-`ba760774908c519d2de1ec9322336709cda54395f0f9ae9d4f606309d628b710`,
-and `runtime.zip` must match SHA-256
+with GravitLauncher `5.7.9`. The API image builds `JavaRuntime.jar` from that
+exact revision with the tracked `deploy/launcher-runtime/oauth-controls.patch`,
+records its SHA-256 beside the artifact, and verifies the bundled bytes again
+before installation. Existing upstream or older patched JARs are snapshotted
+and replaced; a loaded module is activated through a managed LaunchServer
+restart. `runtime.zip` must match SHA-256
 `905b3345fb642c39ae368b4ef82c2c1740bf54e28d0ea436322b15071a891c27`.
 Archive paths are validated before extraction, and
 `modules launcher-load JavaRuntime.jar` is verified before `build`.
@@ -326,6 +329,9 @@ LauncherRuntime external-browser OAuth resources receive a managed compatibility
 patch during every launcher build. It replaces the device-code-specific prompt
 with browser authorization instructions, removes the empty styled code label,
 and renames the misleading password-persistence label to `Remember login`.
+The source-pinned Java patch hides that second checkbox for web/OAuth methods
+and persists their session automatically, leaving `Auto login` as the only
+OAuth checkbox and as the sole control for restore-on-startup behavior.
 The built-in Discord provider keeps the completed callback result pending until
 LauncherRuntime sends its normal confirmation request, avoiding a premature
 WebSocket auth state and the subsequent `You are already logged in` failure.

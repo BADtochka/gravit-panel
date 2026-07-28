@@ -2,6 +2,7 @@ import type {
   GravitInstallation,
   LauncherRuntimeInstallResult,
 } from '@gravit-panel/shared'
+import { readFile } from 'node:fs/promises'
 import {
   ContainerVolumeService,
   type VolumeFileOperations,
@@ -14,6 +15,7 @@ import type { JobTaskContext } from '../jobs/jobs.runner'
 import { launcherRuntimeRelease } from './client-sources'
 import {
   fetchVerifiedArtifact,
+  sha256Bytes,
   type VerifiedArtifactFetcher,
 } from './verified-artifact'
 
@@ -24,9 +26,16 @@ interface RuntimeControlTransport {
   ): Promise<string[]>
 }
 
+interface RuntimeLifecycle {
+  restartLaunchServer(
+    installation: GravitInstallation,
+    context: JobTaskContext,
+  ): Promise<void>
+}
+
 interface RuntimeVolumeOperations extends Pick<
   VolumeFileOperations,
-  'exists' | 'writeFileAtomic' | 'move' | 'remove'
+  'exists' | 'writeFileAtomic' | 'move' | 'remove' | 'sha256'
 > {
   readFile(
     installation: GravitInstallation,
@@ -39,7 +48,17 @@ interface RuntimeVolumeOperations extends Pick<
   ): Promise<void>
 }
 
+interface RuntimeModuleArtifact {
+  bytes: Uint8Array
+  sha256: string
+}
+
+export type RuntimeModuleArtifactProvider = () => Promise<RuntimeModuleArtifact>
+
 const runtimeModuleLine = '[launcher module] javaruntime.jar'
+const bundledRuntimeModulePath =
+  process.env.PANEL_LAUNCHER_RUNTIME_JAR?.trim() ||
+  '/opt/gravit-panel/launcher-runtime/JavaRuntime.jar'
 const runtimeSentinels = [
   'runtime/runtime_en.properties',
   'runtime/scenes/login/login.fxml',
@@ -71,6 +90,33 @@ const isRuntimeLoaded = (lines: string[]) =>
   lines.some((line) => line.toLowerCase().startsWith(runtimeModuleLine))
 const safeTimestamp = () => new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
 
+const loadBundledRuntimeModule: RuntimeModuleArtifactProvider = async () => {
+  let bytes: Uint8Array
+  let checksum: string
+  try {
+    ;[bytes, checksum] = await Promise.all([
+      readFile(bundledRuntimeModulePath),
+      readFile(`${bundledRuntimeModulePath}.sha256`, 'utf8'),
+    ])
+  } catch (error) {
+    throw new Error(
+      `Patched LauncherRuntime artifact is unavailable at ${bundledRuntimeModulePath}; build the API image or set PANEL_LAUNCHER_RUNTIME_JAR`,
+      { cause: error },
+    )
+  }
+  const expectedSha256 = checksum.trim().split(/\s+/, 1)[0]
+  if (!expectedSha256 || !/^[a-f0-9]{64}$/.test(expectedSha256)) {
+    throw new Error('Patched LauncherRuntime checksum file is invalid')
+  }
+  const actualSha256 = sha256Bytes(bytes)
+  if (actualSha256 !== expectedSha256) {
+    throw new Error(
+      `Patched LauncherRuntime checksum mismatch: expected ${expectedSha256}, got ${actualSha256}`,
+    )
+  }
+  return { bytes, sha256: actualSha256 }
+}
+
 const replaceProperty = (source: string, key: string, value: string) => {
   const lines = source.split(/\r?\n/)
   const index = lines.findIndex((line) => line.startsWith(`${key}=`))
@@ -86,6 +132,9 @@ export class LauncherRuntimeService {
     private readonly control: RuntimeControlTransport,
     private readonly volume: RuntimeVolumeOperations = new ContainerVolumeService(),
     private readonly artifactFetcher: VerifiedArtifactFetcher = fetchVerifiedArtifact,
+    private readonly moduleArtifactProvider: RuntimeModuleArtifactProvider =
+      loadBundledRuntimeModule,
+    private readonly lifecycle: RuntimeLifecycle | null = null,
   ) {}
 
   async ensureInstalled(
@@ -93,40 +142,66 @@ export class LauncherRuntimeService {
     context: JobTaskContext,
   ): Promise<LauncherRuntimeInstallResult> {
     context.progress(5, `Checking LauncherRuntime ${launcherRuntimeRelease.tag}`)
-    const [moduleExists, resourcesDirectoryExists, ...runtimeFiles] = await Promise.all([
-      this.volume.exists(installation, launcherRuntimeRelease.module.filename),
-      this.volume.exists(
-        installation,
-        launcherRuntimeRelease.resources.directory,
-        'directory',
-      ),
-      ...runtimeSentinels.map((path) => this.volume.exists(installation, path)),
-    ])
+    const moduleArtifact = await this.moduleArtifactProvider()
+    const [moduleExists, resourcesDirectoryExists, ...runtimeFiles] =
+      await Promise.all([
+        this.volume.exists(installation, launcherRuntimeRelease.module.filename),
+        this.volume.exists(
+          installation,
+          launcherRuntimeRelease.resources.directory,
+          'directory',
+        ),
+        ...runtimeSentinels.map((path) => this.volume.exists(installation, path)),
+      ])
+    const moduleDigest = moduleExists
+      ? await this.volume.sha256?.(
+          installation,
+          launcherRuntimeRelease.module.filename,
+        )
+      : null
+    const moduleCurrent = moduleDigest === moduleArtifact.sha256
     const resourcesExist =
       resourcesDirectoryExists && runtimeFiles.every((present) => present)
-    const alreadyInstalled = moduleExists && resourcesExist
+    const alreadyInstalled = moduleCurrent && resourcesExist
+    const beforeLoad = await this.control.executeModuleCommand(
+      installation,
+      'modules list',
+    )
+    beforeLoad.forEach(context.log)
+    const alreadyLoaded = isRuntimeLoaded(beforeLoad)
+    if (!moduleCurrent && alreadyLoaded && !this.lifecycle) {
+      throw new Error(
+        'LaunchServer restart is unavailable; the patched LauncherRuntime cannot replace the loaded module',
+      )
+    }
     let moduleCreated = false
+    let moduleBackupPath: string | null = null
     let resourcesCreated = false
     let resourcesBackupPath: string | null = null
     const archivePath = `.gravit-panel-${launcherRuntimeRelease.resources.filename}`
 
     try {
-      if (!moduleExists) {
-        context.progress(10, `Downloading ${launcherRuntimeRelease.module.filename}`)
-        const moduleBytes = await this.artifactFetcher(
-          launcherRuntimeRelease.module.url,
-          launcherRuntimeRelease.module.sha256,
-          2 * 1024 * 1024,
-        )
+      if (!moduleCurrent) {
+        context.progress(10, `Installing patched ${launcherRuntimeRelease.module.filename}`)
+        if (moduleExists) {
+          moduleBackupPath =
+            `${launcherRuntimeRelease.module.filename}.backup-${safeTimestamp()}`
+          await this.volume.move(
+            installation,
+            launcherRuntimeRelease.module.filename,
+            moduleBackupPath,
+          )
+          context.log(`Previous LauncherRuntime snapshot created: ${moduleBackupPath}`)
+        }
         await this.volume.writeFileAtomic(
           installation,
           launcherRuntimeRelease.module.filename,
-          moduleBytes,
+          moduleArtifact.bytes,
           '0644',
         )
         moduleCreated = true
         context.log(
-          `Verified ${launcherRuntimeRelease.module.filename}: sha256:${launcherRuntimeRelease.module.sha256}`,
+          `Verified patched ${launcherRuntimeRelease.module.filename}: sha256:${moduleArtifact.sha256}`,
         )
       }
 
@@ -179,6 +254,13 @@ export class LauncherRuntimeService {
       if (moduleCreated) {
         await this.volume.remove(installation, launcherRuntimeRelease.module.filename)
       }
+      if (moduleBackupPath) {
+        await this.volume.move(
+          installation,
+          moduleBackupPath,
+          launcherRuntimeRelease.module.filename,
+        )
+      }
       throw error
     } finally {
       await this.volume.remove(installation, archivePath)
@@ -187,10 +269,20 @@ export class LauncherRuntimeService {
     await this.applyWebAuthResourceFix(installation, context)
 
     context.progress(25, 'Checking LauncherRuntime module state')
-    const beforeLoad = await this.control.executeModuleCommand(installation, 'modules list')
-    beforeLoad.forEach(context.log)
-    const alreadyLoaded = isRuntimeLoaded(beforeLoad)
-    if (!alreadyLoaded) {
+    if (!moduleCurrent && alreadyLoaded) {
+      context.log('Restarting LaunchServer to activate patched LauncherRuntime')
+      await this.lifecycle!.restartLaunchServer(installation, context)
+      const afterRestart = await this.control.executeModuleCommand(
+        installation,
+        'modules list',
+      )
+      afterRestart.forEach(context.log)
+      if (!isRuntimeLoaded(afterRestart)) {
+        throw new Error(
+          'LaunchServer did not report patched JavaRuntime.jar as loaded after restart',
+        )
+      }
+    } else if (!alreadyLoaded) {
       const command =
         `modules launcher-load ${launcherRuntimeRelease.module.filename}` satisfies ModuleControlCommand
       const loadLines = await this.control.executeModuleCommand(installation, command)
@@ -208,7 +300,7 @@ export class LauncherRuntimeService {
       tag: launcherRuntimeRelease.tag,
       revision: launcherRuntimeRelease.revision,
       compatibleLauncherVersion: launcherRuntimeRelease.compatibleLauncherVersion,
-      moduleSha256: launcherRuntimeRelease.module.sha256,
+      moduleSha256: moduleArtifact.sha256,
       resourcesSha256: launcherRuntimeRelease.resources.sha256,
       alreadyInstalled,
       alreadyLoaded,
