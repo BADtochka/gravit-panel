@@ -1,6 +1,6 @@
 # Gravit Panel
 
-Web setup wizard and admin panel for GravitLauncher.
+Web setup wizard and admin panel for [GravitLauncher](https://github.com/GravitLauncher/Launcher).
 
 Stack:
 
@@ -10,6 +10,27 @@ Stack:
 - Bun workspaces
 
 Project plan: [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)
+
+## Architecture
+
+The panel itself is only two containers:
+
+- **api** — Bun + Elysia backend. Manages installations, modules, launcher and
+  client builds, mods, and auth providers. Holds the host Docker socket to
+  control nested Compose projects.
+- **web** — nginx serving the Vue SPA and proxying `/api/` to the API.
+
+Game servers are **not** part of the panel stack. The panel creates and manages
+[LauncherDockered](https://github.com/GravitLauncher/LauncherDockered)
+installations on the Docker host. Every installation runs the official
+`ghcr.io/gravitlauncher/launcher` image plus its own nginx facade, which
+publishes port **17549** on the host and serves launcher updates, profile
+downloads, and the launcher WebSocket/API endpoints.
+
+```text
+https://panel.example.com  → reverse proxy → gravit-panel web (127.0.0.1:8080)
+https://mine.example.com   → reverse proxy → installation nginx (host:17549)
+```
 
 ## Development
 
@@ -24,157 +45,156 @@ Web runs on `http://127.0.0.1:5173` by default.
 Both services bind to the loopback interface by default. Set `HOST`, `WEB_HOST`,
 and `CORS_ORIGINS` explicitly if remote access is required.
 
+Run tests and type checks with:
+
+```bash
+bun test
+bun run check
+```
+
 ## Production deployment
 
 The panel controls Docker Compose projects on the host. Its API container is
 therefore intentionally given `/var/run/docker.sock`; whoever can access the
-panel can affect Docker workloads on that host. The panel does not currently
-provide its own user login. Keep the normal Compose port on loopback and put an
-authenticated reverse proxy, SSO gateway, VPN, or IP allowlist in front of it.
+panel can affect Docker workloads on that host. Keep the panel port on loopback,
+enable Discord authentication, and put an HTTPS reverse proxy in front of it.
 
 ### Docker Compose
 
-Copy the environment example, select a permanent absolute host directory, then
-start the stack:
-
 ```bash
 cp .env.example .env
-mkdir -p /srv/gravit-panel/data/launchserver
+mkdir -p /srv/gravit-panel/data
 docker compose --env-file .env pull
 docker compose --env-file .env up -d
 ```
 
-GitHub Actions publishes `ghcr.io/badtochka/gravit-panel-api`,
-`ghcr.io/badtochka/gravit-panel-web`, and
-`ghcr.io/badtochka/gravit-panel-launchserver-web` after every push to `main`.
-Compose uses their `latest` tags by default; set the corresponding
-`PANEL_*_IMAGE` variables to matching `sha-<commit>` tags for a pinned rollout.
-If the GHCR packages remain private, configure registry credentials on the
-deployment host or in Coolify.
+GitHub Actions publishes `ghcr.io/badtochka/gravit-panel-api` and
+`ghcr.io/badtochka/gravit-panel-web` after every push to `main`. Compose uses
+their `latest` tags by default; set `PANEL_API_IMAGE` / `PANEL_WEB_IMAGE` to
+matching `sha-<commit>` tags for a pinned rollout. If the GHCR packages remain
+private, configure registry credentials on the deployment host or in Coolify.
 
-`compose.yaml` exposes the web service only as `127.0.0.1:8080` by default.
-Use an HTTPS reverse proxy to publish it. `PANEL_DATA_DIR` must be a host bind
-mount at the **same absolute path inside the API container**, not a named Docker
-volume: the panel creates nested LauncherDockered Compose projects whose bind
-mounts must be resolved by the host Docker daemon. Back up this directory before
-upgrades; it contains the SQLite database, encryption key, and managed
-installations.
+`compose.yaml` exposes the web service only as `127.0.0.1:8080`. Publish it
+through your HTTPS reverse proxy. `PANEL_DATA_DIR` must be a host bind mount at
+the **same absolute path inside the API container**, not a named Docker volume:
+the panel creates nested LauncherDockered Compose projects whose bind mounts
+must be resolved by the host Docker daemon. Back up this directory before
+upgrades; it contains the SQLite database, the credential encryption key, and
+all managed installations.
 
-Set `CREDENTIAL_ENCRYPTION_KEY` to a separately backed-up 32-byte base64 key
-if you do not want to use the generated persistent key. `CORS_ORIGINS` can stay
-empty while the browser reaches the API through the same panel origin.
+### Panel public URL
 
-### Panel Discord access
+`PANEL_PUBLIC_URL` is the single source of truth for the panel's address. Its
+path component automatically drives the SPA sub-route and the OAuth callback:
 
-Set `PANEL_AUTH_MODE=discord` to protect the panel with Discord OAuth. Configure
+| Deployment | Value |
+| --- | --- |
+| Root | `PANEL_PUBLIC_URL=https://panel.example.com` |
+| Sub-path | `PANEL_PUBLIC_URL=https://example.com/panel` |
+
+`PANEL_PUBLIC_PATH` no longer needs to be set; it is derived from the URL. Keep
+it only as an override when the reverse proxy strips a different prefix than
+the path portion of `PANEL_PUBLIC_URL`.
+
+### Discord access
+
+Set `PANEL_AUTH_MODE=discord` to protect the panel with Discord OAuth. Create
 an OAuth2 application in the Discord Developer Portal with the `identify` scope
-and add this exact redirect URI:
+and register this exact redirect URI:
 
 ```text
-https://panel.example.com/api/panel-auth/callback
+<PANEL_PUBLIC_URL>/api/panel-auth/callback
 ```
 
-Set `PANEL_PUBLIC_URL` to the public panel URL. The callback is derived
-automatically as `${PANEL_PUBLIC_URL}/api/panel-auth/callback`; register that
-exact value in Discord. Then set `PANEL_DISCORD_CLIENT_ID`, `PANEL_DISCORD_CLIENT_SECRET`, and
+For example `https://panel.example.com/api/panel-auth/callback`, or
+`https://example.com/panel/api/panel-auth/callback` when hosted below a path.
+Then set `PANEL_DISCORD_CLIENT_ID`, `PANEL_DISCORD_CLIENT_SECRET`, and
 `PANEL_DISCORD_ALLOWED_USER_IDS` (a comma-separated allowlist of Discord user
 IDs). The allowlist is required: a successful Discord login alone does not
 grant administrative access.
 
-### Hosting below a path
+When hosting below a sub-path, the reverse proxy must route
+`PathPrefix(<path>)` to the panel and strip that prefix before forwarding;
+`compose.coolify.yaml` ships the matching Traefik middlewares.
 
-The panel supports a public subroute such as `https://host.example/panel`.
-Set `PANEL_PUBLIC_PATH=/panel` for the `web` service and
-`PANEL_PUBLIC_URL=https://host.example/panel` for the API. The public Discord
-callback is derived automatically and includes the same prefix:
+### Game domain routing
 
-```text
-https://host.example/panel/api/panel-auth/callback
+Launcher clients reach their game server through the installation's own nginx
+facade, which every LauncherDockered project publishes on host port `17549`
+(HTTP only). Point your game domain at it through your HTTPS proxy:
+
+```nginx
+# nginx example
+server {
+    listen 443 ssl;
+    server_name mine.example.com;
+    # ssl_certificate ...;
+    location / {
+        proxy_pass http://127.0.0.1:17549;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
 ```
 
-The reverse proxy must route `PathPrefix(/panel)` to the panel and strip
-`/panel` before forwarding it. The browser keeps the prefix for assets, API,
-SSE, router navigation, OAuth redirects, and cookies; nginx and the API still
-receive their normal root paths. For Coolify, `compose.coolify.yaml` performs
-this when `PANEL_PUBLIC_PATH=/panel` is set, including a redirect from
-`/panel` to `/panel/` for relative assets.
+WebSocket upgrade headers are required: the launcher protocol connects to
+`wss://<game-domain>/api`. Terminate TLS at the proxy and forward
+`X-Forwarded-Proto` so LaunchServer keeps generating `https://`/`wss://` URLs.
 
-The same stack starts an official `launchserver` service and its
-`launchserver-web` nginx facade at `127.0.0.1:17549`. It serves updates and
-forwards `/api` and `/webapi/` to LaunchServer. Set `LAUNCHSERVER_ADDRESS` to
-the game domain before creating profiles or configuring Discord OAuth, then
-publish this second local port through the game domain's HTTPS proxy.
+When you create an installation in the panel, set its **address** to the game
+domain (for example `mine.example.com`, without scheme or path). The panel
+synchronizes the persisted launcher download URLs and WebSocket address to that
+value on every install and restart.
 
 ### Coolify
 
 Create an application with the **Docker Compose** build pack and select
-`compose.coolify.yaml` as its compose file. Add these environment variables in
-Coolify:
+`compose.coolify.yaml` as its compose file. The stack contains only the `api`
+and `web` services; assign the panel domain to `web` on port `80`. Coolify
+terminates TLS at its proxy, provides the encryption key through
+`SERVICE_REALBASE64_32_GRAVITPANEL`, and builds `PANEL_PUBLIC_URL` from the
+generated FQDN. Set the three `PANEL_DISCORD_*` variables in Coolify and
+register `https://<panel-domain>/api/panel-auth/callback` in Discord (with the
+`/panel` infix when `PANEL_PUBLIC_PATH=/panel` is set).
 
-| Variable | Value |
-| --- | --- |
-| `CORS_ORIGINS` | Optional; normally empty for the same-origin web/API setup |
+Create `/data/gravit-panel` on the target Docker host before the first
+deployment. Coolify forbids `${...}` interpolation in volume paths, so the
+Coolify Compose file intentionally uses this fixed path; it must not be inside
+Coolify's temporary source checkout.
 
-Assign the panel domain to the `web` service on port `80`, and the game domain
-to `launchserver-web` on port `80`. The Coolify Compose configuration creates a
-wildcard FQDN for `launchserver-web` as the fallback `ADDRESS`. If the game is
-published through your own domain (for example `mine.example.com`), set
-`LAUNCHSERVER_ADDRESS=mine.example.com` in Coolify — without a scheme or path.
-The panel synchronizes persisted launcher URLs to that value on every
-LaunchServer start. `CREDENTIAL_ENCRYPTION_KEY` still uses a Coolify magic
-environment variable and must not be defined manually. Coolify pulls the
-published panel images, runs the declared health checks, and terminates TLS at
-its proxy. The `api` and `launchserver` services are not published directly.
-The LaunchServer nginx configuration is included in the published
-`gravit-panel-launchserver-web` image, so an image-only deployment does not
-need a checked-out `deploy/` directory.
-The panel service also receives a generated Coolify FQDN. In the Discord
-Developer Portal, add the exact redirect URI shown by
-`SERVICE_FQDN_PANELWEB` as `https://<generated-fqdn>/api/panel-auth/callback`.
-Set `PANEL_DISCORD_CLIENT_ID`, `PANEL_DISCORD_CLIENT_SECRET`, and
-`PANEL_DISCORD_ALLOWED_USER_IDS` in Coolify; the last value is a comma-separated
-administrator allowlist. Do not enable either Build Variable checkbox for the
-client secret: it is needed only at runtime.
-Set `PANEL_PUBLIC_PATH=/panel` to host the panel beneath `/panel`; the Compose
-file then publishes that path, strips it in Traefik, and builds the matching
-OAuth callback automatically. Add
-`https://<generated-fqdn>/panel/api/panel-auth/callback` to Discord in that
-case.
-Create `/data/gravit-panel/launchserver` on the target Docker host before the
-first deployment. Coolify forbids `${...}` interpolation in volume paths, so
-the Coolify Compose file intentionally uses this fixed path; it must not be
-inside Coolify's temporary source checkout.
-Keep the Discord allowlist limited to panel administrators: this panel has
-privileged Docker access.
+Game servers are created afterwards from the panel UI as LauncherDockered
+installations; they are not Coolify services. To publish the game domain
+through Coolify's Traefik, route it to the installation facade on the host by
+adding a dynamic configuration on the Docker host, for example
+`/data/coolify/proxy/dynamic/gravit-launcher.yaml`:
 
-The Coolify domain publishes the panel only. A configured Discord OAuth
-callback for a LaunchServer still needs the game domain's proxy to forward
-`/webapi/` to that LaunchServer installation, separately from this stack.
-
-LauncherDockered installation requires an explicit in-app confirmation showing
-the target path, address, Compose project, and operation mode. The API also
-requires the corresponding literal confirmation field, so the dialog cannot be
-bypassed by an accidental form submission.
-
-Fresh installations are written under `./data/installations` by default. Set
-`INSTALLATIONS_ROOT` to use another controlled directory.
-
-RemoteControl credentials require a persistent 32-byte encryption key. Generate
-it from the RemoteControl section in the Status page. The server stores it as
-`./data/credential-encryption.key` with mode `0600`; the key is never returned
-to the browser.
-
-An externally managed key remains supported and takes precedence:
-
-```bash
-CREDENTIAL_ENCRYPTION_KEY="<base64-encoded 32-byte key>" bun run dev
+```yaml
+http:
+  routers:
+    gravit-launcher:
+      rule: "Host(`mine.example.com`)"
+      entryPoints: [https]
+      tls:
+        certResolver: letsencrypt
+      service: gravit-launcher
+  services:
+    gravit-launcher:
+      loadBalancer:
+        servers:
+          - url: "http://172.17.0.1:17549"
 ```
 
-Keep the generated key file or environment key between restarts. Changing or
-losing it makes existing RemoteControl credentials unreadable; status commands
-will safely fall back to the local `control-file`.
+Check the existing files in `/data/coolify/proxy/dynamic/` for the exact
+`entryPoints`/`certResolver` names used by your Coolify version, and use the
+`docker0` gateway address if it differs from `172.17.0.1`
+(`ip -4 addr show docker0`). Traefik reloads dynamic configurations without a
+restart and proxies WebSocket upgrades on the same router automatically.
 
-## MVP operations
+## Operations
 
 - Source-verified LaunchServer and launcher module catalog.
 - Checksum-pinned MirrorHelper workspace and LauncherPrestarter installation.
@@ -186,10 +206,7 @@ will safely fall back to the local `control-file`.
   and LaunchServer.json snapshots.
 - Built-in auth core recipes (memory, SQL, HTTP, merge, Mojang/Microsoft,
   Discord OAuth) plus a Modules Auth tab for FileAuthSystem, MojangSupport,
-  AdditionalHash, and the built-in DiscordAuthSystem module. Discord OAuth
-  configuration is edited in a dedicated modal; FileAuthSystem module settings
-  live on the Auth page. Every catalog entry links to its pinned source
-  repository.
+  AdditionalHash, and the built-in DiscordAuthSystem module.
 - Adaptive Users page with FileAuthSystem account CRUD and guidance for
   externally managed providers.
 - Read-only attachment of an already running official LauncherDockered checkout.
@@ -198,11 +215,16 @@ will safely fall back to the local `control-file`.
 
 Machine-changing operations are fixed typed jobs. Workspace replacement and mod
 removal require explicit UI confirmations; existing files are snapshotted or
-moved to recoverable trash before replacement.
+moved to recoverable trash before replacement. LauncherDockered installation
+requires an explicit in-app confirmation showing the target path, address,
+Compose project, and operation mode.
 
-Completed setup actions are derived from runtime files and pinned SHA-256
-values. The UI hides non-repeatable completed actions and labels safe repeat
-operations as reapply, reinstall, rebuild, or token rotation.
+RemoteControl credentials require a persistent 32-byte encryption key. The
+panel generates and persists one as `credential-encryption.key` (mode `0600`)
+inside the data directory; an externally managed `CREDENTIAL_ENCRYPTION_KEY`
+takes precedence. Keep the key between restarts — losing it makes existing
+RemoteControl credentials unreadable, and status commands safely fall back to
+the local `control-file`.
 
 LaunchServer owns its Docker volume as `root`. The API performs volume
 mutations through fixed `docker compose exec` commands constrained to

@@ -29,14 +29,3 @@ COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 COPY deploy/nginx/40-panel-runtime-config.sh /docker-entrypoint.d/40-panel-runtime-config.sh
 RUN chmod 0555 /docker-entrypoint.d/40-panel-runtime-config.sh
 EXPOSE 80
-
-FROM nginx:1.27-alpine AS launchserver-web-runtime
-COPY deploy/launchserver/nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-
-FROM ghcr.io/gravitlauncher/launcher:v5.7.9 AS launchserver-runtime
-USER root
-RUN apt-get update && apt-get install -y --no-install-recommends jq && rm -rf /var/lib/apt/lists/*
-COPY deploy/launchserver/20-sync-public-urls.sh /app/bin/gravit-panel-launchserver
-RUN chmod 0555 /app/bin/gravit-panel-launchserver
-ENTRYPOINT ["/app/bin/gravit-panel-launchserver"]

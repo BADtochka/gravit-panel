@@ -28,12 +28,6 @@ jobs:
           - name: Web
             target: web-runtime
             image: ghcr.io/${{ github.repository_owner }}/gravit-panel-web
-          - name: LaunchServer web
-            target: launchserver-web-runtime
-            image: ghcr.io/${{ github.repository_owner }}/gravit-panel-launchserver-web
-          - name: LaunchServer
-            target: launchserver-runtime
-            image: ghcr.io/${{ github.repository_owner }}/gravit-panel-launchserver
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

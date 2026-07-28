@@ -1,5 +1,12 @@
 # Deploy with Coolify's Docker Compose build pack.
 #
+# The panel itself is just the API and the web UI. Game servers are NOT part of
+# this stack: create or attach LauncherDockered installations from the panel UI.
+# Each installation runs the official ghcr.io/gravitlauncher/launcher image and
+# publishes its own nginx facade on the Docker host (port 17549 by default).
+# Route your game domain to that host port — see README.md, "Game domain
+# routing" — and keep REMOTE_CONTROL_ENDPOINT pointed at it.
+#
 # Data lives at a fixed absolute host path because Coolify rejects variable
 # interpolation in bind-mount paths as a command-injection safeguard. Do not
 # replace this bind mount with a named volume: the panel starts nested Compose
@@ -8,7 +15,6 @@
 # Coolify provides the following magic variables:
 #   SERVICE_REALBASE64_32_GRAVITPANEL — stable base64 32-byte encryption key
 #   SERVICE_FQDN_PANELWEB             — auto-generated FQDN for the web service
-#   SERVICE_FQDN_LAUNCHSERVERWEB       — auto-generated FQDN for launchserver-web
 name: gravit-panel
 
 services:
@@ -21,6 +27,7 @@ services:
       DATABASE_PATH: /data/gravit-panel/gravit-panel.sqlite
       INSTALLATIONS_ROOT: /data/gravit-panel/installations
       MODULE_ARTIFACTS_DIR: /data/gravit-panel/modules
+      # The installation's nginx facade publishes port 17549 on the Docker host.
       REMOTE_CONTROL_ENDPOINT: http://host.docker.internal:17549
       CREDENTIAL_ENCRYPTION_KEY: ${SERVICE_REALBASE64_32_GRAVITPANEL}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
@@ -72,44 +79,6 @@ services:
       - "coolify.traefik.middlewares=gravit-panel-trailing@docker,gravit-panel-strip@docker"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  launchserver:
-    image: ${PANEL_LAUNCHSERVER_IMAGE:-ghcr.io/badtochka/gravit-panel-launchserver:latest}
-    restart: unless-stopped
-    stdin_open: true
-    tty: true
-    environment:
-      # Defaults to the Coolify-generated FQDN for launchserver-web when
-      # custom LAUNCHSERVER_ADDRESS is not set.
-      ADDRESS: ${LAUNCHSERVER_ADDRESS:-${SERVICE_FQDN_LAUNCHSERVERWEB}}
-      PROJECTNAME: ${LAUNCHSERVER_PROJECT_NAME:-main}
-      JAVA_OPTS: ${LAUNCHSERVER_JAVA_OPTS:-}
-    volumes:
-      - type: bind
-        source: /data/gravit-panel/launchserver
-        target: /app/data
-
-  launchserver-web:
-    image: ${PANEL_LAUNCHSERVER_WEB_IMAGE:-ghcr.io/badtochka/gravit-panel-launchserver-web:latest}
-    restart: unless-stopped
-    depends_on:
-      launchserver:
-        condition: service_started
-    expose:
-      - "80"
-    environment:
-      SERVICE_URL_LAUNCHSERVERWEB_80: /
-    volumes:
-      - type: bind
-        source: /data/gravit-panel/launchserver
-        target: /volume
-        read_only: true
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5

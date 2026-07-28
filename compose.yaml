@@ -1,5 +1,11 @@
 name: gravit-panel
 
+# The panel itself is just the API and the web UI. Game servers are NOT part of
+# this stack: create or attach LauncherDockered installations from the panel UI.
+# Each installation runs the official ghcr.io/gravitlauncher/launcher image and
+# publishes its own nginx facade on the Docker host (port 17549 by default),
+# which is also what REMOTE_CONTROL_ENDPOINT points at.
+
 x-panel-data: &panel-data
   # Absolute path on the Docker host. Must exist before starting the project
   # and must be the same inside the container — LauncherDockered Compose
@@ -19,6 +25,9 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       <<: *panel-data
+      # HTTP endpoint of the LauncherDockered installation facade. Docker
+      # Compose maps host.docker.internal to the Docker host, where each
+      # installation's nginx publishes port 17549.
       REMOTE_CONTROL_ENDPOINT: ${REMOTE_CONTROL_ENDPOINT:-http://host.docker.internal:17549}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
@@ -65,46 +74,6 @@ services:
       PANEL_PUBLIC_PATH: ${PANEL_PUBLIC_PATH:-}
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  # ------------------------------------------------------------------
-  # LaunchServer — GravitLauncher game server runtime.
-  # ------------------------------------------------------------------
-  launchserver:
-    image: ${PANEL_LAUNCHSERVER_IMAGE:-ghcr.io/badtochka/gravit-panel-launchserver:latest}
-    restart: unless-stopped
-    stdin_open: true
-    tty: true
-    environment:
-      ADDRESS: ${LAUNCHSERVER_ADDRESS:-localhost:17549}
-      PROJECTNAME: ${LAUNCHSERVER_PROJECT_NAME:-main}
-      JAVA_OPTS: ${LAUNCHSERVER_JAVA_OPTS:-}
-    volumes:
-      - type: bind
-        source: ${PANEL_DATA_DIR:-/data/gravit-panel}/launchserver
-        target: /app/data
-
-  # ------------------------------------------------------------------
-  # LaunchServer Web — nginx reverse proxy + static updates for launchers.
-  # ------------------------------------------------------------------
-  launchserver-web:
-    image: ${PANEL_LAUNCHSERVER_WEB_IMAGE:-ghcr.io/badtochka/gravit-panel-launchserver-web:latest}
-    restart: unless-stopped
-    depends_on:
-      launchserver:
-        condition: service_started
-    ports:
-      - "127.0.0.1:${LAUNCHSERVER_PORT:-17549}:80"
-    volumes:
-      - type: bind
-        source: ${PANEL_DATA_DIR:-/data/gravit-panel}/launchserver
-        target: /volume
-        read_only: true
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5

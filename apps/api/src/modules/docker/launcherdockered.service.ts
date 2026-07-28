@@ -728,12 +728,12 @@ export class LauncherDockeredService {
     const config = parsed as Record<string, unknown>
     let changed = false
 
-    // Both nginx facades (the bundled launchserver-web and the upstream
-    // LauncherDockered one) use the updates directory itself as their document
-    // root. Public URLs must therefore be root-relative to that directory.
-    // Strip a duplicated "/<updatesDir>/" prefix that LaunchServer may have
-    // persisted, otherwise requests resolve to "<updatesDir>/<updatesDir>/..."
-    // and every launcher artifact download ends in a 404.
+    // The LauncherDockered nginx facade uses the updates directory itself as
+    // its document root. Public URLs must therefore be root-relative to that
+    // directory. Strip a duplicated "/<updatesDir>/" prefix that LaunchServer
+    // may have persisted, otherwise requests resolve to
+    // "<updatesDir>/<updatesDir>/..." and every launcher artifact download
+    // ends in a 404.
     let updatesDir = 'updates'
     const updatesProvider = config.updatesProvider
     if (updatesProvider && typeof updatesProvider === 'object' && !Array.isArray(updatesProvider)) {
