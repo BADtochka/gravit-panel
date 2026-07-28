@@ -47,6 +47,7 @@ const runtimeSentinels = [
 ] as const
 const webAuthFxmlPath = 'runtime/overlay/webauth/webauth.fxml'
 const webAuthDescriptionKey = 'runtime.overlay.webauth.webauth.description'
+const rememberLoginKey = 'runtime.scenes.login.savePassword'
 const webAuthDescriptions = {
   'runtime/runtime_en.properties':
     'Complete authorization in the opened browser window, then return here and confirm the login.',
@@ -58,6 +59,13 @@ const webAuthDescriptions = {
     'Завершіть авторизацію у відкритому вікні браузера, потім поверніться сюди та підтвердьте вхід.',
   'runtime/runtime_be.properties':
     'Завяршыце аўтарызацыю ў адкрытым акне браўзера, затым вярніцеся сюды і пацвердзіце ўваход.',
+} as const
+const rememberLoginLabels = {
+  'runtime/runtime_en.properties': 'REMEMBER LOGIN',
+  'runtime/runtime_ru.properties': 'ЗАПОМНИТЬ ВХОД',
+  'runtime/runtime_pl.properties': 'ZAPAMIĘTAJ LOGOWANIE',
+  'runtime/runtime_uk.properties': 'ЗАПАМ’ЯТАТИ ВХІД',
+  'runtime/runtime_be.properties': 'ЗАПОМНІЦЬ УВАХОД',
 } as const
 const isRuntimeLoaded = (lines: string[]) =>
   lines.some((line) => line.toLowerCase().startsWith(runtimeModuleLine))
@@ -227,7 +235,11 @@ export class LauncherRuntimeService {
     for (const [path, description] of Object.entries(webAuthDescriptions)) {
       if (!(await this.volume.exists(installation, path))) continue
       const current = await this.volume.readFile(installation, path)
-      const next = replaceProperty(current, webAuthDescriptionKey, description)
+      const next = replaceProperty(
+        replaceProperty(current, webAuthDescriptionKey, description),
+        rememberLoginKey,
+        rememberLoginLabels[path as keyof typeof rememberLoginLabels],
+      )
       if (next === current) continue
       await this.volume.writeFileAtomic(
         installation,

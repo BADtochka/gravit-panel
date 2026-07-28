@@ -324,10 +324,16 @@ Java launcher UI, not the separate LauncherPrestarter download window.
 
 LauncherRuntime external-browser OAuth resources receive a managed compatibility
 patch during every launcher build. It replaces the device-code-specific prompt
-with browser authorization instructions and removes the empty styled code label.
+with browser authorization instructions, removes the empty styled code label,
+and renames the misleading password-persistence label to `Remember login`.
 The built-in Discord provider keeps the completed callback result pending until
 LauncherRuntime sends its normal confirmation request, avoiding a premature
 WebSocket auth state and the subsequent `You are already logged in` failure.
+Discord OAuth and Minecraft access tokens occupy their correct protocol fields;
+persisted OAuth sessions support both restore and refresh-token rotation.
+Launcher-facing OAuth tokens are independent random LaunchServer session tokens;
+Discord provider credentials remain server-side and never enter launcher TRACE
+output.
 
 ### Slice 10: Client Build
 

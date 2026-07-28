@@ -43,8 +43,23 @@ public class JsonUserStorage {
             if (stored == null) return;
             for (StoredUser su : stored.values()) {
                 DiscordUser user = new DiscordUser(su.uuid, su.discordId, su.username, su.permissions);
-                user.accessToken = su.accessToken;
-                user.refreshToken = su.refreshToken;
+                if (su.discordAccessToken == null) {
+                    // 1.0.5 and older stored Discord provider credentials in
+                    // the launcher session-token fields. Keep those provider
+                    // credentials server-side and invalidate the leaked client
+                    // session by generating fresh local tokens.
+                    user.discordAccessToken = su.accessToken;
+                    user.discordRefreshToken = su.refreshToken;
+                    user.discordExpireIn = su.expireIn;
+                    user.accessToken = pro.gravit.utils.helper.SecurityHelper.randomStringToken();
+                    user.refreshToken = pro.gravit.utils.helper.SecurityHelper.randomStringToken();
+                } else {
+                    user.accessToken = su.accessToken;
+                    user.refreshToken = su.refreshToken;
+                    user.discordAccessToken = su.discordAccessToken;
+                    user.discordRefreshToken = su.discordRefreshToken;
+                    user.discordExpireIn = su.discordExpireIn;
+                }
                 user.expireIn = su.expireIn;
                 user.minecraftAccessToken = su.minecraftAccessToken != null ? su.minecraftAccessToken : java.util.UUID.randomUUID().toString().replace("-", "");
                 user.setBanned(su.banned);
@@ -68,6 +83,9 @@ public class JsonUserStorage {
                 su.accessToken = user.accessToken;
                 su.refreshToken = user.refreshToken;
                 su.expireIn = user.expireIn;
+                su.discordAccessToken = user.discordAccessToken;
+                su.discordRefreshToken = user.discordRefreshToken;
+                su.discordExpireIn = user.discordExpireIn;
                 su.minecraftAccessToken = user.minecraftAccessToken;
                 su.banned = user.isBanned();
                 stored.put(user.getDiscordId(), su);
@@ -95,6 +113,15 @@ public class JsonUserStorage {
     public synchronized DiscordUser findByAccessToken(String accessToken) {
         for (DiscordUser user : byDiscordId.values()) {
             if (accessToken != null && accessToken.equals(user.accessToken)) {
+                return user;
+            }
+        }
+        return null;
+    }
+
+    public synchronized DiscordUser findByRefreshToken(String refreshToken) {
+        for (DiscordUser user : byDiscordId.values()) {
+            if (refreshToken != null && refreshToken.equals(user.refreshToken)) {
                 return user;
             }
         }
@@ -131,6 +158,9 @@ public class JsonUserStorage {
         public String accessToken;
         public String refreshToken;
         public long expireIn;
+        public String discordAccessToken;
+        public String discordRefreshToken;
+        public long discordExpireIn;
         public String minecraftAccessToken;
         public boolean banned;
     }

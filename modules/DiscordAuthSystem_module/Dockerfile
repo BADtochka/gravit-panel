@@ -29,5 +29,5 @@ RUN mkdir -p libs && cp /libs/*.jar libs/ \
 # Export only the resulting module JAR. The file is renamed so downstream steps
 # (panel install, Docker volume copy) get a stable filename.
 FROM scratch AS export
-COPY --from=builder /workspace/module/build/libs/DiscordAuthSystem_module-1.0.4.jar /DiscordAuthSystem_module.jar
+COPY --from=builder /workspace/module/build/libs/DiscordAuthSystem_module-1.0.6.jar /DiscordAuthSystem_module.jar
 CMD ["/DiscordAuthSystem_module.jar"]

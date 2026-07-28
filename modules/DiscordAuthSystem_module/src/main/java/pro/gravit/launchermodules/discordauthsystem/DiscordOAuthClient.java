@@ -42,7 +42,19 @@ public class DiscordOAuthClient {
         params.put("grant_type", "authorization_code");
         params.put("code", code);
         params.put("redirect_uri", config.redirectUrl);
+        return exchangeToken(params);
+    }
 
+    public TokenResponse refreshAccessToken(String refreshToken) throws IOException {
+        Map<String, String> params = new HashMap<>();
+        params.put("client_id", config.clientId);
+        params.put("client_secret", config.clientSecret);
+        params.put("grant_type", "refresh_token");
+        params.put("refresh_token", refreshToken);
+        return exchangeToken(params);
+    }
+
+    private TokenResponse exchangeToken(Map<String, String> params) throws IOException {
         String body = params.entrySet().stream()
             .map(e -> urlEncode(e.getKey()) + "=" + urlEncode(e.getValue()))
             .collect(Collectors.joining("&"));
@@ -56,7 +68,7 @@ public class DiscordOAuthClient {
         HttpResponse<String> response = send(request);
         JsonObject json = JsonParser.parseString(response.body()).getAsJsonObject();
         if (json.has("error")) {
-            throw new IOException("Discord token exchange failed: " + json.get("error").getAsString());
+            throw new IOException("Discord token request failed: " + json.get("error").getAsString());
         }
         return new TokenResponse(
             getString(json, "access_token"),

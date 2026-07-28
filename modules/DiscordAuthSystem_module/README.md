@@ -5,6 +5,8 @@
 ## Возможности
 
 - Авто-регистрация пользователей при первом входе через Discord.
+- Восстановление сессии и обновление Discord OAuth access token через refresh token.
+- Отдельные случайные токены сессии LaunchServer: Discord access/refresh tokens не отправляются лаунчеру.
 - Проверка принадлежности к обязательным Discord-гильдиям.
 - Безопасное форматирование никнеймов (транслитерация, фильтрация символов, regex).
 - Хранение пользователей в JSON-файле (`config/DiscordAuthSystem/`), без внешней БД.
@@ -36,7 +38,7 @@
    ```bash
    gradle build
    ```
-4. Скопируйте `build/libs/DiscordAuthSystem_module-1.0.4.jar` в `LaunchServer/modules/`.
+4. Скопируйте `build/libs/DiscordAuthSystem_module-1.0.6.jar` в `LaunchServer/modules/`.
 5. Запустите LaunchServer и выполните `modules load DiscordAuthSystem`.
 
 ## Конфигурация
@@ -111,6 +113,16 @@
 
 Завершённый результат хранится в памяти не более двух минут и привязан к тому
 же WebSocket-клиенту, который создал OAuth `state`.
+
+LauncherRuntime сохраняет OAuth-сессию через элемент интерфейса, который в
+upstream называется «Сохранить пароль». Панель меняет эту подпись на
+«Запомнить вход»: пароль Discord не сохраняется. При включённом автовходе
+сохраненный OAuth access token восстанавливает сессию, а после истечения срока
+действия модуль обновляет его через Discord refresh token.
+
+В `Database.json` Discord provider tokens хранятся отдельно от локальных
+LaunchServer session tokens. В протокол лаунчера и его TRACE-логи Discord
+access/refresh tokens не передаются.
 
 ## Безопасность никнеймов
 

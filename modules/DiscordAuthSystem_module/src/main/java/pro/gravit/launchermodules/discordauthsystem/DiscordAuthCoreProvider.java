@@ -15,6 +15,7 @@ import pro.gravit.launchserver.auth.core.UserSession;
 import pro.gravit.launchserver.manangers.AuthManager;
 import pro.gravit.launchserver.socket.Client;
 import pro.gravit.launchserver.socket.response.auth.AuthResponse;
+import pro.gravit.utils.helper.LogHelper;
 import pro.gravit.utils.helper.SecurityHelper;
 
 import java.io.IOException;
@@ -159,14 +160,45 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
 
     @Override
     public UserSession getUserSessionByOAuthAccessToken(String accessToken) {
-        if (storage == null) return null;
+        try {
+            ensureInitialized();
+        } catch (IOException e) {
+            LogHelper.error("Unable to initialize DiscordAuthSystem for session restore", e);
+            return null;
+        }
         DiscordUser user = storage.findByAccessToken(accessToken);
         return user == null ? null : new DiscordUserSession(user, accessToken);
     }
 
     @Override
     public AuthManager.AuthReport refreshAccessToken(String refreshToken, AuthResponse.AuthContext context) {
-        return null;
+        try {
+            ensureInitialized();
+            DiscordUser user = storage.findByRefreshToken(refreshToken);
+            if (
+                user == null ||
+                user.discordRefreshToken == null ||
+                user.discordRefreshToken.isBlank()
+            ) {
+                return null;
+            }
+            DiscordOAuthClient.TokenResponse tokens =
+                oauthClient.refreshAccessToken(user.discordRefreshToken);
+            if (tokens.accessToken == null || tokens.accessToken.isBlank()) {
+                return null;
+            }
+            String nextRefreshToken =
+                tokens.refreshToken == null || tokens.refreshToken.isBlank()
+                    ? user.discordRefreshToken
+                    : tokens.refreshToken;
+            long expireIn = tokens.expiresIn > 0 ? tokens.expiresIn : 0;
+            user.updateOAuth(tokens.accessToken, nextRefreshToken, expireIn);
+            storage.save();
+            return reportFor(user, user.accessToken, false);
+        } catch (IOException e) {
+            LogHelper.error("Unable to refresh Discord OAuth access token", e);
+            return null;
+        }
     }
 
     @Override
@@ -233,13 +265,19 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
         user.updateOAuth(accessToken, refreshToken, expireIn);
         storage.save();
 
-        return reportFor(user, accessToken, minecraftAccess);
+        return reportFor(user, user.accessToken, minecraftAccess);
     }
 
-    private AuthManager.AuthReport reportFor(DiscordUser user, String accessToken, boolean minecraftAccess) {
+    static AuthManager.AuthReport reportFor(DiscordUser user, String accessToken, boolean minecraftAccess) {
         DiscordUserSession session = new DiscordUserSession(user, accessToken);
         if (minecraftAccess) {
-            return AuthManager.AuthReport.ofOAuthWithMinecraft(accessToken, user.minecraftAccessToken, user.refreshToken, user.expireIn, session);
+            return AuthManager.AuthReport.ofOAuthWithMinecraft(
+                user.minecraftAccessToken,
+                accessToken,
+                user.refreshToken,
+                user.expireIn,
+                session
+            );
         }
         return AuthManager.AuthReport.ofOAuth(accessToken, user.refreshToken, user.expireIn, session);
     }

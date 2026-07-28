@@ -2,6 +2,7 @@ package pro.gravit.launchermodules.discordauthsystem;
 
 import pro.gravit.launcher.base.ClientPermissions;
 import pro.gravit.launchserver.auth.core.User;
+import pro.gravit.utils.helper.SecurityHelper;
 
 import java.util.UUID;
 
@@ -12,6 +13,9 @@ public class DiscordUser implements User {
     public String accessToken;
     public String refreshToken;
     public long expireIn;
+    public String discordAccessToken;
+    public String discordRefreshToken;
+    public long discordExpireIn;
     public String minecraftAccessToken;
     private final ClientPermissions permissions;
     private boolean banned;
@@ -56,9 +60,12 @@ public class DiscordUser implements User {
         return discordId;
     }
 
-    public void updateOAuth(String accessToken, String refreshToken, long expireIn) {
-        this.accessToken = accessToken;
-        this.refreshToken = refreshToken;
+    public void updateOAuth(String discordAccessToken, String discordRefreshToken, long expireIn) {
+        this.discordAccessToken = discordAccessToken;
+        this.discordRefreshToken = discordRefreshToken;
+        this.discordExpireIn = expireIn;
+        this.accessToken = SecurityHelper.randomStringToken();
+        this.refreshToken = SecurityHelper.randomStringToken();
         this.expireIn = expireIn;
     }
 }

@@ -46,7 +46,11 @@ const volumeHarness = () => {
       paths.set(`${target}/overlay/webauth/webauth.fxml`, 'file')
       files.set(
         `${target}/runtime_en.properties`,
-        'runtime.overlay.webauth.webauth.description=Copy the code below\\n',
+        [
+          'runtime.scenes.login.savePassword=SAVE PASSWORD',
+          'runtime.overlay.webauth.webauth.description=Copy the code below',
+          '',
+        ].join('\n'),
       )
       files.set(`${target}/scenes/login/login.fxml`, '<AnchorPane />')
       files.set(
@@ -112,6 +116,9 @@ describe('LauncherRuntimeService', () => {
     expect(files.get('runtime/runtime_en.properties')).toContain(
       'Complete authorization in the opened browser window',
     )
+    expect(files.get('runtime/runtime_en.properties')).toContain(
+      'runtime.scenes.login.savePassword=REMEMBER LOGIN',
+    )
     expect(files.get('runtime/overlay/webauth/webauth.fxml')).not.toContain(
       'styleClass="tooltip"',
     )
@@ -137,7 +144,11 @@ describe('LauncherRuntimeService', () => {
     paths.set('runtime/overlay/webauth/webauth.fxml', 'file')
     files.set(
       'runtime/runtime_en.properties',
-      'runtime.overlay.webauth.webauth.description=Copy the code below\n',
+      [
+        'runtime.scenes.login.savePassword=SAVE PASSWORD',
+        'runtime.overlay.webauth.webauth.description=Copy the code below',
+        '',
+      ].join('\n'),
     )
     files.set('runtime/scenes/login/login.fxml', '<AnchorPane />')
     files.set(
@@ -165,6 +176,9 @@ describe('LauncherRuntimeService', () => {
     expect(result.alreadyLoaded).toBe(true)
     expect(files.get('runtime/runtime_en.properties')).toContain(
       'Complete authorization in the opened browser window',
+    )
+    expect(files.get('runtime/runtime_en.properties')).toContain(
+      'runtime.scenes.login.savePassword=REMEMBER LOGIN',
     )
     expect(files.get('runtime/overlay/webauth/webauth.fxml')).not.toContain(
       'styleClass="tooltip"',
