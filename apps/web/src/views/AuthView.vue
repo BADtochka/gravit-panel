@@ -229,7 +229,7 @@
                     <Input
                       id="discord-redirect-url"
                       v-model="discord.redirectUrl"
-                      placeholder="http://127.0.0.1:9274/webapi/auth/discord"
+                      :placeholder="defaultDiscordRedirectUrl || 'http://127.0.0.1:9274/webapi/auth/discord'"
                     />
                   </div>
                   <div class="grid gap-2">
@@ -431,6 +431,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useInstallationJob } from '@/composables/useInstallationJob'
+import { defaultDiscordRedirectUrl as resolveDiscordRedirectUrl } from '@/lib/discord-redirect'
 import { useInstallationsStore } from '@/stores/installations'
 import type {
   AuthConfiguration,
@@ -492,6 +493,9 @@ const discordGuildInput = ref('')
 const discordModalOpen = ref(false)
 const discordClientSecretConfigured = ref(false)
 const fileAuthAutoSave = ref(true)
+const defaultDiscordRedirectUrl = computed(() =>
+  resolveDiscordRedirectUrl(selectedInstallation.value?.address),
+)
 
 const {
   activeJob,
@@ -584,7 +588,7 @@ watch(
       Object.assign(discord, {
         clientId: value.discord.clientId,
         clientSecret: '',
-        redirectUrl: value.discord.redirectUrl,
+        redirectUrl: value.discord.redirectUrl || defaultDiscordRedirectUrl.value,
         discordAuthorizeUrl: value.discord.discordAuthorizeUrl,
         discordTokenUrl: value.discord.discordTokenUrl,
         discordApiEndpoint: value.discord.discordApiEndpoint,
@@ -601,6 +605,10 @@ watch(
   },
   { immediate: true },
 )
+
+watch(defaultDiscordRedirectUrl, (value) => {
+  if (value && !discord.redirectUrl) discord.redirectUrl = value
+}, { immediate: true })
 
 watch(sqlDriver, (driver) => {
   const prefixes = {
