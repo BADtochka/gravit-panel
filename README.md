@@ -171,13 +171,21 @@ register `https://<panel-domain>/api/panel-auth/callback` in Discord (with the
 
 Create `/data/gravit-panel` on the target Docker host before the first
 deployment. Coolify forbids `${...}` interpolation in volume paths, so the
-Coolify Compose file intentionally uses this fixed path; it must not be inside
-Coolify's temporary source checkout.
+Coolify Compose file intentionally uses this fixed path; it must not be
+inside Coolify's temporary source checkout.
 
-Game servers are created afterwards from the panel UI as LauncherDockered
-installations; they are not Coolify services. To publish the game domain
-through Coolify's Traefik, route it to the installation facade on the host by
-adding a dynamic configuration on the Docker host, for example
+The bundled standalone `launchserver` service can be published straight from
+the Coolify UI: assign your game domain to it (it serves the launcher
+WebSocket API and update downloads on port 9274; Traefik proxies WebSocket
+upgrades transparently) and set `LAUNCHSERVER_ADDRESS` to the same domain so
+the generated `LaunchServer.json` advertises `https://`/`wss://` URLs. Without
+a domain assignment it stays internal and unused.
+
+Game servers managed by the panel are created afterwards as LauncherDockered
+installations; they are not Coolify services, so Coolify cannot route domains
+to them through the UI. To publish their domain through Coolify's Traefik,
+route it to the installation facade on the host by adding a dynamic
+configuration on the Docker host, for example
 `/data/coolify/proxy/dynamic/gravit-launcher.yaml`:
 
 ```yaml

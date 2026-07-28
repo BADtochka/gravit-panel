@@ -87,21 +87,25 @@ services:
 
   # Optional standalone stock LaunchServer. The panel does NOT manage it;
   # managed game servers are LauncherDockered installations created from the
-  # panel UI. Intentionally exposed only on the host loopback: assign no domain
-  # to it in Coolify, and proxy a game domain to 127.0.0.1:9274 manually if you
-  # actually use it (WebSocket upgrade required). Its netty port serves the
-  # launcher API and, when fileServerEnabled, the update files directly.
+  # panel UI. Coolify routes a domain straight to its netty port through the
+  # Docker network: SERVICE_URL_LAUNCHSERVER_9274 creates the route (assign
+  # your game domain to this service in the Coolify UI), and Traefik proxies
+  # the launcher WebSocket API and update downloads on it transparently.
   launchserver:
     image: ${LAUNCHSERVER_IMAGE:-ghcr.io/gravitlauncher/launcher:v5.7.9}
     restart: unless-stopped
     stdin_open: true
     tty: true
     environment:
-      ADDRESS: ${LAUNCHSERVER_ADDRESS:-localhost:9274}
+      # Creates the Coolify route to this service's port 9274. Set the game
+      # domain on it in the Coolify UI, then mirror it into ADDRESS below so
+      # the generated LaunchServer.json advertises https:// and wss:// URLs.
+      SERVICE_URL_LAUNCHSERVER_9274: /
+      ADDRESS: ${LAUNCHSERVER_ADDRESS:-${SERVICE_FQDN_LAUNCHSERVER_9274}}
       PROJECTNAME: ${LAUNCHSERVER_PROJECT_NAME:-main}
       JAVA_OPTS: ${LAUNCHSERVER_JAVA_OPTS:-}
-    ports:
-      - "127.0.0.1:${LAUNCHSERVER_PORT:-9274}:9274"
+    expose:
+      - "9274"
     volumes:
       - type: bind
         source: /data/gravit-panel/launchserver
