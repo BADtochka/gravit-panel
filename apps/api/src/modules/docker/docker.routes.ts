@@ -79,6 +79,7 @@ export const createDockerRoutes = ({
   )
   .get('/install/configuration', () => ({
     launchServerPath: join(installer.installationsRoot, launchServerInstallationName),
+    defaultAddress: env.LAUNCHSERVER_PUBLIC_ADDRESS,
     source: launcherDockeredSource,
   }))
   .get('/launchserver', () => ({ item: installations.list()[0] ?? null }))

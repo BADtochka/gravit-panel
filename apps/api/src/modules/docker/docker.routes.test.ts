@@ -212,6 +212,7 @@ describe('Docker installation API', () => {
     expect(configuration.status).toBe(200)
     expect(await configuration.json()).toMatchObject({
       launchServerPath: '/srv/gravit/default',
+      defaultAddress: 'localhost:9274',
     })
     expect(invalid.status).toBe(422)
     expect(jobsStore.list()).toHaveLength(0)

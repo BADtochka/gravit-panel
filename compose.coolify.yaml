@@ -1,10 +1,9 @@
 # Deploy with Coolify's Docker Compose build pack.
 #
-# The single panel-managed LaunchServer is NOT part of this stack: create or
-# attach its LauncherDockered workspace from the panel UI. It runs the official
-# ghcr.io/gravitlauncher/launcher image and publishes one nginx facade on host
-# port 17549. Route your game domain to that port — see README.md, "Game domain
-# routing" — and keep REMOTE_CONTROL_ENDPOINT pointed at it.
+# The actual LaunchServer runtime is created once in a panel-managed
+# LauncherDockered workspace. The `launchserver` service is a stateless proxy to
+# that runtime, so Coolify can assign the game domain to a normal Compose
+# service without creating a second LaunchServer or configuration directory.
 #
 # Data lives at a fixed absolute host path because Coolify rejects variable
 # interpolation in bind-mount paths as a command-injection safeguard. Do not
@@ -14,6 +13,7 @@
 # Coolify provides the following magic variables:
 #   SERVICE_REALBASE64_32_GRAVITPANEL — stable base64 32-byte encryption key
 #   SERVICE_FQDN_PANELWEB             — auto-generated FQDN for the web service
+#   SERVICE_FQDN_LAUNCHSERVER_80      — game-domain FQDN for the proxy service
 name: gravit-panel
 
 services:
@@ -26,8 +26,10 @@ services:
       DATABASE_PATH: /data/gravit-panel/gravit-panel.sqlite
       INSTALLATIONS_ROOT: /data/gravit-panel/installations
       MODULE_ARTIFACTS_DIR: /data/gravit-panel/modules
-      # The LaunchServer nginx facade publishes port 17549 on the Docker host.
-      REMOTE_CONTROL_ENDPOINT: http://host.docker.internal:17549
+      REMOTE_CONTROL_ENDPOINT: http://launchserver
+      # Coolify generates this FQDN for the launchserver proxy service. The
+      # setup form uses it as the default public LaunchServer address.
+      LAUNCHSERVER_PUBLIC_ADDRESS: ${SERVICE_FQDN_LAUNCHSERVER_80}
       CREDENTIAL_ENCRYPTION_KEY: ${SERVICE_REALBASE64_32_GRAVITPANEL}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       # PANEL_PUBLIC_URL is the single source of truth for the panel's
@@ -40,6 +42,9 @@ services:
       PANEL_DISCORD_CLIENT_SECRET: ${PANEL_DISCORD_CLIENT_SECRET:?Set the Discord OAuth2 client secret}
       PANEL_DISCORD_ALLOWED_USER_IDS: ${PANEL_DISCORD_ALLOWED_USER_IDS:?Set at least one allowed Discord user ID}
       PANEL_AUTH_COOKIE_SECURE: 'true'
+    depends_on:
+      launchserver:
+        condition: service_healthy
     volumes:
       - type: bind
         source: /data/gravit-panel
@@ -82,3 +87,24 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  launchserver:
+    image: nginx:stable-alpine
+    restart: unless-stopped
+    expose:
+      - "80"
+    environment:
+      SERVICE_URL_LAUNCHSERVER_80: /
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - type: bind
+        source: ./deploy/launchserver-proxy/default.conf
+        target: /etc/nginx/conf.d/default.conf
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s

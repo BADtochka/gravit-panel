@@ -121,6 +121,7 @@ describe('API smoke routes', () => {
 
     expect(configurationResponse.status).toBe(200)
     expect(configuration.launchServerPath).toStartWith('/')
+    expect(configuration.defaultAddress).toBe('localhost:9274')
     expect(configuration).not.toHaveProperty('machineOperationsEnabled')
 
     const installResponse = await request('/api/docker/install', {

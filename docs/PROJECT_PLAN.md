@@ -416,6 +416,8 @@ Status: completed.
 - Switch to the admin layout immediately after the first successful
   install/import/attach job.
 - Keep exactly one LaunchServer and one shared server configuration per panel.
+- Expose that server through a stateless root-Compose `launchserver` proxy so
+  Coolify can attach the game domain without a second runtime or data volume.
 - Use the desktop and mobile sidebar switcher only for client profiles
   discovered from that LaunchServer.
 - Expose an explicit New profile action that opens a clean client draft without

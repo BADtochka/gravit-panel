@@ -13,30 +13,33 @@ Project plan: [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)
 
 ## Architecture
 
-The panel itself is only two containers:
+The panel Compose stack has three services:
 
 - **api** — Bun + Elysia backend. Manages LaunchServer, modules, launcher and
   client builds, mods, and auth providers. Holds the host Docker socket to
   control nested Compose projects.
 - **web** — nginx serving the Vue SPA and proxying `/api/` to the API.
+- **launchserver** — a stateless nginx facade that gives Compose and Coolify a
+  stable service target for the one panel-managed LaunchServer.
 
-LaunchServer is **not** part of the panel stack. Each panel creates and manages
-exactly one [LauncherDockered](https://github.com/GravitLauncher/LauncherDockered)
-workspace on the Docker host. It runs the official
+Each panel creates and manages exactly one
+[LauncherDockered](https://github.com/GravitLauncher/LauncherDockered) workspace
+on the Docker host. Its runtime runs the official
 `ghcr.io/gravitlauncher/launcher` image plus an nginx facade, which publishes
 port **17549** on the host and serves launcher updates, profile downloads, and
 the launcher WebSocket/API endpoints. Additional Minecraft clients are
 LaunchServer profiles inside that shared workspace; they do not create more
-containers or independent configuration trees.
+runtime containers or independent configuration trees. The Compose
+`launchserver` service only proxies to that managed facade; it owns no data and
+has no separate `LaunchServer.json`.
 
 ```text
 https://panel.example.com  → reverse proxy → gravit-panel web (127.0.0.1:8080)
-https://mine.example.com   → reverse proxy → LaunchServer nginx (host:17549)
+https://mine.example.com   → launchserver service → managed nginx (host:17549)
 ```
 
-The managed workspace uses
-`PANEL_DATA_DIR/installations/default`; there is no second standalone
-`PANEL_DATA_DIR/launchserver` service or configuration.
+The managed workspace uses `PANEL_DATA_DIR/installations/default`. The proxy
+service does not mount the legacy `PANEL_DATA_DIR/launchserver` directory.
 
 ## Development
 
@@ -80,8 +83,9 @@ their `latest` tags by default; set `PANEL_API_IMAGE` / `PANEL_WEB_IMAGE` to
 matching `sha-<commit>` tags for a pinned rollout. If the GHCR packages remain
 private, configure registry credentials on the deployment host or in Coolify.
 
-`compose.yaml` exposes the web service only as `127.0.0.1:8080`. Publish it
-through your HTTPS reverse proxy. `PANEL_DATA_DIR` must be a host bind mount at
+`compose.yaml` exposes the web service as `127.0.0.1:8080` and the LaunchServer
+facade as `127.0.0.1:9274`. Publish them through their respective HTTPS reverse
+proxies. `PANEL_DATA_DIR` must be a host bind mount at
 the **same absolute path inside the API container**, not a named Docker volume:
 the panel creates nested LauncherDockered Compose projects whose bind mounts
 must be resolved by the host Docker daemon. Back up this directory before
@@ -125,8 +129,8 @@ When hosting below a sub-path, the reverse proxy must route
 
 ### Game domain routing
 
-Launcher clients reach LaunchServer through its nginx facade, which the
-LauncherDockered workspace publishes on host port `17549`
+Launcher clients reach LaunchServer through the Compose `launchserver` facade.
+For a regular Docker Compose deployment it is published on host port `9274`
 (HTTP only). Point your game domain at it through your HTTPS proxy:
 
 ```nginx
@@ -136,7 +140,7 @@ server {
     server_name mine.example.com;
     # ssl_certificate ...;
     location / {
-        proxy_pass http://127.0.0.1:17549;
+        proxy_pass http://127.0.0.1:9274;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
@@ -159,8 +163,8 @@ value on every install and restart.
 ### Coolify
 
 Create an application with the **Docker Compose** build pack and select
-`compose.coolify.yaml` as its compose file. The stack contains only the `api`
-and `web` services; assign the panel domain to `web` on port `80`. Coolify
+`compose.coolify.yaml` as its compose file. Assign the panel domain to `web` on
+port `80` and the game/launcher domain to `launchserver` on port `80`. Coolify
 terminates TLS at its proxy, provides the encryption key through
 `SERVICE_REALBASE64_32_GRAVITPANEL`, and builds `PANEL_PUBLIC_URL` from the
 generated FQDN. Set the three `PANEL_DISCORD_*` variables in Coolify and
@@ -172,41 +176,15 @@ deployment. Coolify forbids `${...}` interpolation in volume paths, so the
 Coolify Compose file intentionally uses this fixed path; it must not be
 inside Coolify's temporary source checkout.
 
-The single LaunchServer managed by the panel is created afterwards from the
-setup screen. It is not a Coolify service, so Coolify cannot route its game
-domain through the application UI. To publish that domain through Coolify's
-Traefik, route it to the LaunchServer facade on the host by adding a dynamic
-configuration on the Docker host, for example
-`/data/coolify/proxy/dynamic/gravit-launcher.yaml`:
+`SERVICE_URL_LAUNCHSERVER_80` makes Coolify route that domain directly to the
+Compose service. The service preserves WebSocket upgrade and forwarded HTTPS
+headers, then proxies to the managed LauncherDockered facade on host port
+`17549`. No manual Traefik dynamic configuration is required.
 
-```yaml
-http:
-  routers:
-    gravit-launcher:
-      rule: "Host(`mine.example.com`)"
-      entryPoints: [https]
-      tls:
-        certResolver: letsencrypt
-      service: gravit-launcher
-  services:
-    gravit-launcher:
-      loadBalancer:
-        servers:
-          - url: "http://172.17.0.1:17549"
-```
-
-Check the existing files in `/data/coolify/proxy/dynamic/` for the exact
-`entryPoints`/`certResolver` names used by your Coolify version, and use the
-`docker0` gateway address if it differs from `172.17.0.1`
-(`ip -4 addr show docker0`). Traefik reloads dynamic configurations without a
-restart and proxies WebSocket upgrades on the same router automatically.
-
-If upgrading from a revision that included the optional standalone
-`launchserver` Compose service, redeploy the panel stack with orphan removal
-enabled and verify that the old service is stopped before starting the managed
-server. Its old `PANEL_DATA_DIR/launchserver` directory is intentionally left
-untouched for recovery; archive or remove it only after checking that the
-managed data under `PANEL_DATA_DIR/installations/default` is complete.
+Coolify passes the generated `SERVICE_FQDN_LAUNCHSERVER_80` into the setup form.
+Confirm that this is the intended game domain before creating LaunchServer.
+The old `PANEL_DATA_DIR/launchserver` directory from standalone deployments is
+not mounted and remains untouched for recovery.
 
 ## Operations
 

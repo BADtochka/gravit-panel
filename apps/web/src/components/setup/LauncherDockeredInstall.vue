@@ -224,7 +224,7 @@ const activeJob = ref<JobRecord | null>(null)
 const form = reactive({
   mode: 'clone' as LauncherDockeredInstallMode,
   importPath: '',
-  address: 'localhost:17549',
+  address: '',
   projectName: 'MY_PROJECT',
 })
 
@@ -241,6 +241,9 @@ const { data: configuration, error: configurationError } = useQuery({
   queryKey: ['docker-install-configuration'],
   queryFn: () => getJson<DockerInstallConfiguration>('/api/docker/install/configuration'),
 })
+watch(configuration, (value) => {
+  if (value && !form.address) form.address = value.defaultAddress
+}, { immediate: true })
 
 const connectToJob = (job: JobRecord) => {
   activeJob.value = job

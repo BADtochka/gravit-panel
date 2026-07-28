@@ -115,6 +115,7 @@ export interface LauncherDockeredInstallRequest
 
 export interface DockerInstallConfiguration {
   launchServerPath: string
+  defaultAddress: string
   source: DockerPreflightResponse['source']
 }
 

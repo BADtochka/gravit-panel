@@ -1,10 +1,9 @@
 name: gravit-panel
 
-# The panel manages exactly one LaunchServer, created from the panel UI as a
-# LauncherDockered workspace on the official ghcr.io/gravitlauncher/launcher
-# image. Its nginx facade publishes port 17549 on the Docker host, which is
-# also what REMOTE_CONTROL_ENDPOINT points at. Additional game clients are
-# profiles on that server — not separate installations.
+# The panel manages exactly one LaunchServer in a LauncherDockered workspace.
+# The `launchserver` service below is its stateless Compose-visible proxy: it
+# gives Coolify and external reverse proxies a stable service target without
+# creating a second runtime, data directory, or LaunchServer.json.
 
 x-panel-data: &panel-data
   # Absolute path on the Docker host. Must exist before starting the project
@@ -25,10 +24,9 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       <<: *panel-data
-      # HTTP endpoint of the LaunchServer facade. Docker Compose maps
-      # host.docker.internal to the Docker host, where its nginx publishes
-      # port 17549.
-      REMOTE_CONTROL_ENDPOINT: ${REMOTE_CONTROL_ENDPOINT:-http://host.docker.internal:17549}
+      # Both API and public traffic use the same Compose-visible facade.
+      REMOTE_CONTROL_ENDPOINT: ${REMOTE_CONTROL_ENDPOINT:-http://launchserver}
+      LAUNCHSERVER_PUBLIC_ADDRESS: ${LAUNCHSERVER_PUBLIC_ADDRESS:-localhost:9274}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       # Panel auth. Set PANEL_AUTH_MODE=discord and configure the OAuth
@@ -39,6 +37,9 @@ services:
       PANEL_DISCORD_CLIENT_SECRET: ${PANEL_DISCORD_CLIENT_SECRET:-}
       PANEL_DISCORD_ALLOWED_USER_IDS: ${PANEL_DISCORD_ALLOWED_USER_IDS:-}
       PANEL_AUTH_COOKIE_SECURE: ${PANEL_AUTH_COOKIE_SECURE:-true}
+    depends_on:
+      launchserver:
+        condition: service_healthy
     volumes:
       - type: bind
         source: ${PANEL_DATA_DIR:-/data/gravit-panel}
@@ -78,3 +79,27 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # ------------------------------------------------------------------
+  # LaunchServer facade — stable Compose target for the one managed server.
+  # The actual runtime remains in the panel-managed LauncherDockered workspace
+  # and publishes its nginx facade on host port 17549.
+  # ------------------------------------------------------------------
+  launchserver:
+    image: nginx:stable-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${LAUNCHSERVER_PROXY_PORT:-9274}:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - type: bind
+        source: ./deploy/launchserver-proxy/default.conf
+        target: /etc/nginx/conf.d/default.conf
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
