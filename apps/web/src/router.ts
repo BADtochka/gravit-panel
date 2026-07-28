@@ -3,9 +3,9 @@ import AuthView from './views/AuthView.vue'
 import ClientsView from './views/ClientsView.vue'
 import JobsView from './views/JobsView.vue'
 import LauncherView from './views/LauncherView.vue'
+import LaunchServerSetupView from './views/LaunchServerSetupView.vue'
 import ModsView from './views/ModsView.vue'
 import ModulesView from './views/ModulesView.vue'
-import ProfileCreationView from './views/ProfileCreationView.vue'
 import StatusView from './views/StatusView.vue'
 import UsersView from './views/UsersView.vue'
 import { panelPublicPath } from './lib/public-path'
@@ -13,7 +13,7 @@ import { panelPublicPath } from './lib/public-path'
 export const router = createRouter({
   history: createWebHistory(panelPublicPath || '/'),
   routes: [
-    { path: '/', name: 'profile-creation', component: ProfileCreationView },
+    { path: '/', name: 'launchserver-setup', component: LaunchServerSetupView },
     { path: '/status', component: StatusView },
     { path: '/jobs', component: JobsView },
     { path: '/modules', component: ModulesView },

@@ -20,7 +20,7 @@
         <CardTitle class="text-base">Verified artifact manifest</CardTitle>
         <CardDescription>
           Only JARs present in this pinned release can be loaded. Built-in local modules are verified
-          after publication to the selected LaunchServer installation.
+          after publication to the panel LaunchServer.
         </CardDescription>
       </CardHeader>
       <CardContent class="grid gap-3 pt-6 text-xs text-muted-foreground md:grid-cols-3">
@@ -241,7 +241,7 @@ import {
 } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useInstallationJob } from '@/composables/useInstallationJob'
-import { useInstallationsStore } from '@/stores/installations'
+import { useLaunchServerStore } from '@/stores/launchserver'
 import type {
   GravitModuleCatalog,
   GravitModuleCatalogItem,
@@ -262,14 +262,14 @@ import {
 import { storeToRefs } from 'pinia'
 import { computed, ref, watch } from 'vue'
 
-const { selectedInstallationId } = storeToRefs(useInstallationsStore())
+const { launchServerId } = storeToRefs(useLaunchServerStore())
 const {
   activeJob,
   activeJobError,
   attachJob,
   finishJob,
 } = useInstallationJob(
-  () => selectedInstallationId.value,
+  () => launchServerId.value,
   ['gravit.module.install', 'gravit.module.remove', 'gravit.module.discordauthsystem.build'],
 )
 
@@ -286,17 +286,17 @@ const { data: catalog, error: catalogError } = useQuery({
   queryKey: ['module-catalog'],
   queryFn: () => getJson<GravitModuleCatalog>('/api/modules/catalog'),
 })
-const stateEnabled = computed(() => Boolean(selectedInstallationId.value))
+const stateEnabled = computed(() => Boolean(launchServerId.value))
 const {
   data: moduleState,
   error: stateError,
   isFetching: stateFetching,
   refetch: refetchState,
 } = useQuery({
-  queryKey: computed(() => ['module-state', selectedInstallationId.value]),
+  queryKey: computed(() => ['module-state', launchServerId.value]),
   queryFn: () =>
     getJson<GravitModuleState>(
-      `/api/modules/state?installationId=${encodeURIComponent(selectedInstallationId.value)}`,
+      `/api/modules/state?installationId=${encodeURIComponent(launchServerId.value)}`,
     ),
   enabled: stateEnabled,
   retry: false,
@@ -375,7 +375,7 @@ const {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        installationId: selectedInstallationId.value,
+        installationId: launchServerId.value,
         moduleId,
       }),
     }),
@@ -392,7 +392,7 @@ const {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(
-        { installationId: selectedInstallationId.value },
+        { installationId: launchServerId.value },
       ),
     }),
   onSuccess: attachJob,
@@ -409,7 +409,7 @@ const {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        installationId: selectedInstallationId.value,
+        installationId: launchServerId.value,
         moduleId,
         confirmRemove: true,
       }),

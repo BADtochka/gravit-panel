@@ -15,30 +15,28 @@ Project plan: [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)
 
 The panel itself is only two containers:
 
-- **api** — Bun + Elysia backend. Manages installations, modules, launcher and
+- **api** — Bun + Elysia backend. Manages LaunchServer, modules, launcher and
   client builds, mods, and auth providers. Holds the host Docker socket to
   control nested Compose projects.
 - **web** — nginx serving the Vue SPA and proxying `/api/` to the API.
 
-Game servers are **not** part of the panel stack. The panel creates and manages
-[LauncherDockered](https://github.com/GravitLauncher/LauncherDockered)
-installations on the Docker host. Every installation runs the official
-`ghcr.io/gravitlauncher/launcher` image plus its own nginx facade, which
-publishes port **17549** on the host and serves launcher updates, profile
-downloads, and the launcher WebSocket/API endpoints.
+LaunchServer is **not** part of the panel stack. Each panel creates and manages
+exactly one [LauncherDockered](https://github.com/GravitLauncher/LauncherDockered)
+workspace on the Docker host. It runs the official
+`ghcr.io/gravitlauncher/launcher` image plus an nginx facade, which publishes
+port **17549** on the host and serves launcher updates, profile downloads, and
+the launcher WebSocket/API endpoints. Additional Minecraft clients are
+LaunchServer profiles inside that shared workspace; they do not create more
+containers or independent configuration trees.
 
 ```text
 https://panel.example.com  → reverse proxy → gravit-panel web (127.0.0.1:8080)
-https://mine.example.com   → reverse proxy → installation nginx (host:17549)
+https://mine.example.com   → reverse proxy → LaunchServer nginx (host:17549)
 ```
 
-The Compose files also include an **optional standalone `launchserver`
-service** built from the stock official image (`ghcr.io/gravitlauncher/launcher`,
-no custom build). It is a convenience for simple setups: the panel does not
-manage it, it keeps its data in `PANEL_DATA_DIR/launchserver`, and its netty
-port (`127.0.0.1:9274`, WebSocket API plus update files when
-`fileServerEnabled`) stays on the host loopback until you proxy a game domain
-to it. Managed game servers are always LauncherDockered installations.
+The managed workspace uses
+`PANEL_DATA_DIR/installations/default`; there is no second standalone
+`PANEL_DATA_DIR/launchserver` service or configuration.
 
 ## Development
 
@@ -88,7 +86,7 @@ the **same absolute path inside the API container**, not a named Docker volume:
 the panel creates nested LauncherDockered Compose projects whose bind mounts
 must be resolved by the host Docker daemon. Back up this directory before
 upgrades; it contains the SQLite database, the credential encryption key, and
-all managed installations.
+the managed LaunchServer workspace.
 
 ### Panel public URL
 
@@ -127,8 +125,8 @@ When hosting below a sub-path, the reverse proxy must route
 
 ### Game domain routing
 
-Launcher clients reach their game server through the installation's own nginx
-facade, which every LauncherDockered project publishes on host port `17549`
+Launcher clients reach LaunchServer through its nginx facade, which the
+LauncherDockered workspace publishes on host port `17549`
 (HTTP only). Point your game domain at it through your HTTPS proxy:
 
 ```nginx
@@ -153,7 +151,7 @@ WebSocket upgrade headers are required: the launcher protocol connects to
 `wss://<game-domain>/api`. Terminate TLS at the proxy and forward
 `X-Forwarded-Proto` so LaunchServer keeps generating `https://`/`wss://` URLs.
 
-When you create an installation in the panel, set its **address** to the game
+When you set up LaunchServer in the panel, set its **address** to the game
 domain (for example `mine.example.com`, without scheme or path). The panel
 synchronizes the persisted launcher download URLs and WebSocket address to that
 value on every install and restart.
@@ -174,17 +172,10 @@ deployment. Coolify forbids `${...}` interpolation in volume paths, so the
 Coolify Compose file intentionally uses this fixed path; it must not be
 inside Coolify's temporary source checkout.
 
-The bundled standalone `launchserver` service can be published straight from
-the Coolify UI: assign your game domain to it (it serves the launcher
-WebSocket API and update downloads on port 9274; Traefik proxies WebSocket
-upgrades transparently) and set `LAUNCHSERVER_ADDRESS` to the same domain so
-the generated `LaunchServer.json` advertises `https://`/`wss://` URLs. Without
-a domain assignment it stays internal and unused.
-
-Game servers managed by the panel are created afterwards as LauncherDockered
-installations; they are not Coolify services, so Coolify cannot route domains
-to them through the UI. To publish their domain through Coolify's Traefik,
-route it to the installation facade on the host by adding a dynamic
+The single LaunchServer managed by the panel is created afterwards from the
+setup screen. It is not a Coolify service, so Coolify cannot route its game
+domain through the application UI. To publish that domain through Coolify's
+Traefik, route it to the LaunchServer facade on the host by adding a dynamic
 configuration on the Docker host, for example
 `/data/coolify/proxy/dynamic/gravit-launcher.yaml`:
 
@@ -210,12 +201,19 @@ Check the existing files in `/data/coolify/proxy/dynamic/` for the exact
 (`ip -4 addr show docker0`). Traefik reloads dynamic configurations without a
 restart and proxies WebSocket upgrades on the same router automatically.
 
+If upgrading from a revision that included the optional standalone
+`launchserver` Compose service, redeploy the panel stack with orphan removal
+enabled and verify that the old service is stopped before starting the managed
+server. Its old `PANEL_DATA_DIR/launchserver` directory is intentionally left
+untouched for recovery; archive or remove it only after checking that the
+managed data under `PANEL_DATA_DIR/installations/default` is complete.
+
 ## Operations
 
 - Source-verified LaunchServer and launcher module catalog.
 - Checksum-pinned MirrorHelper workspace and LauncherPrestarter installation.
 - Launcher and Minecraft client builds with live job logs.
-- Launcher artifact hashing and installation-scoped downloads.
+- Launcher artifact hashing and server-scoped downloads.
 - Modrinth search, compatible mod installation, hash detection, verified
   updates, disable/enable, and recoverable removal.
 - Source-verified FileAuthSystem configuration with sanitized provider discovery
@@ -226,12 +224,12 @@ restart and proxies WebSocket upgrades on the same router automatically.
 - Adaptive Users page with FileAuthSystem account CRUD and guidance for
   externally managed providers.
 - Read-only attachment of an already running official LauncherDockered checkout.
-- Profile-aware navigation: first-run setup is fullscreen, while registered
-  projects use one persisted sidebar selection across every operational page.
+- Profile-aware navigation: first-run LaunchServer setup is fullscreen, while
+  the sidebar persists one client-profile selection across operational pages.
 
 Machine-changing operations are fixed typed jobs. Workspace replacement and mod
 removal require explicit UI confirmations; existing files are snapshotted or
-moved to recoverable trash before replacement. LauncherDockered installation
+moved to recoverable trash before replacement. LaunchServer setup
 requires an explicit in-app confirmation showing the target path, address,
 Compose project, and operation mode.
 

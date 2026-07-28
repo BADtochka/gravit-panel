@@ -66,7 +66,7 @@
             </Badge>
           </div>
           <CardDescription>
-            Installed automatically during profile setup. Reapply only to repair or reset it.
+            Installed automatically during LaunchServer setup. Reapply only to repair or reset it.
           </CardDescription>
         </CardHeader>
         <CardContent class="break-all font-mono text-xs text-muted-foreground">
@@ -105,7 +105,7 @@
             </Badge>
           </div>
           <CardDescription>
-            Installed automatically during profile setup from a checksum-verified release.
+            Installed automatically during LaunchServer setup from a checksum-verified release.
           </CardDescription>
         </CardHeader>
         <CardContent class="space-y-1 text-xs text-muted-foreground">
@@ -248,7 +248,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useInstallationJob } from '@/composables/useInstallationJob'
 import { panelUrl } from '@/lib/public-path'
-import { useInstallationsStore } from '@/stores/installations'
+import { useLaunchServerStore } from '@/stores/launchserver'
 import type {
   ClientPreparationState, JobRecord, LauncherArtifact, LauncherCustomizationState,
   LaunchServerRuntimeHealth, SourcePin,
@@ -273,7 +273,7 @@ interface Configuration {
 }
 
 const queryClient = useQueryClient()
-const { selectedInstallationId: installationId } = storeToRefs(useInstallationsStore())
+const { launchServerId: installationId } = storeToRefs(useLaunchServerStore())
 const {
   activeJob,
   activeJobError,

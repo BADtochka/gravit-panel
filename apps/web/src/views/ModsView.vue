@@ -43,20 +43,12 @@
       <CardContent class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <div>
           <label class="text-xs font-medium" for="mods-profile">Profile</label>
-          <Select v-model="profile">
-            <SelectTrigger id="mods-profile" class="mt-1 w-full">
-              <SelectValue placeholder="Select a built profile" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="item in profiles?.items"
-                :key="item.name"
-                :value="item.name"
-              >
-                {{ item.name }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+          <p id="mods-profile" class="mt-1 flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm">
+            {{ profile || 'No profile selected' }}
+          </p>
+          <p class="mt-1 text-xs text-muted-foreground">
+            Switch profiles from the sidebar.
+          </p>
         </div>
         <div>
           <label class="text-xs font-medium" for="mods-version">Minecraft</label>
@@ -227,9 +219,11 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useInstallationJob } from '@/composables/useInstallationJob'
-import { useInstallationsStore } from '@/stores/installations'
+import { useClientProfiles } from '@/composables/useClientProfiles'
+import { useLaunchServerStore } from '@/stores/launchserver'
+import { useProfilesStore } from '@/stores/profiles'
 import type {
-  ClientProfileDescriptor, InstalledMod, JobRecord, MinecraftLoader,
+  InstalledMod, JobRecord, MinecraftLoader,
   MinecraftVersionCatalog, ModrinthProject,
 } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
@@ -241,8 +235,8 @@ import { computed, ref, watch } from 'vue'
 
 const loaders = ['VANILLA', 'FABRIC', 'FORGE', 'NEOFORGE', 'QUILT'] as const
 const queryClient = useQueryClient()
-const { selectedInstallationId: installationId } = storeToRefs(useInstallationsStore())
-const profile = ref('')
+const { launchServerId: installationId } = storeToRefs(useLaunchServerStore())
+const { selectedProfileName: profile } = storeToRefs(useProfilesStore())
 const version = ref('')
 const loader = ref<MinecraftLoader>('FABRIC')
 const constraintsLocked = ref(true)
@@ -264,7 +258,6 @@ const {
 )
 watch(installationId, () => {
   selectedSlugs.value = []
-  profile.value = ''
   version.value = ''
   loader.value = 'FABRIC'
   constraintsLocked.value = true
@@ -294,14 +287,7 @@ const {
   queryFn: () => getJson<MinecraftVersionCatalog>('/api/clients/minecraft-versions'),
   staleTime: 6 * 60 * 60 * 1000,
 })
-const { data: profiles, error: profilesError } = useQuery({
-  queryKey: computed(() => ['client-profiles', installationId.value]),
-  queryFn: () => getJson<{ items: ClientProfileDescriptor[] }>(
-    `/api/clients/profiles?installationId=${encodeURIComponent(installationId.value)}`,
-  ),
-  enabled: computed(() => Boolean(installationId.value)),
-  retry: false,
-})
+const { data: profiles, error: profilesError } = useClientProfiles()
 const selectedProfile = computed(
   () => profiles.value?.items.find((item) => item.name === profile.value) ?? null,
 )
@@ -311,11 +297,7 @@ const applyProfileParameters = () => {
   version.value = selected.minecraftVersion ?? ''
   loader.value = selected.loader ?? 'FABRIC'
 }
-watch(profiles, (catalog) => {
-  const items = catalog?.items ?? []
-  if (!items.some((item) => item.name === profile.value)) {
-    profile.value = items[0]?.name ?? ''
-  }
+watch(profiles, () => {
   if (constraintsLocked.value) applyProfileParameters()
 }, { immediate: true })
 watch(profile, () => {

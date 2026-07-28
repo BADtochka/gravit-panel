@@ -120,7 +120,7 @@ describe('API smoke routes', () => {
     const configuration = await configurationResponse.json()
 
     expect(configurationResponse.status).toBe(200)
-    expect(configuration.installationsRoot).toStartWith('/')
+    expect(configuration.launchServerPath).toStartWith('/')
     expect(configuration).not.toHaveProperty('machineOperationsEnabled')
 
     const installResponse = await request('/api/docker/install', {
@@ -128,7 +128,6 @@ describe('API smoke routes', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         mode: 'clone',
-        installationName: 'default',
         address: 'localhost:17549',
         projectName: 'TEST_PROJECT',
         confirmInstallation: false,
@@ -162,12 +161,12 @@ describe('API smoke routes', () => {
     expect(JSON.stringify(body)).not.toContain('token')
   })
 
-  test('lists registered LauncherDockered installations', async () => {
-    const response = await request('/api/docker/installations')
+  test('reports the single managed LaunchServer', async () => {
+    const response = await request('/api/docker/launchserver')
     const body = await response.json()
 
     expect(response.status).toBe(200)
-    expect(body.items).toBeArray()
+    expect(body.item).toBeNull()
   })
 
   test('returns a source-verified module catalog', async () => {

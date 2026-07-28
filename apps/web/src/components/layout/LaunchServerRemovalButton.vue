@@ -5,22 +5,22 @@
         class="w-full cursor-pointer"
         size="sm"
         variant="outline"
-        :disabled="pending || !selectedInstallation"
+        :disabled="pending || !launchServer"
       >
         <LoaderCircle v-if="pending" class="animate-spin" />
         <Trash2 v-else />
-        {{ pending ? 'Deleting profile…' : 'Delete profile' }}
+        {{ pending ? 'Deleting server…' : 'Delete server' }}
       </Button>
     </AlertDialogTrigger>
     <AlertDialogContent>
       <AlertDialogHeader>
-        <AlertDialogTitle>Delete {{ selectedInstallation?.name }} permanently?</AlertDialogTitle>
+        <AlertDialogTitle>Delete LaunchServer permanently?</AlertDialogTitle>
         <AlertDialogDescription class="space-y-2">
           <span class="block">
-            Containers, Compose volumes, installation files, configuration snapshots, and the
+            Containers, Compose volumes, server files, configuration snapshots, and the
             encrypted RemoteControl credential will be removed.
           </span>
-          <span class="block break-all font-mono text-xs">{{ selectedInstallation?.path }}</span>
+          <span class="block break-all font-mono text-xs">{{ launchServer?.path }}</span>
           <span class="block font-medium text-destructive">
             This cannot be undone. Job history is retained as an audit log.
           </span>
@@ -32,7 +32,7 @@
           class="cursor-pointer bg-destructive text-white hover:bg-destructive/90"
           @click="startRemoval"
         >
-          Delete profile and data
+          Delete server and data
         </AlertDialogAction>
       </AlertDialogFooter>
     </AlertDialogContent>
@@ -51,7 +51,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { useInstallationJob } from '@/composables/useInstallationJob'
 import { useJobLogStream } from '@/composables/useJobLogStream'
-import { useInstallationsStore } from '@/stores/installations'
+import { useLaunchServerStore } from '@/stores/launchserver'
 import type { JobRecord } from '@gravit-panel/shared'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { LoaderCircle, Trash2 } from '@lucide/vue'
@@ -60,13 +60,13 @@ import { computed } from 'vue'
 
 const emit = defineEmits<{ removed: [] }>()
 const queryClient = useQueryClient()
-const { selectedInstallation, selectedInstallationId } = storeToRefs(useInstallationsStore())
+const { launchServer, launchServerId } = storeToRefs(useLaunchServerStore())
 const {
   activeJob: job,
   attachJob,
   finishJob,
 } = useInstallationJob(
-  () => selectedInstallationId.value,
+  () => launchServerId.value,
   ['docker.launcherdockered.delete'],
 )
 
@@ -75,8 +75,8 @@ const {
   isPending: requestPending,
   error: requestError,
 } = useMutation({
-  mutationFn: async (installationId: string) => {
-    const response = await fetch(`/api/docker/installations/${installationId}`, {
+  mutationFn: async () => {
+    const response = await fetch('/api/docker/launchserver', {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ confirmDeletion: true }),
@@ -102,7 +102,7 @@ const { currentJob } = useJobLogStream(
         predicate: (query) => query.queryKey.includes(installationId),
       })
     }
-    await queryClient.invalidateQueries({ queryKey: ['docker-installations'] })
+    await queryClient.invalidateQueries({ queryKey: ['docker-launchserver'] })
     emit('removed')
   },
 )
@@ -120,8 +120,8 @@ const error = computed(
       : null),
 )
 const startRemoval = () => {
-  if (selectedInstallation.value && !pending.value) {
-    removeInstallation(selectedInstallation.value.id)
+  if (launchServer.value && !pending.value) {
+    removeInstallation()
   }
 }
 </script>

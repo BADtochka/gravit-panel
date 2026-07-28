@@ -19,18 +19,18 @@
       </span>
     </div>
 
-    <div v-if="installations.length" class="grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
+    <div v-if="launchServer" class="grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
       <aside class="space-y-4">
         <div class="rounded-lg border bg-card p-4">
-          <p class="text-sm font-medium">{{ selectedInstallation?.name }}</p>
-          <p class="mt-1 text-xs text-muted-foreground">{{ selectedInstallation?.projectName }}</p>
-          <template v-if="selectedInstallation">
+          <p class="text-sm font-medium">LaunchServer</p>
+          <p class="mt-1 text-xs text-muted-foreground">{{ launchServer.projectName }}</p>
+          <template v-if="launchServer">
             <p class="mt-3 break-all font-mono text-xs text-muted-foreground">
-              {{ selectedInstallation.path }}
+              {{ launchServer.path }}
             </p>
-            <p class="mt-2 text-xs text-muted-foreground">{{ selectedInstallation.address }}</p>
+            <p class="mt-2 text-xs text-muted-foreground">{{ launchServer.address }}</p>
             <p class="mt-1 font-mono text-xs text-muted-foreground">
-              {{ selectedInstallation.sourceRevision.slice(0, 12) }}
+              {{ launchServer.sourceRevision.slice(0, 12) }}
             </p>
           </template>
         </div>
@@ -54,6 +54,14 @@
             Security check
           </Button>
         </div>
+
+        <div class="rounded-lg border border-destructive/30 p-4">
+          <p class="text-sm font-medium text-destructive">Danger zone</p>
+          <p class="mt-1 text-xs text-muted-foreground">
+            The panel manages a single LaunchServer. Delete it only to rebuild from scratch.
+          </p>
+          <LaunchServerRemovalButton class="mt-3" />
+        </div>
       </aside>
 
       <div class="min-w-0 overflow-hidden rounded-lg border bg-card">
@@ -73,7 +81,7 @@
           </p>
           <p v-else-if="error" class="text-destructive">{{ error.message }}</p>
           <p v-else-if="!result" class="text-muted-foreground">
-            Run a status or security command to inspect this installation.
+            Run a status or security command to inspect LaunchServer.
           </p>
           <div v-else-if="result.lines.length" class="space-y-1">
             <p v-for="(line, index) in result.lines" :key="`${index}-${line}`" class="break-words">
@@ -108,8 +116,9 @@
 </template>
 
 <script setup lang="ts">
+import LaunchServerRemovalButton from '@/components/layout/LaunchServerRemovalButton.vue'
 import { Button } from '@/components/ui/button'
-import { useInstallationsStore } from '@/stores/installations'
+import { useLaunchServerStore } from '@/stores/launchserver'
 import type {
   ApiHealth,
   LaunchServerCommandResult,
@@ -120,8 +129,8 @@ import { Activity, LoaderCircle, ShieldCheck } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { computed, ref, watch } from 'vue'
 
-const { installations, selectedInstallation, selectedInstallationId } = storeToRefs(
-  useInstallationsStore(),
+const { launchServer, launchServerId } = storeToRefs(
+  useLaunchServerStore(),
 )
 const result = ref<LaunchServerCommandResult | null>(null)
 
@@ -138,11 +147,11 @@ const { data: health } = useQuery({
   queryKey: ['health'],
   queryFn: () => getJson<ApiHealth>('/api/health'),
 })
-watch(selectedInstallationId, () => {
+watch(launchServerId, () => {
   result.value = null
 })
 
-const commandsEnabled = computed(() => Boolean(selectedInstallationId.value))
+const commandsEnabled = computed(() => Boolean(launchServerId.value))
 
 const {
   error,
@@ -155,7 +164,7 @@ const {
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ installationId: selectedInstallationId.value }),
+        body: JSON.stringify({ installationId: launchServerId.value }),
       },
     ),
   onSuccess: (value) => {

@@ -3,7 +3,7 @@
     <div>
       <h2 class="text-2xl font-semibold tracking-tight">Clients</h2>
       <p class="mt-1 text-sm text-muted-foreground">
-        Create or rebuild the Minecraft client for the selected panel profile.
+        Create a client profile or rebuild the profile selected in the sidebar.
       </p>
     </div>
 
@@ -16,7 +16,9 @@
     <Card>
       <CardHeader>
         <div class="flex items-start justify-between gap-3">
-          <CardTitle class="text-base">Build Minecraft client</CardTitle>
+          <CardTitle class="text-base">
+            {{ creatingProfile ? 'Create client profile' : 'Build Minecraft client' }}
+          </CardTitle>
           <Badge v-if="profileState?.built" variant="secondary">
             <CircleCheck /> Completed
           </Badge>
@@ -30,7 +32,7 @@
           <label class="text-xs font-medium" for="client-name">Profile name</label>
           <Input id="client-name" v-model="clientName" class="mt-1" />
           <p class="mt-1 text-xs text-muted-foreground">
-            Defaults to the selected panel profile name.
+            New profiles appear in the sidebar switcher after the build completes.
           </p>
         </div>
         <div>
@@ -88,8 +90,10 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useClientProfiles } from '@/composables/useClientProfiles'
 import { useInstallationJob } from '@/composables/useInstallationJob'
-import { useInstallationsStore } from '@/stores/installations'
+import { useLaunchServerStore } from '@/stores/launchserver'
+import { useProfilesStore } from '@/stores/profiles'
 import type {
   ClientCompatibility,
   ClientProfileState,
@@ -104,6 +108,7 @@ import {
 } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 interface Configuration {
   loaders: MinecraftLoader[]
@@ -111,9 +116,11 @@ interface Configuration {
 }
 
 const queryClient = useQueryClient()
-const { selectedInstallation, selectedInstallationId: installationId } = storeToRefs(
-  useInstallationsStore(),
-)
+const route = useRoute()
+const router = useRouter()
+const { launchServerId: installationId } = storeToRefs(useLaunchServerStore())
+const { selectedProfileName } = storeToRefs(useProfilesStore())
+const { data: profiles } = useClientProfiles()
 const {
   activeJob,
   activeJobError,
@@ -127,10 +134,10 @@ const clientName = ref('')
 const version = ref('')
 const loader = ref<MinecraftLoader>('FABRIC')
 const mods = ref('')
-
-watch(selectedInstallation, (installation) => {
-  clientName.value = installation?.name ?? ''
-}, { immediate: true })
+const newProfileToken = computed(() =>
+  typeof route.query.new === 'string' ? route.query.new : '',
+)
+const creatingProfile = computed(() => Boolean(newProfileToken.value))
 watch(activeJob, (job) => {
   if (!job || job.type !== 'gravit.client.build') return
   if (typeof job.input.name === 'string') clientName.value = job.input.name
@@ -169,6 +176,34 @@ const {
 watch(versionCatalog, (catalog) => {
   if (!version.value && catalog?.latestRelease) version.value = catalog.latestRelease
 }, { immediate: true })
+const selectedProfile = computed(
+  () => profiles.value?.items.find((item) => item.name === selectedProfileName.value) ?? null,
+)
+let appliedDraftKey = ''
+watch(
+  [selectedProfileName, selectedProfile, newProfileToken],
+  ([name, selected, createToken]) => {
+    const draftKey = createToken
+      ? `new:${createToken}`
+      : `profile:${name}:${selected?.minecraftVersion ?? ''}:${selected?.loader ?? ''}`
+    if (draftKey === appliedDraftKey) return
+    appliedDraftKey = draftKey
+
+    if (createToken) {
+      clientName.value = ''
+      version.value = versionCatalog.value?.latestRelease ?? ''
+      loader.value = 'FABRIC'
+      mods.value = ''
+      return
+    }
+
+    clientName.value = name
+    version.value = selected?.minecraftVersion ?? versionCatalog.value?.latestRelease ?? ''
+    loader.value = selected?.loader ?? 'FABRIC'
+    mods.value = ''
+  },
+  { immediate: true },
+)
 
 const { data: compatibility, error: compatibilityError } = useQuery({
   queryKey: computed(() => ['client-compatibility', version.value]),
@@ -238,5 +273,9 @@ const jobFinished = async (job: JobRecord) => {
       queryKey: ['client-profiles', installationId.value],
     }),
   ])
+  if (job.status === 'succeeded' && typeof job.input.name === 'string') {
+    selectedProfileName.value = job.input.name
+    await router.replace('/clients')
+  }
 }
 </script>

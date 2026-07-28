@@ -2,11 +2,11 @@
   <section class="space-y-4 rounded-lg border bg-card p-4 md:p-6">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">Profile details</p>
-        <h3 class="mt-1 text-lg font-semibold">Configure Launcher profile</h3>
+        <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">LaunchServer details</p>
+        <h3 class="mt-1 text-lg font-semibold">Configure the panel server</h3>
         <p class="mt-1 text-sm text-muted-foreground">
           LauncherDockered, RemoteControl, MirrorHelper, and LauncherPrestarter are prepared in one
-          background job.
+          background job. Client profiles will share this server and its configuration.
         </p>
       </div>
       <span class="rounded-md border px-2 py-1 text-xs text-muted-foreground">Background job</span>
@@ -16,7 +16,7 @@
       v-if="!hostReady && form.mode !== 'attach'"
       class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
     >
-      Pass Docker preflight on the selected port before starting or configuring an installation.
+      Pass Docker preflight on the selected port before starting or configuring LaunchServer.
       Attaching an already running server does not require a free port.
     </p>
 
@@ -61,25 +61,15 @@
           </RadioGroup>
         </fieldset>
 
-        <label class="block text-sm font-medium">
-          Installation name
-          <Input
-            v-model.trim="form.installationName"
-            class="mt-1"
-            maxlength="64"
-            pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*"
-            required
-          />
-          <span
-            v-if="configuration && form.mode === 'clone'"
-            class="mt-1 block break-all text-xs text-muted-foreground"
-          >
-            {{ configuration.installationsRoot }}/{{ form.installationName }}
-          </span>
-          <span v-else class="mt-1 block text-xs text-muted-foreground">
-            Display name used in the panel.
-          </span>
-        </label>
+        <div v-if="form.mode === 'clone'" class="rounded-md border bg-muted/40 p-3">
+          <p class="text-sm font-medium">Managed server path</p>
+          <p class="mt-1 break-all font-mono text-xs text-muted-foreground">
+            {{ configuration?.launchServerPath ?? 'Loading…' }}
+          </p>
+          <p class="mt-2 text-xs text-muted-foreground">
+            Fixed for this panel; additional clients are created as profiles inside this server.
+          </p>
+        </div>
         <label v-if="form.mode !== 'clone'" class="block text-sm font-medium">
           Existing absolute path
           <Input
@@ -109,7 +99,7 @@
           </span>
         </label>
         <label class="block text-sm font-medium">
-          Project name
+          Launcher project name
           <Input
             v-model.trim="form.projectName"
             class="mt-1"
@@ -117,6 +107,9 @@
             pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*"
             required
           />
+          <span class="mt-1 block text-xs text-muted-foreground">
+            Shared by the launcher and every client profile on this server.
+          </span>
         </label>
         <Button
           class="w-full"
@@ -129,7 +122,7 @@
         >
           <LoaderCircle v-if="isPending || (activeJob && !terminal)" class="size-4 animate-spin" />
           <Play v-else class="size-4" />
-          {{ activeJob && !terminal ? 'Installation running' : 'Start installation' }}
+          {{ activeJob && !terminal ? 'LaunchServer setup running' : 'Set up LaunchServer' }}
         </Button>
       </div>
     </form>
@@ -137,7 +130,7 @@
     <AlertDialog v-model:open="confirmationOpen">
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Confirm profile creation</AlertDialogTitle>
+          <AlertDialogTitle>Confirm LaunchServer setup</AlertDialogTitle>
           <AlertDialogDescription>
             This operation prepares LauncherDockered and automatically configures a restricted
             RemoteControl token, the pinned MirrorHelper workspace, and LauncherPrestarter.
@@ -176,7 +169,7 @@
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction @click="submitInstallation">
-            Confirm and create profile
+            Confirm and set up server
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -189,7 +182,7 @@
       {{ (configurationError || mutationError)?.message }}
     </p>
 
-    <JobLogCard :job="activeJob" title="Profile creation" @finished="installationFinished" />
+    <JobLogCard :job="activeJob" title="LaunchServer setup" @finished="installationFinished" />
   </section>
 </template>
 
@@ -208,7 +201,6 @@ import JobLogCard from '@/components/jobs/JobLogCard.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { useInstallationsStore } from '@/stores/installations'
 import type {
   DockerInstallConfiguration,
   JobRecord,
@@ -226,13 +218,11 @@ const emit = defineEmits<{
 }>()
 
 const queryClient = useQueryClient()
-const installationsStore = useInstallationsStore()
 const confirmationOpen = ref(false)
 const activeJob = ref<JobRecord | null>(null)
 
 const form = reactive({
   mode: 'clone' as LauncherDockeredInstallMode,
-  installationName: 'default',
   importPath: '',
   address: 'localhost:17549',
   projectName: 'MY_PROJECT',
@@ -258,11 +248,7 @@ const connectToJob = (job: JobRecord) => {
 const installationFinished = async (record: JobRecord) => {
   activeJob.value = record
   if (record.status !== 'succeeded') return
-  const installationId = record.result?.installationId
-  if (typeof installationId === 'string') {
-    installationsStore.selectedInstallationId = installationId
-  }
-  await queryClient.invalidateQueries({ queryKey: ['docker-installations'] })
+  await queryClient.invalidateQueries({ queryKey: ['docker-launchserver'] })
   emit('installed')
 }
 
@@ -282,7 +268,7 @@ const {
 
 const installationTarget = computed(() =>
   form.mode === 'clone'
-    ? `${configuration.value?.installationsRoot ?? ''}/${form.installationName}`
+    ? configuration.value?.launchServerPath ?? ''
     : form.importPath,
 )
 
@@ -293,7 +279,6 @@ const requestInstallation = () => {
 const submitInstallation = () => {
   const input: LauncherDockeredInstallRequest = {
     mode: form.mode,
-    installationName: form.installationName,
     address: form.address,
     projectName: form.projectName,
     confirmInstallation: true,

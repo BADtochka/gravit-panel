@@ -23,14 +23,14 @@
       </section>
     </main>
 
-    <div v-else-if="installationsLoading" class="grid min-h-screen place-items-center">
+    <div v-else-if="launchServerLoading" class="grid min-h-screen place-items-center">
       <div class="flex items-center gap-2 text-sm text-muted-foreground">
         <LoaderCircle class="size-4 animate-spin" />
-        Loading projects…
+        Loading LaunchServer…
       </div>
     </div>
 
-    <main v-else-if="!hasProjects" class="min-h-screen p-4 md:p-8">
+    <main v-else-if="!hasLaunchServer" class="min-h-screen p-4 md:p-8">
       <div class="mx-auto max-w-7xl">
         <RouterView />
       </div>
@@ -50,7 +50,7 @@
             <p class="text-xs text-muted-foreground">Admin workspace</p>
           </div>
         </div>
-        <ProjectSwitcher class="border-b p-3" />
+        <ProfileSwitcher class="border-b p-3" />
         <nav class="space-y-1 p-3">
           <RouterLink
             v-for="item in navItems"
@@ -94,7 +94,7 @@
                     <SheetDescription class="text-xs">Admin workspace</SheetDescription>
                   </div>
                 </SheetHeader>
-                <ProjectSwitcher class="border-b p-3" @selected="mobileNavOpen = false" />
+                <ProfileSwitcher class="border-b p-3" @selected="mobileNavOpen = false" />
                 <nav class="space-y-1 p-3">
                   <RouterLink
                     v-for="item in navItems"
@@ -112,10 +112,10 @@
             </Sheet>
             <div class="min-w-0">
               <h1 class="truncate text-base font-semibold">
-                {{ selectedInstallation?.name ?? 'GravitLauncher' }}
+                LaunchServer
               </h1>
               <p class="hidden truncate text-xs text-muted-foreground sm:block">
-                {{ selectedInstallation?.projectName }} · {{ selectedInstallation?.address }}
+                {{ launchServer?.projectName }} · {{ launchServer?.address }}
               </p>
             </div>
           </div>
@@ -155,7 +155,7 @@
 </template>
 
 <script setup lang="ts">
-import ProjectSwitcher from '@/components/layout/ProjectSwitcher.vue'
+import ProfileSwitcher from '@/components/layout/ProfileSwitcher.vue'
 import { Button } from '@/components/ui/button'
 import {
   Sheet,
@@ -165,10 +165,10 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
-import { resolveInstallationRedirect } from '@/lib/installation-routing'
+import { resolveLaunchServerRedirect } from '@/lib/launchserver-routing'
 import { panelFetch, panelUrl } from '@/lib/public-path'
 import { useTheme } from '@/lib/theme'
-import { useInstallationsStore } from '@/stores/installations'
+import { useLaunchServerStore } from '@/stores/launchserver'
 import type { GravitInstallation } from '@gravit-panel/shared'
 import { useQuery } from '@tanstack/vue-query'
 import {
@@ -189,8 +189,8 @@ import { storeToRefs } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-interface InstallationsResponse {
-  items: GravitInstallation[]
+interface LaunchServerResponse {
+  item: GravitInstallation | null
 }
 
 interface PanelAuthSession {
@@ -206,8 +206,8 @@ interface PanelAuthSession {
 }
 
 const { theme, toggleTheme } = useTheme()
-const installationsStore = useInstallationsStore()
-const { installations, selectedInstallation } = storeToRefs(installationsStore)
+const launchServerStore = useLaunchServerStore()
+const { launchServer } = storeToRefs(launchServerStore)
 const mobileNavOpen = ref(false)
 const route = useRoute()
 const router = useRouter()
@@ -239,30 +239,30 @@ const logout = async () => {
   window.location.assign(panelUrl('/'))
 }
 
-const getInstallations = async () => {
-  const response = await panelFetch('/api/docker/installations')
-  if (!response.ok) throw new Error(`Projects request failed with status ${response.status}`)
-  return response.json() as Promise<InstallationsResponse>
+const getLaunchServer = async () => {
+  const response = await panelFetch('/api/docker/launchserver')
+  if (!response.ok) throw new Error(`LaunchServer request failed with status ${response.status}`)
+  return response.json() as Promise<LaunchServerResponse>
 }
 
-const { data, isLoading: installationsLoading } = useQuery({
-  queryKey: ['docker-installations'],
-  queryFn: getInstallations,
+const { data, isLoading: launchServerLoading } = useQuery({
+  queryKey: ['docker-launchserver'],
+  queryFn: getLaunchServer,
   enabled: computed(
     () => panelAuth.value !== undefined && (!panelAuth.value.enabled || panelAuth.value.authenticated),
   ),
 })
 watch(
-  [() => data.value?.items, () => route.path],
-  ([items, path]) => {
-    if (!items) return
-    installationsStore.setInstallations(items)
-    const redirect = resolveInstallationRedirect(path, items.length)
+  [() => data.value?.item, () => route.path],
+  ([item, path]) => {
+    if (item === undefined) return
+    launchServerStore.setLaunchServer(item)
+    const redirect = resolveLaunchServerRedirect(path, Boolean(item))
     if (redirect) void router.replace(redirect)
   },
   { immediate: true },
 )
-const hasProjects = computed(() => installations.value.length > 0)
+const hasLaunchServer = computed(() => Boolean(launchServer.value))
 
 const navItems = [
   { to: '/status', label: 'Status', icon: Activity },

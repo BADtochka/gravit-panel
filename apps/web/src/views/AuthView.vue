@@ -306,8 +306,8 @@
               </AlertDialogHeader>
               <dl class="grid gap-2 rounded-md border bg-muted/40 p-4 text-sm">
                 <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-3">
-                  <dt class="text-muted-foreground">Installation</dt>
-                  <dd>{{ selectedInstallation?.name }}</dd>
+                  <dt class="text-muted-foreground">Server</dt>
+                  <dd>LaunchServer</dd>
                 </div>
                 <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-3">
                   <dt class="text-muted-foreground">Auth id</dt>
@@ -432,7 +432,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { useInstallationJob } from '@/composables/useInstallationJob'
 import { defaultDiscordRedirectUrl as resolveDiscordRedirectUrl } from '@/lib/discord-redirect'
-import { useInstallationsStore } from '@/stores/installations'
+import { useLaunchServerStore } from '@/stores/launchserver'
 import type {
   AuthConfiguration,
   AuthCoreRecipeId,
@@ -449,8 +449,8 @@ import { storeToRefs } from 'pinia'
 import { computed, reactive, ref, watch } from 'vue'
 
 const queryClient = useQueryClient()
-const { selectedInstallation, selectedInstallationId: installationId } = storeToRefs(
-  useInstallationsStore(),
+const { launchServer, launchServerId: installationId } = storeToRefs(
+  useLaunchServerStore(),
 )
 const authId = ref('')
 const recipeId = ref<AuthCoreRecipeId>('file')
@@ -494,7 +494,7 @@ const discordModalOpen = ref(false)
 const discordClientSecretConfigured = ref(false)
 const fileAuthAutoSave = ref(true)
 const defaultDiscordRedirectUrl = computed(() =>
-  resolveDiscordRedirectUrl(selectedInstallation.value?.address),
+  resolveDiscordRedirectUrl(launchServer.value?.address),
 )
 
 const {

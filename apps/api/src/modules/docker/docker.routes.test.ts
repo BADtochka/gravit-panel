@@ -112,7 +112,6 @@ const installRequest = (
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({
     mode,
-    installationName: `${mode}-install`,
     ...(mode !== 'clone' ? { importPath: '/srv/imported' } : {}),
     address: 'localhost:17549',
     projectName: 'TEST_PROJECT',
@@ -133,6 +132,8 @@ describe('Docker installation API', () => {
       const response = await request('/api/docker/install', installRequest(mode))
       const queued = await response.json()
       const completed = await waitForTerminalJob(jobsStore, queued.id)
+      const currentResponse = await request('/api/docker/launchserver')
+      const current = await currentResponse.json()
 
       expect(response.status).toBe(202)
       expect(queued.type).toBe('docker.launcherdockered.install')
@@ -140,10 +141,15 @@ describe('Docker installation API', () => {
       expect(completed.result?.installationId).toBeString()
       expect(installations.list()).toEqual([
         expect.objectContaining({
-          name: `${mode}-install`,
-          path: `/srv/gravit/${mode}-install`,
+          name: 'LaunchServer',
+          path: '/srv/gravit/default',
         }),
       ])
+      expect(currentResponse.status).toBe(200)
+      expect(current.item).toMatchObject({
+        name: 'LaunchServer',
+        path: '/srv/gravit/default',
+      })
       expect(calls).toBe(1)
     },
   )
@@ -165,11 +171,29 @@ describe('Docker installation API', () => {
     expect(first.status).toBe(202)
     expect(duplicate.status).toBe(409)
     expect(await duplicate.json()).toEqual({
-      message: 'A LauncherDockered installation job is already active.',
+      message: 'A LaunchServer setup job is already active.',
     })
 
     release?.()
     expect((await waitForTerminalJob(jobsStore, firstJob.id)).status).toBe('succeeded')
+  })
+
+  test('rejects a second installation because the panel manages a single LaunchServer', async () => {
+    const { request, installations, jobsStore } = createHarness(async (input) =>
+      installResult(input),
+    )
+
+    const first = await request('/api/docker/install', installRequest('clone'))
+    const firstJob = await first.json()
+    expect((await waitForTerminalJob(jobsStore, firstJob.id)).status).toBe('succeeded')
+    expect(installations.list()).toHaveLength(1)
+
+    const second = await request('/api/docker/install', installRequest('clone'))
+    expect(second.status).toBe(409)
+    expect(await second.json()).toEqual({
+      message:
+        'This panel manages a single LaunchServer. Remove the existing installation before creating another one.',
+    })
   })
 
   test('serves installation configuration and validates explicit confirmation', async () => {
@@ -179,7 +203,6 @@ describe('Docker installation API', () => {
       ...installRequest('clone'),
       body: JSON.stringify({
         mode: 'clone',
-        installationName: 'default',
         address: 'localhost:17549',
         projectName: 'TEST_PROJECT',
         confirmInstallation: false,
@@ -188,13 +211,13 @@ describe('Docker installation API', () => {
 
     expect(configuration.status).toBe(200)
     expect(await configuration.json()).toMatchObject({
-      installationsRoot: '/srv/gravit',
+      launchServerPath: '/srv/gravit/default',
     })
     expect(invalid.status).toBe(422)
     expect(jobsStore.list()).toHaveLength(0)
   })
 
-  test('runs automatic integration provisioning before completing profile setup', async () => {
+  test('runs automatic integration provisioning before completing LaunchServer setup', async () => {
     const order: string[] = []
     const { request, jobsStore } = createHarness(
       async (input) => {
@@ -217,7 +240,7 @@ describe('Docker installation API', () => {
     const completed = await waitForTerminalJob(jobsStore, queued.id)
 
     expect(completed.status).toBe('succeeded')
-    expect(order).toEqual(['launcher-dockered', 'integrations:clone-install'])
+    expect(order).toEqual(['launcher-dockered', 'integrations:LaunchServer'])
     expect(completed.result).toHaveProperty('setup')
   })
 
@@ -284,7 +307,7 @@ describe('Docker installation API', () => {
       new Date().toISOString(),
     )
 
-    const response = await request(`/api/docker/installations/${installation.id}`, {
+    const response = await request('/api/docker/launchserver', {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ confirmDeletion: true }),
@@ -315,7 +338,7 @@ describe('Docker installation API', () => {
     expect(jobsStore.get(queued.id)?.status).toBe('succeeded')
   })
 
-  test('requires confirmation, a registered installation, and no active operation', async () => {
+  test('requires confirmation, a configured LaunchServer, and no active operation', async () => {
     let release: (() => void) | undefined
     const gate = new Promise<void>((resolve) => {
       release = resolve
@@ -337,37 +360,37 @@ describe('Docker installation API', () => {
     await waitForTerminalJob(jobsStore, installedJob.id)
     const installation = installations.list()[0]!
 
-    const invalid = await request(`/api/docker/installations/${installation.id}`, {
+    const invalid = await request('/api/docker/launchserver', {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ confirmDeletion: false }),
     })
-    const unknown = await request(`/api/docker/installations/${crypto.randomUUID()}`, {
-      method: 'DELETE',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ confirmDeletion: true }),
-    })
-    const first = await request(`/api/docker/installations/${installation.id}`, {
+    const first = await request('/api/docker/launchserver', {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ confirmDeletion: true }),
     })
     const firstJob = await first.json()
-    const duplicate = await request(`/api/docker/installations/${installation.id}`, {
+    const duplicate = await request('/api/docker/launchserver', {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ confirmDeletion: true }),
     })
 
     expect(invalid.status).toBe(422)
-    expect(unknown.status).toBe(404)
     expect(first.status).toBe(202)
     expect(duplicate.status).toBe(409)
     expect(await duplicate.json()).toEqual({
-      message: 'Another operation is active for this installation.',
+      message: 'Another operation is active for LaunchServer.',
     })
 
     release?.()
     expect((await waitForTerminalJob(jobsStore, firstJob.id)).status).toBe('succeeded')
+    const missing = await request('/api/docker/launchserver', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmDeletion: true }),
+    })
+    expect(missing.status).toBe(404)
   })
 })

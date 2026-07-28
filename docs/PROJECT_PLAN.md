@@ -281,7 +281,7 @@ SHA-256 `e206a35615b91ae21a13154b7cb4dda9c742a2a45211880e79100bb09636de7f`.
 Existing binaries are snapshotted before replacement.
 The pinned Prestarter module registers its Windows launcher binary during
 `LaunchServerLauncherBinaryInit`; dynamically loading the module is therefore
-not enough. Profile setup restarts only the `gravitlauncher` Compose service,
+not enough. LaunchServer setup restarts only the `gravitlauncher` Compose service,
 removes the stale bind-mounted `control-file`, waits for a newly created socket,
 and verifies the module after restart. The generated `.env` also opens
 `java.base/java.time` only to the named Gson module required by the pinned
@@ -399,7 +399,7 @@ Status: completed.
 - Verify its upstream Git origin, exact revision, Compose shape, and `.env`
   metadata.
 - Check Compose service state and wait for the existing control socket.
-- Register the installation without rewriting `.env`, running `compose up`, or
+- Register LaunchServer without rewriting `.env`, running `compose up`, or
   restarting containers.
 
 This first existing-server import mode deliberately supports
@@ -407,18 +407,21 @@ LauncherDockered-managed servers only. A standalone LaunchServer directory
 needs a separate command and volume transport abstraction and is not presented
 as supported by the current UI.
 
-### Slice 14: Profile-aware Layout and Completion State
+### Slice 14: Single-LaunchServer Layout and Profile State
 
 Status: completed.
 
-- Show the first-run Setup wizard without the admin sidebar while no projects
-  are registered.
+- Show the first-run LaunchServer setup wizard without the admin sidebar while
+  no server is registered.
 - Switch to the admin layout immediately after the first successful
   install/import/attach job.
-- Keep one persisted selected project in the desktop and mobile sidebars.
-- Expose an explicit Add profile action without repeating installation for the
-  currently selected project.
-- Use the selected project across Status, Modules, Auth, Clients, and Mods.
+- Keep exactly one LaunchServer and one shared server configuration per panel.
+- Use the desktop and mobile sidebar switcher only for client profiles
+  discovered from that LaunchServer.
+- Expose an explicit New profile action that opens a clean client draft without
+  creating another LauncherDockered workspace.
+- Use the singleton LaunchServer across Status, Modules, Auth, Users, Launcher,
+  Clients, and Mods.
 - Remove install controls for already loaded modules and configured file auth.
 - Offer explicit reapply/reinstall/rebuild actions where repetition is
   supported.
@@ -426,8 +429,8 @@ Status: completed.
 Client preparation completion is not inferred from job history alone. The API
 checks the pinned MirrorHelper manifest and Prestarter SHA-256 values, generated
 launcher artifacts, and both the profile JSON and updates directory for a named
-Minecraft client. Switching projects clears stale page-local job state so logs
-and action status cannot leak between profiles.
+Minecraft client. Switching client profiles updates Clients and Mods while
+jobs and server-wide settings remain scoped to the singleton LaunchServer.
 
 ### Slice 15: Auth Cores, Auth Modules Tab, and Users
 

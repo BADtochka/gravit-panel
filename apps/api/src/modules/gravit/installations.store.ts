@@ -30,6 +30,12 @@ export class InstallationsStore {
 
   upsert(name: string, result: LauncherDockeredInstallResult): GravitInstallation {
     const current = this.getByPath(result.installationPath)
+    const registered = this.list()[0]
+    if (registered && !current) {
+      throw new Error(
+        `This panel already manages LaunchServer at ${registered.path}; a second server cannot be registered`,
+      )
+    }
     const now = new Date().toISOString()
     const id = current?.id ?? crypto.randomUUID()
     const createdAt = current?.createdAt ?? now

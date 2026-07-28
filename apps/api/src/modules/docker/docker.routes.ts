@@ -1,8 +1,10 @@
 import type {
+  LauncherDockeredInstallInput,
   LauncherDockeredInstallRequest,
   LauncherDockeredRemovalResult,
 } from '@gravit-panel/shared'
 import { Elysia, t } from 'elysia'
+import { join } from 'node:path'
 import { env } from '../../core/env'
 import { clientBuildService } from '../clients/clients.routes'
 import {
@@ -32,12 +34,10 @@ const provisioning = new ProfileProvisioningService(
   env.REMOTE_CONTROL_ENDPOINT,
 )
 
-const installationFields = {
-  installationName: t.String({
-    minLength: 1,
-    maxLength: 64,
-    pattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]*$',
-  }),
+const launchServerInstallationName = 'default'
+const launchServerDisplayName = 'LaunchServer'
+
+const launchServerFields = {
   address: t.String({ minLength: 1, maxLength: 255 }),
   projectName: t.String({
     minLength: 1,
@@ -52,7 +52,7 @@ export interface DockerRoutesDependencies {
     LauncherDockeredService,
     'installationsRoot' | 'install' | 'removeInstallation'
   >
-  installations: Pick<InstallationsStore, 'get' | 'list' | 'upsert' | 'delete'>
+  installations: Pick<InstallationsStore, 'list' | 'upsert' | 'delete'>
   provisioning: Pick<ProfileProvisioningService, 'prepare'>
   jobs: Pick<JobsRunner, 'create' | 'hasActiveType'>
   activeJob: (installationId: string) => unknown
@@ -78,23 +78,36 @@ export const createDockerRoutes = ({
     },
   )
   .get('/install/configuration', () => ({
-    installationsRoot: installer.installationsRoot,
+    launchServerPath: join(installer.installationsRoot, launchServerInstallationName),
     source: launcherDockeredSource,
   }))
-  .get('/installations', () => ({ items: installations.list() }))
+  .get('/launchserver', () => ({ item: installations.list()[0] ?? null }))
   .post(
     '/install',
     ({ body, set }) => {
       if (jobs.hasActiveType('docker.launcherdockered.install')) {
         set.status = 409
-        return { message: 'A LauncherDockered installation job is already active.' }
+        return { message: 'A LaunchServer setup job is already active.' }
+      }
+      // One panel manages exactly one LaunchServer. Additional game clients
+      // are created as profiles on that server, not as new installations.
+      if (installations.list().length > 0) {
+        set.status = 409
+        return {
+          message:
+            'This panel manages a single LaunchServer. Remove the existing installation before creating another one.',
+        }
       }
 
-      const { confirmInstallation: _, ...input } = body as LauncherDockeredInstallRequest
+      const { confirmInstallation: _, ...requestInput } = body as LauncherDockeredInstallRequest
+      const input: LauncherDockeredInstallInput = {
+        ...requestInput,
+        installationName: launchServerInstallationName,
+      }
       const job = jobs.create(
         'docker.launcherdockered.install',
         { ...input, confirmInstallation: true },
-        'LauncherDockered installation queued',
+        'LaunchServer setup queued',
         async (context) => {
           const installationContext = {
             signal: context.signal,
@@ -103,8 +116,8 @@ export const createDockerRoutes = ({
               context.progress(Math.round(progress * 0.45), message),
           }
           const result = await installer.install(input, installationContext)
-          const installation = installations.upsert(input.installationName, result)
-          context.log(`Installation registered: ${installation.id}`)
+          const installation = installations.upsert(launchServerDisplayName, result)
+          context.log(`LaunchServer registered: ${installation.id}`)
           try {
             const setup = await provisioning.prepare(installation, {
               signal: context.signal,
@@ -112,11 +125,11 @@ export const createDockerRoutes = ({
               progress: (progress, message) =>
                 context.progress(45 + Math.round(progress * 0.5), message),
             })
-            context.progress(98, 'Profile setup completed')
+            context.progress(98, 'LaunchServer setup completed')
             return { ...result, installationId: installation.id, setup }
           } catch (error) {
             installations.delete(installation.id)
-            context.log('Incomplete profile registration removed')
+            context.log('Incomplete LaunchServer registration removed')
             if (input.mode === 'clone') {
               try {
                 await installer.removeInstallation(installation, context)
@@ -139,34 +152,34 @@ export const createDockerRoutes = ({
         t.Object({
           mode: t.Literal('clone'),
           confirmInstallation: t.Literal(true),
-          ...installationFields,
+          ...launchServerFields,
         }),
         t.Object({
           mode: t.Literal('import'),
           confirmInstallation: t.Literal(true),
           importPath: t.String({ minLength: 1, maxLength: 4_096 }),
-          ...installationFields,
+          ...launchServerFields,
         }),
         t.Object({
           mode: t.Literal('attach'),
           confirmInstallation: t.Literal(true),
           importPath: t.String({ minLength: 1, maxLength: 4_096 }),
-          ...installationFields,
+          ...launchServerFields,
         }),
       ]),
     },
   )
   .delete(
-    '/installations/:installationId',
-    ({ params, set }) => {
-      const installation = installations.get(params.installationId)
+    '/launchserver',
+    ({ set }) => {
+      const installation = installations.list()[0]
       if (!installation) {
         set.status = 404
-        return { message: 'LauncherDockered installation not found.' }
+        return { message: 'LaunchServer is not configured.' }
       }
       if (activeJob(installation.id)) {
         set.status = 409
-        return { message: 'Another operation is active for this installation.' }
+        return { message: 'Another operation is active for LaunchServer.' }
       }
 
       const job = jobs.create(
@@ -193,7 +206,6 @@ export const createDockerRoutes = ({
       return job
     },
     {
-      params: t.Object({ installationId: t.String({ format: 'uuid' }) }),
       body: t.Object({ confirmDeletion: t.Literal(true) }),
     },
   )

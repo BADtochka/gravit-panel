@@ -108,12 +108,13 @@ export interface LauncherDockeredInstallInput {
   projectName: string
 }
 
-export interface LauncherDockeredInstallRequest extends LauncherDockeredInstallInput {
+export interface LauncherDockeredInstallRequest
+  extends Omit<LauncherDockeredInstallInput, 'installationName'> {
   confirmInstallation: true
 }
 
 export interface DockerInstallConfiguration {
-  installationsRoot: string
+  launchServerPath: string
   source: DockerPreflightResponse['source']
 }
 

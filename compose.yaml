@@ -1,14 +1,10 @@
 name: gravit-panel
 
-# Panel-managed game servers are NOT part of this stack: create or attach
-# LauncherDockered installations from the panel UI. Each installation runs the
-# official ghcr.io/gravitlauncher/launcher image and publishes its own nginx
-# facade on the Docker host (port 17549 by default), which is also what
-# REMOTE_CONTROL_ENDPOINT points at.
-#
-# The optional `launchserver` service below is a standalone stock
-# LaunchServer for simple setups. The panel does not manage it: configure it
-# through its own LaunchServer.json.
+# The panel manages exactly one LaunchServer, created from the panel UI as a
+# LauncherDockered workspace on the official ghcr.io/gravitlauncher/launcher
+# image. Its nginx facade publishes port 17549 on the Docker host, which is
+# also what REMOTE_CONTROL_ENDPOINT points at. Additional game clients are
+# profiles on that server — not separate installations.
 
 x-panel-data: &panel-data
   # Absolute path on the Docker host. Must exist before starting the project
@@ -20,7 +16,7 @@ x-panel-data: &panel-data
 
 services:
   # ------------------------------------------------------------------
-  # API — Bun + Elysia server. Manages installations, modules, builds.
+  # API — Bun + Elysia server. Manages LaunchServer, modules, and builds.
   # ------------------------------------------------------------------
   api:
     image: ${PANEL_API_IMAGE:-ghcr.io/badtochka/gravit-panel-api:latest}
@@ -29,9 +25,9 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       <<: *panel-data
-      # HTTP endpoint of the LauncherDockered installation facade. Docker
-      # Compose maps host.docker.internal to the Docker host, where each
-      # installation's nginx publishes port 17549.
+      # HTTP endpoint of the LaunchServer facade. Docker Compose maps
+      # host.docker.internal to the Docker host, where its nginx publishes
+      # port 17549.
       REMOTE_CONTROL_ENDPOINT: ${REMOTE_CONTROL_ENDPOINT:-http://host.docker.internal:17549}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
@@ -82,26 +78,3 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-
-  # ------------------------------------------------------------------
-  # LaunchServer (optional) — stock official image, standalone game server.
-  # The panel does NOT manage this container; managed servers are
-  # LauncherDockered installations. Its netty port serves the launcher
-  # WebSocket API and, when fileServerEnabled, the update files directly.
-  # Publish it through your game domain's HTTPS proxy with WebSocket upgrade.
-  # ------------------------------------------------------------------
-  launchserver:
-    image: ${LAUNCHSERVER_IMAGE:-ghcr.io/gravitlauncher/launcher:v5.7.9}
-    restart: unless-stopped
-    stdin_open: true
-    tty: true
-    environment:
-      ADDRESS: ${LAUNCHSERVER_ADDRESS:-localhost:9274}
-      PROJECTNAME: ${LAUNCHSERVER_PROJECT_NAME:-main}
-      JAVA_OPTS: ${LAUNCHSERVER_JAVA_OPTS:-}
-    ports:
-      - "127.0.0.1:${LAUNCHSERVER_PORT:-9274}:9274"
-    volumes:
-      - type: bind
-        source: ${PANEL_DATA_DIR:-/data/gravit-panel}/launchserver
-        target: /app/data

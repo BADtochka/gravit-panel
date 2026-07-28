@@ -188,7 +188,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useInstallationJob } from '@/composables/useInstallationJob'
-import { useInstallationsStore } from '@/stores/installations'
+import { useLaunchServerStore } from '@/stores/launchserver'
 import type { AuthConfiguration, AuthUsersResponse, JobRecord } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { TriangleAlert, UserPlus, Users } from '@lucide/vue'
@@ -197,7 +197,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
 const queryClient = useQueryClient()
-const { selectedInstallationId: installationId } = storeToRefs(useInstallationsStore())
+const { launchServerId: installationId } = storeToRefs(useLaunchServerStore())
 const authId = ref('')
 const createOpen = ref(false)
 const passwordOpen = ref(false)

@@ -44,4 +44,32 @@ describe('InstallationsStore', () => {
     expect(store.list()).toEqual([])
     database.close()
   })
+
+  test('refuses to register a second LaunchServer path', () => {
+    const database = new Database(':memory:')
+    database.exec(schema)
+    const store = new InstallationsStore(database)
+    const result = {
+      mode: 'clone' as const,
+      address: 'localhost:17549',
+      projectName: 'PRIMARY',
+      sourceRepository: 'https://github.com/GravitLauncher/LauncherDockered',
+      sourceRevision: '723203b56f8d58f2447edd20ac8a5b84a31ef816',
+      environmentBackupPath: null,
+    }
+
+    store.upsert('LaunchServer', {
+      ...result,
+      installationPath: '/srv/gravit/default',
+    })
+
+    expect(() =>
+      store.upsert('Another LaunchServer', {
+        ...result,
+        installationPath: '/srv/gravit/secondary',
+      }),
+    ).toThrow('a second server cannot be registered')
+    expect(store.list()).toHaveLength(1)
+    database.close()
+  })
 })

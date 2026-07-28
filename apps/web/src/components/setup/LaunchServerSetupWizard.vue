@@ -2,9 +2,9 @@
   <section class="space-y-6">
     <div class="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h2 class="text-2xl font-semibold tracking-tight">Create profile</h2>
+        <h2 class="text-2xl font-semibold tracking-tight">Set up LaunchServer</h2>
         <p class="mt-1 text-sm text-muted-foreground">
-          Check this host and prepare a complete GravitLauncher profile.
+          Check this host and prepare the single LaunchServer managed by this panel.
         </p>
       </div>
       <Button
@@ -39,7 +39,7 @@
               {{
                 preflight.ready
                   ? 'Docker, Compose, and the selected host port are ready.'
-                  : 'Resolve the failed checks before starting the installation.'
+                  : 'Resolve the failed checks before setting up LaunchServer.'
               }}
             </p>
           </div>
