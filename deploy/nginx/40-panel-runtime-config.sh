@@ -20,5 +20,11 @@ case "$panel_public_path" in
 esac
 
 panel_public_path="${panel_public_path%/}"
+panel_base_href="${panel_public_path:-/}/"
+if [ "$panel_public_path" = "" ]; then
+  panel_base_href="/"
+fi
+
 printf "window.__GRAVIT_PANEL_CONFIG__ = { publicPath: '%s' };\n" "$panel_public_path" \
   > /usr/share/nginx/html/panel-config.js
+sed -i "s|__GRAVIT_PANEL_BASE_HREF__|$panel_base_href|g" /usr/share/nginx/html/index.html
