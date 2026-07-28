@@ -25,19 +25,40 @@ if [ -f "$config" ] && [ -n "${ADDRESS:-}" ]; then
     websocket_origin="ws://$ADDRESS"
   fi
 
+  # The nginx facades use the updates directory itself as their document root,
+  # so public URLs must be root-relative to it. Read updatesDir to strip a
+  # duplicated "/<updatesDir>/" prefix that would otherwise resolve to
+  # "<updatesDir>/<updatesDir>/..." and 404 every artifact download.
+  updates_dir=$(jq -r '.updatesProvider.updatesDir // "updates"' "$config" 2>/dev/null || printf 'updates')
+  case "$updates_dir" in
+    ''|*[!A-Za-z0-9._-]*|*/*) updates_dir=updates ;;
+  esac
+  updates_dir_escaped=$(printf '%s' "$updates_dir" | sed 's|\.|\\.|g')
+
   pending=$(mktemp "${config}.pending.XXXXXX")
   trap 'rm -f "$pending"' EXIT
   jq \
     --arg http_origin "$http_origin" \
     --arg websocket_origin "$websocket_origin" \
+    --arg updates_dir "$updates_dir_escaped" \
     '
       def rewrite($origin):
-        if type == "string" then gsub("^(https?|wss?)://[^/]+"; $origin) else . end;
+        if type != "string" then . else
+          gsub("^(https?|wss?)://[^/]+"; $origin)
+        end;
+      def normalize_updates_path:
+        if type != "string" then . else
+          if test("^(https?|wss?)://[^/]+/" + $updates_dir + "/")
+          then sub("^(?<o>(https?|wss?)://[^/]+)/" + $updates_dir + "/"; "\(.o)/")
+          else . end
+        end;
       if (.updatesProvider.urls? | type) == "object" then
-        .updatesProvider.urls |= with_entries(.value |= rewrite($http_origin))
+        .updatesProvider.urls |= with_entries(
+          .value |= (rewrite($http_origin) | normalize_updates_path)
+        )
       else . end |
       if (.netty.downloadURL? | type) == "string" then
-        .netty.downloadURL |= rewrite($http_origin)
+        .netty.downloadURL |= (rewrite($http_origin) | normalize_updates_path)
       else . end |
       if (.netty.address? | type) == "string" then
         .netty.address |= rewrite($websocket_origin)

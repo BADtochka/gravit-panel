@@ -16,7 +16,7 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { JobTaskContext } from '../jobs/jobs.runner'
 import { launcherDockeredSource } from './docker.service'
 
@@ -727,12 +727,36 @@ export class LauncherDockeredService {
     }
     const config = parsed as Record<string, unknown>
     let changed = false
-    const rewriteUrl = (value: unknown, protocol: string) => {
+
+    // Both nginx facades (the bundled launchserver-web and the upstream
+    // LauncherDockered one) use the updates directory itself as their document
+    // root. Public URLs must therefore be root-relative to that directory.
+    // Strip a duplicated "/<updatesDir>/" prefix that LaunchServer may have
+    // persisted, otherwise requests resolve to "<updatesDir>/<updatesDir>/..."
+    // and every launcher artifact download ends in a 404.
+    let updatesDir = 'updates'
+    const updatesProvider = config.updatesProvider
+    if (updatesProvider && typeof updatesProvider === 'object' && !Array.isArray(updatesProvider)) {
+      const configured = (updatesProvider as Record<string, unknown>).updatesDir
+      if (
+        typeof configured === 'string' &&
+        /^[a-zA-Z0-9._-]+$/.test(configured) &&
+        basename(configured) === configured
+      ) {
+        updatesDir = configured
+      }
+    }
+    const updatesPrefix = `/${updatesDir}/`
+
+    const rewriteUrl = (value: unknown, protocol: string, normalizeUpdatesPath: boolean) => {
       if (typeof value !== 'string') return value
       try {
         const url = new URL(value)
         url.protocol = protocol
         url.host = publicAddress.host
+        if (normalizeUpdatesPath && url.pathname.startsWith(updatesPrefix)) {
+          url.pathname = url.pathname.slice(updatesPrefix.length - 1)
+        }
         const rewritten = url.toString()
         if (rewritten !== value) changed = true
         return rewritten
@@ -741,14 +765,13 @@ export class LauncherDockeredService {
       }
     }
 
-    const updatesProvider = config.updatesProvider
     if (updatesProvider && typeof updatesProvider === 'object' && !Array.isArray(updatesProvider)) {
       const provider = updatesProvider as Record<string, unknown>
       const urls = provider.urls
       if (urls && typeof urls === 'object' && !Array.isArray(urls)) {
         const values = urls as Record<string, unknown>
         for (const [key, value] of Object.entries(values)) {
-          values[key] = rewriteUrl(value, httpProtocol)
+          values[key] = rewriteUrl(value, httpProtocol, true)
         }
       }
     }
@@ -756,8 +779,8 @@ export class LauncherDockeredService {
     const netty = config.netty
     if (netty && typeof netty === 'object' && !Array.isArray(netty)) {
       const values = netty as Record<string, unknown>
-      values.downloadURL = rewriteUrl(values.downloadURL, httpProtocol)
-      values.address = rewriteUrl(values.address, websocketProtocol)
+      values.downloadURL = rewriteUrl(values.downloadURL, httpProtocol, true)
+      values.address = rewriteUrl(values.address, websocketProtocol, false)
     }
 
     if (!changed) return false

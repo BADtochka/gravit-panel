@@ -160,6 +160,7 @@ describe('LauncherDockeredService', () => {
       join(installationPath, 'launcher', 'LaunchServer.json'),
       JSON.stringify({
         updatesProvider: {
+          updatesDir: 'updates',
           urls: {
             EXE_WINDOWS_X86_64: 'http://old.example/updates/Launcher.exe',
             JAR: 'http://old.example/updates/Launcher.jar',
@@ -199,21 +200,98 @@ describe('LauncherDockeredService', () => {
       const config = JSON.parse(
         await readFile(join(installationPath, 'launcher', 'LaunchServer.json'), 'utf8'),
       )
+      // The nginx document root IS the updates directory, so synchronized URLs
+      // must be root-relative to it. A persisted "/updates/" prefix would
+      // resolve to "updates/updates/..." and 404 every artifact download.
       expect(config).toMatchObject({
         updatesProvider: {
           urls: {
-            EXE_WINDOWS_X86_64: 'https://mine.roflan.ru/updates/Launcher.exe',
-            JAR: 'https://mine.roflan.ru/updates/Launcher.jar',
+            EXE_WINDOWS_X86_64: 'https://mine.roflan.ru/Launcher.exe',
+            JAR: 'https://mine.roflan.ru/Launcher.jar',
           },
         },
         netty: {
-          downloadURL: 'https://mine.roflan.ru/updates/',
+          downloadURL: 'https://mine.roflan.ru/',
           address: 'wss://mine.roflan.ru/api',
         },
       })
       expect(await readFile(join(installationPath, 'nginx.conf'), 'utf8')).toContain(
         'proxy_set_header X-Forwarded-Proto $launcher_forwarded_proto;',
       )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps the %dirname% download template and root-relative artifact URLs intact', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gravit-launcherdockered-dirname-'))
+    const installationPath = join(root, 'default')
+    await mkdir(join(installationPath, 'launcher'), { recursive: true })
+    await writeFile(join(installationPath, 'docker-compose.yml'), compose)
+    await writeFile(join(installationPath, 'nginx.conf'), nginxConfig)
+    await writeFile(
+      join(installationPath, '.env'),
+      'ADDRESS=mine.roflan.ru\nPROJECTNAME=TEST\n',
+    )
+    await writeFile(
+      join(installationPath, 'launcher', 'LaunchServer.json'),
+      JSON.stringify({
+        updatesProvider: {
+          updatesDir: 'updates',
+          binaryName: 'Launcher',
+          urls: {
+            JAR: 'http://old.example/Launcher.jar',
+            EXE_WINDOWS_X86_64: 'http://old.example/Launcher.exe',
+          },
+        },
+        netty: {
+          downloadURL: 'http://old.example/%dirname%/',
+          address: 'ws://old.example/api',
+        },
+      }),
+    )
+    const commands: string[][] = []
+    const service = new LauncherDockeredService(
+      root,
+      async (command) => {
+        commands.push(command)
+        return { exitCode: 0, output: 'ok' }
+      },
+      ready,
+    )
+    const now = new Date().toISOString()
+    const installation: GravitInstallation = {
+      id: crypto.randomUUID(),
+      name: 'default',
+      path: installationPath,
+      address: 'mine.roflan.ru',
+      projectName: 'TEST',
+      sourceRepository: launcherDockeredSource.repository,
+      sourceRevision: launcherDockeredSource.revision,
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    try {
+      await service.restartLaunchServer(installation, createContext().context)
+      const config = JSON.parse(
+        await readFile(join(installationPath, 'launcher', 'LaunchServer.json'), 'utf8'),
+      )
+      // Only scheme and host change. Root-relative paths and the %dirname%
+      // profile template already match the updates-dir document root and
+      // must survive synchronization untouched.
+      expect(config).toMatchObject({
+        updatesProvider: {
+          urls: {
+            JAR: 'https://mine.roflan.ru/Launcher.jar',
+            EXE_WINDOWS_X86_64: 'https://mine.roflan.ru/Launcher.exe',
+          },
+        },
+        netty: {
+          downloadURL: 'https://mine.roflan.ru/%dirname%/',
+          address: 'wss://mine.roflan.ru/api',
+        },
+      })
     } finally {
       await rm(root, { recursive: true, force: true })
     }
