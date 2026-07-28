@@ -156,6 +156,21 @@ const profileDescriptor = (
   loader: inferProfileLoader(profile),
 })
 
+const profileAssetIndexPath = (profile: LaunchProfileConfig) => {
+  const assetDir =
+    typeof profile.assetDir === 'string' &&
+    assetPathSegmentPattern.test(profile.assetDir)
+      ? profile.assetDir
+      : null
+  const assetIndex =
+    typeof profile.assetIndex === 'string' &&
+    assetPathSegmentPattern.test(profile.assetIndex)
+      ? profile.assetIndex
+      : null
+  if (!assetDir || !assetIndex) return null
+  return join('updates', assetDir, 'indexes', `${assetIndex}.json`)
+}
+
 export const inferProfileLoader = (
   profile: LaunchProfileConfig,
 ): ClientProfileDescriptor['loader'] => {
@@ -346,7 +361,7 @@ export class ClientBuildService {
     )
 
     try {
-      await this.syncProfiles(installation, context, 65)
+      await this.reloadProfilesAndUpdates(installation, context, 65)
     } catch (error) {
       await this.volume.writeFileAtomic(
         installation,
@@ -354,9 +369,7 @@ export class ClientBuildService {
         new TextEncoder().encode(current.raw),
         '0644',
       )
-      await this.control
-        .executeClientCommand(installation, 'config profileProvider sync')
-        .catch(() => [])
+      await this.reloadProfilesAndUpdates(installation, context, 80).catch(() => {})
       throw error
     }
 
@@ -413,7 +426,7 @@ export class ClientBuildService {
         await this.volume.move(installation, updatesPath, trashedUpdatesPath)
         updatesMoved = true
       }
-      await this.syncProfiles(installation, context, 70)
+      await this.reloadProfilesAndUpdates(installation, context, 70)
     } catch (error) {
       if (updatesMoved) {
         await this.volume.move(installation, trashedUpdatesPath, updatesPath)
@@ -421,9 +434,7 @@ export class ClientBuildService {
       if (profileMoved) {
         await this.volume.move(installation, trashedProfilePath, profilePath)
       }
-      await this.control
-        .executeClientCommand(installation, 'config profileProvider sync')
-        .catch(() => [])
+      await this.reloadProfilesAndUpdates(installation, context, 85).catch(() => {})
       throw error
     }
 
@@ -796,6 +807,16 @@ export class ClientBuildService {
         )
       }
     }
+    const previousAssetIndexPath = previousProfile
+      ? profileAssetIndexPath(previousProfile)
+      : null
+    if (
+      previousAssetIndexPath &&
+      (await this.volume.exists(installation, previousAssetIndexPath))
+    ) {
+      context.log(`Preparing existing Minecraft assets from ${previousAssetIndexPath}`)
+      await this.reloadProfilesAndUpdates(installation, context, 15)
+    }
 
     const suffix = input.mods.length ? ` ${input.mods.join(',')}` : ''
     const command =
@@ -823,34 +844,18 @@ export class ClientBuildService {
       installation,
       input.name,
     )
-    const assetDir =
-      typeof generated.assetDir === 'string' &&
-      assetPathSegmentPattern.test(generated.assetDir)
-        ? generated.assetDir
-        : null
-    const assetIndex =
-      typeof generated.assetIndex === 'string' &&
-      assetPathSegmentPattern.test(generated.assetIndex)
-        ? generated.assetIndex
-        : null
-    if (!assetDir || !assetIndex) {
+    const assetIndexRelativePath = profileAssetIndexPath(generated)
+    if (!assetIndexRelativePath) {
       throw new Error(
         'MirrorHelper produced a profile without a safe assetDir and assetIndex',
       )
     }
-    const assetIndexRelativePath = join(
-      'updates',
-      assetDir,
-      'indexes',
-      `${assetIndex}.json`,
-    )
     if (!(await this.volume.exists(installation, assetIndexRelativePath))) {
       throw new Error(
         `MirrorHelper did not download the required asset index ${assetIndexRelativePath}`,
       )
     }
     context.log(`Verified Minecraft asset index ${assetIndexRelativePath}`)
-    await this.syncProfiles(installation, context, 85)
 
     let preservedMetadata = false
     if (previousProfile) {
@@ -890,16 +895,7 @@ export class ClientBuildService {
         context.log(`Preserved stable identity and metadata for profile ${input.name}`)
       }
     }
-    if (preservedMetadata) {
-      if (!this.lifecycle) {
-        throw new Error(
-          'LaunchServer restart is unavailable; preserved profile metadata cannot be activated',
-        )
-      }
-      context.progress(92, 'Restarting LaunchServer with preserved profile metadata')
-      await this.lifecycle.restartLaunchServer(installation, context)
-      context.log(`LaunchServer reloaded preserved profile ${input.name}`)
-    }
+    await this.reloadProfilesAndUpdates(installation, context, 90)
     const profilePath = join(launcherRoot(installation), profileRelativePath)
     const updatesPath = join(launcherRoot(installation), updatesRelativePath)
     context.progress(95, 'Client profile and update files verified')
@@ -1086,17 +1082,21 @@ export class ClientBuildService {
     return { raw, profile }
   }
 
-  private async syncProfiles(
+  private async reloadProfilesAndUpdates(
     installation: GravitInstallation,
     context: JobTaskContext,
     progress: number,
   ) {
-    context.progress(progress, 'Synchronizing LaunchServer profiles and updates')
-    const lines = await this.control.executeClientCommand(
-      installation,
-      'config profileProvider sync',
-    )
-    lines.forEach(context.log)
+    if (!this.lifecycle) {
+      throw new Error(
+        'LaunchServer restart is unavailable; profiles and updates cannot be reloaded',
+      )
+    }
+    context.progress(progress, 'Reloading LaunchServer profiles and updates')
+    await this.volume.remove(installation, '.updates-cache')
+    context.log('Invalidated LaunchServer updates cache')
+    await this.lifecycle.restartLaunchServer(installation, context)
+    context.log('LaunchServer profiles and updates reloaded')
   }
 
   private validateProfile(value: string) {

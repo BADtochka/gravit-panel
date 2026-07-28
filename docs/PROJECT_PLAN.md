@@ -446,14 +446,19 @@ Status: completed.
   creating another LauncherDockered workspace.
 - Keep the technical profile ID immutable after creation while exposing editable
   launcher-visible title, description, and sort order.
-- Run the source-defined `config profileProvider sync` action immediately after
-  MirrorHelper publishes a source-valid profile so shared assets and their
-  cache are synchronized. Then preserve the existing profile UUID and
-  presentation metadata across rebuilds and restart LaunchServer so the
-  restored identity becomes active without a second full directory sync.
+- Invalidate `.updates-cache` after profile or update mutations and restart
+  LaunchServer so its normal initialization rebuilds the shared updates index
+  and reloads profiles. Do not use the runtime
+  `config profileProvider sync` command: it is not reliable across the managed
+  LaunchServer builds.
+- Before rebuilding an existing profile whose asset index is already present,
+  perform the same cache invalidation and reload so MirrorHelper reuses the
+  on-disk assets instead of downloading them again from an empty in-memory map.
+- Preserve the existing profile UUID and presentation metadata across
+  MirrorHelper rebuilds before that controlled reload.
 - Remove profiles through an explicitly confirmed background job that moves the
   profile JSON and client update directory to recoverable panel trash before
-  synchronizing LaunchServer.
+  reloading LaunchServer.
 - Use the singleton LaunchServer across Status, Modules, Auth, Users, Launcher,
   Clients, and Mods.
 - Remove install controls for already loaded modules and configured file auth.

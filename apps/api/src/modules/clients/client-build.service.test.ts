@@ -143,14 +143,26 @@ describe('ClientBuildService', () => {
         }
       },
     } as VolumeFileOperations
-    const commands: string[] = []
-    const control = {
-      executeClientCommand: async (_installation: GravitInstallation, command: string) => {
-        commands.push(command)
-        return ['Profiles and updates synced']
+    let restarts = 0
+    let cacheInvalidations = 0
+    volume.remove = async (_installation, path) => {
+      if (path === '.updates-cache') cacheInvalidations += 1
+      paths.delete(path)
+      files.delete(path)
+    }
+    const service = new ClientBuildService(
+      {} as ControlFileService,
+      volume,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        restartLaunchServer: async () => {
+          restarts += 1
+        },
       },
-    } as unknown as ControlFileService
-    const service = new ClientBuildService(control, volume)
+    )
     const now = new Date().toISOString()
     const installation: GravitInstallation = {
       id: crypto.randomUUID(),
@@ -205,10 +217,8 @@ describe('ClientBuildService', () => {
       ),
     ).toBe(true)
     expect(removed.trashPath).toContain('.gravit-panel-trash/profiles/main-')
-    expect(commands).toEqual([
-      'config profileProvider sync',
-      'config profileProvider sync',
-    ])
+    expect(cacheInvalidations).toBe(2)
+    expect(restarts).toBe(2)
   })
 
   test('keeps an already loaded Prestarter module and installs the verified executable', async () => {
@@ -399,8 +409,24 @@ describe('ClientBuildService', () => {
         path: string,
         bytes: Uint8Array,
       ) => writeFile(join(launcher, path), bytes),
+      remove: async (_installation: GravitInstallation, path: string) => {
+        if (path !== '.updates-cache') throw new Error(`Unexpected removal: ${path}`)
+      },
     } as VolumeFileOperations
-    const service = new ClientBuildService(control, volume)
+    let restarts = 0
+    const service = new ClientBuildService(
+      control,
+      volume,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        restartLaunchServer: async () => {
+          restarts += 1
+        },
+      },
+    )
     const now = new Date().toISOString()
     const installation: GravitInstallation = {
       id: crypto.randomUUID(),
@@ -430,8 +456,8 @@ describe('ClientBuildService', () => {
       expect(commands).toEqual([
         'mirrorhelper setDisableDownloadAssets false',
         'installClient fabric-1214 1.21.4 FABRIC fabric-api,sodium',
-        'config profileProvider sync',
       ])
+      expect(restarts).toBe(2)
       expect(result.compatibility.authlibArtifact).toBe('LauncherAuthlib6.jar')
       expect(result.profilePath).toEndWith('profiles/fabric-1214.json')
     } finally {
@@ -503,6 +529,8 @@ describe('ClientBuildService', () => {
           sortIndex: 7,
           servers: [{ name: 'Play', serverAddress: 'play.example.com', serverPort: 25565 }],
           version: '1.21.1',
+          assetDir: 'assets',
+          assetIndex: '17',
         }),
       ],
     ])
@@ -517,9 +545,12 @@ describe('ClientBuildService', () => {
         path: string,
         bytes: Uint8Array,
       ) => {
-        expect(commands.at(-1)).toBe('config profileProvider sync')
+        expect(commands.at(-1)).toBe('installClient main 1.21.4 FABRIC')
         paths.set(path, 'file')
         files.set(path, new TextDecoder().decode(bytes))
+      },
+      remove: async (_installation: GravitInstallation, path: string) => {
+        expect(path).toBe('.updates-cache')
       },
     } as VolumeFileOperations
     const control = {
@@ -553,7 +584,11 @@ describe('ClientBuildService', () => {
       undefined,
       {
         restartLaunchServer: async () => {
-          expect(commands.at(-1)).toBe('config profileProvider sync')
+          if (restarts === 0) {
+            expect(commands).toEqual([])
+          } else {
+            expect(commands.at(-1)).toBe('installClient main 1.21.4 FABRIC')
+          }
           expect(JSON.parse(files.get('profiles/main.json')!).uuid).toBe(oldUuid)
           restarts += 1
         },
@@ -597,9 +632,8 @@ describe('ClientBuildService', () => {
     expect(commands).toEqual([
       'mirrorhelper setDisableDownloadAssets false',
       'installClient main 1.21.4 FABRIC',
-      'config profileProvider sync',
     ])
-    expect(restarts).toBe(1)
+    expect(restarts).toBe(2)
   })
 
   test('downloads a missing NeoForge installer before building the client', async () => {
@@ -667,6 +701,9 @@ describe('ClientBuildService', () => {
       undefined,
       undefined,
       loaderInstallers,
+      {
+        restartLaunchServer: async () => {},
+      },
     )
     const now = new Date().toISOString()
     const installation: GravitInstallation = {
@@ -696,7 +733,6 @@ describe('ClientBuildService', () => {
     expect(commands).toEqual([
       'mirrorhelper setDisableDownloadAssets false',
       'installClient main 1.21.1 NEOFORGE',
-      'config profileProvider sync',
     ])
     expect(
       paths.get(
@@ -721,7 +757,8 @@ describe('ClientBuildService', () => {
         if (value === undefined) throw new Error(`Missing ${path}`)
         return value
       },
-    } as VolumeFileOperations
+      remove: async () => {},
+    } as unknown as VolumeFileOperations
     const control = {
       executeClientCommand: async (_installation: GravitInstallation, command: string) => {
         commands.push(command)
@@ -737,7 +774,17 @@ describe('ClientBuildService', () => {
         return ['Completed']
       },
     } as unknown as ControlFileService
-    const service = new ClientBuildService(control, volume)
+    const service = new ClientBuildService(
+      control,
+      volume,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        restartLaunchServer: async () => {},
+      },
+    )
     const now = new Date().toISOString()
     const installation: GravitInstallation = {
       id: crypto.randomUUID(),
@@ -766,7 +813,6 @@ describe('ClientBuildService', () => {
     expect(commands).toEqual([
       'mirrorhelper setDisableDownloadAssets false',
       'installClient forge-main 1.21.1 FORGE',
-      'config profileProvider sync',
     ])
   })
 
