@@ -135,6 +135,13 @@ const waitForControlSocket: InstallationReadinessWaiter = async (
 const safeTimestamp = () => new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
 const pendingInstallMarker = '.gravit-panel-pending-install.json'
 const fileAuthJvmOption = '--add-opens=java.base/java.time=com.google.gson'
+const launcherNginxConfig = 'nginx.conf'
+const launchServerConfig = join('launcher', 'LaunchServer.json')
+const forwardedProtoMap = `map $http_x_forwarded_proto $launcher_forwarded_proto {
+    default $http_x_forwarded_proto;
+    '' $scheme;
+}
+`
 const launchServerRestartMaintenance = [
   'rm -f /app/data/control-file',
   'sessions=/app/data/config/FileAuthSystem/Sessions.json',
@@ -209,6 +216,7 @@ export class LauncherDockeredService {
         input,
         context,
       )
+      await this.ensureForwardedProtoConfiguration(source.installationPath, context)
       await mkdir(join(source.installationPath, 'launcher'), { recursive: true })
       context.progress(60, 'Environment and persistent launcher directory are ready')
 
@@ -230,6 +238,10 @@ export class LauncherDockeredService {
       context.log('Waiting for LaunchServer control socket')
       await this.readinessWaiter(source.installationPath, context.signal)
       context.progress(95, 'LaunchServer control socket is ready')
+
+      if (await this.synchronizeLaunchServerPublicUrls(source.installationPath, context)) {
+        await this.restartLaunchServerProject(source.installationPath, context)
+      }
 
       if (input.mode === 'clone') {
         await rm(join(source.installationPath, pendingInstallMarker), { force: true })
@@ -342,6 +354,23 @@ export class LauncherDockeredService {
   ): Promise<void> {
     const installationPath = resolve(installation.path)
     await this.validateComposeProject(installationPath)
+    const proxyUpdated = await this.ensureForwardedProtoConfiguration(installationPath, context)
+    if (proxyUpdated) {
+      await this.runChecked(
+        ['docker', 'compose', 'restart', 'nginx'],
+        installationPath,
+        context,
+        'Reloading nginx with the preserved forwarded HTTPS scheme',
+      )
+    }
+    await this.synchronizeLaunchServerPublicUrls(installationPath, context)
+    await this.restartLaunchServerProject(installationPath, context)
+  }
+
+  private async restartLaunchServerProject(
+    installationPath: string,
+    context: JobTaskContext,
+  ): Promise<void> {
     await this.ensureLaunchServerJvmCompatibility(installationPath, context)
     await this.runChecked(
       ['docker', 'compose', 'stop', 'gravitlauncher'],
@@ -626,6 +655,130 @@ export class LauncherDockeredService {
     context.log(`Environment written: ${environmentPath}`)
 
     return backupPath
+  }
+
+  private async ensureForwardedProtoConfiguration(
+    installationPath: string,
+    context: JobTaskContext,
+  ) {
+    const configPath = join(installationPath, launcherNginxConfig)
+    if (!(await exists(configPath))) {
+      context.log('LauncherDockered nginx.conf is absent; no proxy scheme migration was needed')
+      return false
+    }
+
+    const contents = await readFile(configPath, 'utf8')
+    if (contents.includes('$launcher_forwarded_proto')) return false
+    if (!contents.includes('proxy_set_header X-Forwarded-Proto $scheme;')) {
+      context.log('LauncherDockered nginx.conf has no known forwarded-proto pattern; preserving it')
+      return false
+    }
+
+    const serverMarker = '\nserver {'
+    const markerIndex = contents.indexOf(serverMarker)
+    if (markerIndex === -1) {
+      throw new Error('LauncherDockered nginx.conf has no top-level server block for the HTTPS scheme migration')
+    }
+
+    const updated =
+      contents.slice(0, markerIndex) +
+      `\n${forwardedProtoMap}` +
+      contents.slice(markerIndex).replaceAll(
+        'proxy_set_header X-Forwarded-Proto $scheme;',
+        'proxy_set_header X-Forwarded-Proto $launcher_forwarded_proto;',
+      )
+    const backupPath = join(installationPath, `nginx.conf.backup-${safeTimestamp()}`)
+    await copyFile(configPath, backupPath)
+    const temporaryPath = join(installationPath, `.nginx.conf.pending-${crypto.randomUUID()}`)
+    try {
+      await writeFile(temporaryPath, updated, { encoding: 'utf8', flag: 'wx', mode: 0o644 })
+      await rename(temporaryPath, configPath)
+    } catch (error) {
+      await rm(temporaryPath, { force: true })
+      throw error
+    }
+    context.log(`LaunchServer proxy HTTPS-scheme snapshot created: ${backupPath}`)
+    context.log('Preserved the outer HTTPS scheme for LaunchServer WebSocket requests')
+    return true
+  }
+
+  private async synchronizeLaunchServerPublicUrls(
+    installationPath: string,
+    context: JobTaskContext,
+  ) {
+    const configPath = join(installationPath, launchServerConfig)
+    if (!(await exists(configPath))) {
+      context.log('LaunchServer.json is not generated yet; public URL synchronization will run on the next restart')
+      return false
+    }
+
+    const { address } = await this.readExistingEnvironment(installationPath)
+    const publicAddress = new URL(`http://${address}`)
+    const localAddress = new Set(['localhost', '127.0.0.1', '::1']).has(
+      publicAddress.hostname.toLowerCase(),
+    )
+    const secure = !localAddress && (!publicAddress.port || publicAddress.port === '443')
+    const httpProtocol = secure ? 'https:' : 'http:'
+    const websocketProtocol = secure ? 'wss:' : 'ws:'
+    const contents = await readFile(configPath, 'utf8')
+    const parsed: unknown = JSON.parse(contents)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('LaunchServer.json must contain a JSON object to synchronize public URLs')
+    }
+    const config = parsed as Record<string, unknown>
+    let changed = false
+    const rewriteUrl = (value: unknown, protocol: string) => {
+      if (typeof value !== 'string') return value
+      try {
+        const url = new URL(value)
+        url.protocol = protocol
+        url.host = publicAddress.host
+        const rewritten = url.toString()
+        if (rewritten !== value) changed = true
+        return rewritten
+      } catch {
+        return value
+      }
+    }
+
+    const updatesProvider = config.updatesProvider
+    if (updatesProvider && typeof updatesProvider === 'object' && !Array.isArray(updatesProvider)) {
+      const provider = updatesProvider as Record<string, unknown>
+      const urls = provider.urls
+      if (urls && typeof urls === 'object' && !Array.isArray(urls)) {
+        const values = urls as Record<string, unknown>
+        for (const [key, value] of Object.entries(values)) {
+          values[key] = rewriteUrl(value, httpProtocol)
+        }
+      }
+    }
+
+    const netty = config.netty
+    if (netty && typeof netty === 'object' && !Array.isArray(netty)) {
+      const values = netty as Record<string, unknown>
+      values.downloadURL = rewriteUrl(values.downloadURL, httpProtocol)
+      values.address = rewriteUrl(values.address, websocketProtocol)
+    }
+
+    if (!changed) return false
+
+    const backupPath = join(installationPath, 'launcher', `LaunchServer.json.backup-address-${safeTimestamp()}`)
+    await copyFile(configPath, backupPath)
+    const temporaryPath = join(installationPath, 'launcher', `.LaunchServer.json.pending-${crypto.randomUUID()}`)
+    try {
+      await writeFile(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, {
+        encoding: 'utf8',
+        flag: 'wx',
+        mode: 0o600,
+      })
+      await rename(temporaryPath, configPath)
+    } catch (error) {
+      await rm(temporaryPath, { force: true })
+      throw error
+    }
+    context.log(`LaunchServer public URL snapshot created: ${backupPath}`)
+    context.log(`Synchronized launcher download URLs and WebSocket address to ${publicAddress.host}`)
+    return true
   }
 
   private async ensureLaunchServerJvmCompatibility(

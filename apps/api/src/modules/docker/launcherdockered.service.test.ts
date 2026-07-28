@@ -19,6 +19,19 @@ services:
     image: nginx
 `
 
+const nginxConfig = `
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  '' close;
+}
+
+server {
+  location /api {
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+`
+
 const createContext = () => {
   const logs: string[] = []
   const progress: number[] = []
@@ -127,6 +140,79 @@ describe('LauncherDockeredService', () => {
       expect(readinessPaths).toEqual([installationPath])
       expect(await readFile(join(installationPath, '.env'), 'utf8')).toContain(
         'JAVA_OPTS=--add-opens=java.base/java.time=com.google.gson',
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('synchronizes persisted public URLs to HTTPS and WSS during restart', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gravit-launcherdockered-public-url-'))
+    const installationPath = join(root, 'default')
+    await mkdir(join(installationPath, 'launcher'), { recursive: true })
+    await writeFile(join(installationPath, 'docker-compose.yml'), compose)
+    await writeFile(join(installationPath, 'nginx.conf'), nginxConfig)
+    await writeFile(
+      join(installationPath, '.env'),
+      'ADDRESS=mine.roflan.ru\nPROJECTNAME=TEST\n',
+    )
+    await writeFile(
+      join(installationPath, 'launcher', 'LaunchServer.json'),
+      JSON.stringify({
+        updatesProvider: {
+          urls: {
+            EXE_WINDOWS_X86_64: 'http://old.example/updates/Launcher.exe',
+            JAR: 'http://old.example/updates/Launcher.jar',
+          },
+        },
+        netty: {
+          downloadURL: 'http://old.example/updates/',
+          address: 'ws://old.example/api',
+        },
+      }),
+    )
+    const commands: string[][] = []
+    const service = new LauncherDockeredService(
+      root,
+      async (command) => {
+        commands.push(command)
+        return { exitCode: 0, output: 'ok' }
+      },
+      ready,
+    )
+    const now = new Date().toISOString()
+    const installation: GravitInstallation = {
+      id: crypto.randomUUID(),
+      name: 'default',
+      path: installationPath,
+      address: 'mine.roflan.ru',
+      projectName: 'TEST',
+      sourceRepository: launcherDockeredSource.repository,
+      sourceRevision: launcherDockeredSource.revision,
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    try {
+      await service.restartLaunchServer(installation, createContext().context)
+      expect(commands[0]).toEqual(['docker', 'compose', 'restart', 'nginx'])
+      const config = JSON.parse(
+        await readFile(join(installationPath, 'launcher', 'LaunchServer.json'), 'utf8'),
+      )
+      expect(config).toMatchObject({
+        updatesProvider: {
+          urls: {
+            EXE_WINDOWS_X86_64: 'https://mine.roflan.ru/updates/Launcher.exe',
+            JAR: 'https://mine.roflan.ru/updates/Launcher.jar',
+          },
+        },
+        netty: {
+          downloadURL: 'https://mine.roflan.ru/updates/',
+          address: 'wss://mine.roflan.ru/api',
+        },
+      })
+      expect(await readFile(join(installationPath, 'nginx.conf'), 'utf8')).toContain(
+        'proxy_set_header X-Forwarded-Proto $launcher_forwarded_proto;',
       )
     } finally {
       await rm(root, { recursive: true, force: true })
