@@ -507,6 +507,7 @@ describe('ClientBuildService', () => {
       ],
     ])
     const commands: string[] = []
+    let restarts = 0
     const volume = {
       exists: async (_installation: GravitInstallation, path: string, kind = 'file') =>
         paths.get(path) === kind,
@@ -516,6 +517,7 @@ describe('ClientBuildService', () => {
         path: string,
         bytes: Uint8Array,
       ) => {
+        expect(commands.at(-1)).toBe('config profileProvider sync')
         paths.set(path, 'file')
         files.set(path, new TextDecoder().decode(bytes))
       },
@@ -542,7 +544,21 @@ describe('ClientBuildService', () => {
         return ['Completed']
       },
     } as unknown as ControlFileService
-    const service = new ClientBuildService(control, volume)
+    const service = new ClientBuildService(
+      control,
+      volume,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        restartLaunchServer: async () => {
+          expect(commands.at(-1)).toBe('config profileProvider sync')
+          expect(JSON.parse(files.get('profiles/main.json')!).uuid).toBe(oldUuid)
+          restarts += 1
+        },
+      },
+    )
     const now = new Date().toISOString()
     const installation: GravitInstallation = {
       id: crypto.randomUUID(),
@@ -583,6 +599,7 @@ describe('ClientBuildService', () => {
       'installClient main 1.21.4 FABRIC',
       'config profileProvider sync',
     ])
+    expect(restarts).toBe(1)
   })
 
   test('downloads a missing NeoForge installer before building the client', async () => {

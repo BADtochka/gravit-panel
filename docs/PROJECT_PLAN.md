@@ -446,10 +446,11 @@ Status: completed.
   creating another LauncherDockered workspace.
 - Keep the technical profile ID immutable after creation while exposing editable
   launcher-visible title, description, and sort order.
-- Preserve the existing profile UUID and presentation metadata across
-  MirrorHelper rebuilds, then run the source-defined
-  `config profileProvider sync` action so replaced UUIDs cannot remain as
-  duplicate launcher entries.
+- Run the source-defined `config profileProvider sync` action immediately after
+  MirrorHelper publishes a source-valid profile so shared assets and their
+  cache are synchronized. Then preserve the existing profile UUID and
+  presentation metadata across rebuilds and restart LaunchServer so the
+  restored identity becomes active without a second full directory sync.
 - Remove profiles through an explicitly confirmed background job that moves the
   profile JSON and client update directory to recoverable panel trash before
   synchronizing LaunchServer.

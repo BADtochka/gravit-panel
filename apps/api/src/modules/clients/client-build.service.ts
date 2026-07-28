@@ -850,38 +850,56 @@ export class ClientBuildService {
       )
     }
     context.log(`Verified Minecraft asset index ${assetIndexRelativePath}`)
+    await this.syncProfiles(installation, context, 85)
 
+    let preservedMetadata = false
     if (previousProfile) {
       if (
         typeof previousProfile.uuid === 'string' &&
         profileUuidPattern.test(previousProfile.uuid)
       ) {
         generated.uuid = previousProfile.uuid
+        preservedMetadata = true
       }
       if (typeof previousProfile.title === 'string' && previousProfile.title.trim()) {
         generated.title = previousProfile.title
+        preservedMetadata = true
       }
       if (typeof previousProfile.info === 'string' && previousProfile.info.trim()) {
         generated.info = previousProfile.info
+        preservedMetadata = true
       }
       if (
         typeof previousProfile.sortIndex === 'number' &&
         Number.isSafeInteger(previousProfile.sortIndex)
       ) {
         generated.sortIndex = previousProfile.sortIndex
+        preservedMetadata = true
       }
       if (Array.isArray(previousProfile.servers)) {
         generated.servers = previousProfile.servers
+        preservedMetadata = true
       }
-      await this.volume.writeFileAtomic(
-        installation,
-        profileRelativePath,
-        new TextEncoder().encode(`${JSON.stringify(generated, null, 2)}\n`),
-        '0644',
-      )
-      context.log(`Preserved stable identity and metadata for profile ${input.name}`)
+      if (preservedMetadata) {
+        await this.volume.writeFileAtomic(
+          installation,
+          profileRelativePath,
+          new TextEncoder().encode(`${JSON.stringify(generated, null, 2)}\n`),
+          '0644',
+        )
+        context.log(`Preserved stable identity and metadata for profile ${input.name}`)
+      }
     }
-    await this.syncProfiles(installation, context, 90)
+    if (preservedMetadata) {
+      if (!this.lifecycle) {
+        throw new Error(
+          'LaunchServer restart is unavailable; preserved profile metadata cannot be activated',
+        )
+      }
+      context.progress(92, 'Restarting LaunchServer with preserved profile metadata')
+      await this.lifecycle.restartLaunchServer(installation, context)
+      context.log(`LaunchServer reloaded preserved profile ${input.name}`)
+    }
     const profilePath = join(launcherRoot(installation), profileRelativePath)
     const updatesPath = join(launcherRoot(installation), updatesRelativePath)
     context.progress(95, 'Client profile and update files verified')
