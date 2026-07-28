@@ -290,7 +290,9 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
     @Override
     public boolean joinServer(Client client, String username, UUID uuid, String accessToken, String serverID) throws IOException {
         if (storage == null) return false;
-        DiscordUser user = storage.findByUsername(username);
+        DiscordUser user = username == null || username.isBlank()
+            ? storage.findByUuid(uuid)
+            : storage.findByUsername(username);
         return user != null && (accessToken == null || accessToken.equals(user.accessToken) || accessToken.equals(user.minecraftAccessToken));
     }
 

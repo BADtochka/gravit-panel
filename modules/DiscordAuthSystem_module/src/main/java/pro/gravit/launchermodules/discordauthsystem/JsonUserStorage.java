@@ -27,7 +27,11 @@ public class JsonUserStorage {
     private final Map<UUID, DiscordUser> byUuid = new ConcurrentHashMap<>();
 
     public JsonUserStorage(LaunchServer server) {
-        this.storagePath = server.dir.resolve("config").resolve("DiscordAuthSystem").resolve("Database.json");
+        this(server.dir.resolve("config").resolve("DiscordAuthSystem").resolve("Database.json"));
+    }
+
+    JsonUserStorage(Path storagePath) {
+        this.storagePath = storagePath;
         load();
     }
 
@@ -103,10 +107,16 @@ public class JsonUserStorage {
     }
 
     public synchronized DiscordUser findByUsername(String username) {
+        if (username == null || username.isBlank()) {
+            return null;
+        }
         return byUsername.get(username.toLowerCase());
     }
 
     public synchronized DiscordUser findByUuid(UUID uuid) {
+        if (uuid == null) {
+            return null;
+        }
         return byUuid.get(uuid);
     }
 

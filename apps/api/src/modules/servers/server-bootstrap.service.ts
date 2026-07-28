@@ -797,6 +797,7 @@ printf 'eula=true\\n' > "$WORKDIR/eula.txt"
 cat > "$WORKDIR/gravit-server.env" <<'GRAVIT_ENV'
 SERVERWRAPPER_ADDRESS=${shellQuote(config.launchServerAddress)}
 SERVERWRAPPER_SERVER_NAME=${shellQuote(config.binding.name)}
+SERVERWRAPPER_AUTH_ID=${shellQuote(config.binding.authId!)}
 SERVERWRAPPER_CHECK_SERVER_TOKEN=${shellQuote(serverToken)}
 _JAVA_OPTIONS=${shellQuote(jvmOptions)}
 GRAVIT_ENV
