@@ -27,35 +27,60 @@ const context = (): JobTaskContext => ({
 
 const volumeHarness = () => {
   const paths = new Map<string, 'file' | 'directory'>()
+  const files = new Map<string, string>()
   const volume: RuntimeVolumeOperations = {
     exists: async (_installation, path, kind = 'file') => paths.get(path) === kind,
-    writeFileAtomic: async (_installation, path) => {
+    readFile: async (_installation, path) => {
+      const value = files.get(path)
+      if (value === undefined) throw new Error(`Missing fixture file: ${path}`)
+      return value
+    },
+    writeFileAtomic: async (_installation, path, bytes) => {
       paths.set(path, 'file')
+      files.set(path, new TextDecoder().decode(bytes))
     },
     extractZipToNewDirectory: async (_installation, _archive, target) => {
       paths.set(target, 'directory')
       paths.set(`${target}/runtime_en.properties`, 'file')
       paths.set(`${target}/scenes/login/login.fxml`, 'file')
+      paths.set(`${target}/overlay/webauth/webauth.fxml`, 'file')
+      files.set(
+        `${target}/runtime_en.properties`,
+        'runtime.overlay.webauth.webauth.description=Copy the code below\\n',
+      )
+      files.set(`${target}/scenes/login/login.fxml`, '<AnchorPane />')
+      files.set(
+        `${target}/overlay/webauth/webauth.fxml`,
+        '<Label id="link" styleClass="tooltip" />',
+      )
     },
     move: async (_installation, source, target) => {
       const entries = [...paths.entries()].filter(
         ([path]) => path === source || path.startsWith(`${source}/`),
       )
+      const fileEntries = [...files.entries()].filter(
+        ([path]) => path === source || path.startsWith(`${source}/`),
+      )
       entries.forEach(([path]) => paths.delete(path))
+      fileEntries.forEach(([path]) => files.delete(path))
       entries.forEach(([path, kind]) => {
         paths.set(`${target}${path.slice(source.length)}`, kind)
+      })
+      fileEntries.forEach(([path, contents]) => {
+        files.set(`${target}${path.slice(source.length)}`, contents)
       })
     },
     remove: async (_installation, path) => {
       paths.delete(path)
+      files.delete(path)
     },
   }
-  return { paths, volume }
+  return { files, paths, volume }
 }
 
 describe('LauncherRuntimeService', () => {
   test('installs pinned GUI assets and persists JavaRuntime.jar as a launcher module', async () => {
-    const { paths, volume } = volumeHarness()
+    const { files, paths, volume } = volumeHarness()
     const commands: ModuleControlCommand[] = []
     let loaded = false
     const control = {
@@ -84,6 +109,12 @@ describe('LauncherRuntimeService', () => {
     expect(paths.get('JavaRuntime.jar')).toBe('file')
     expect(paths.get('runtime')).toBe('directory')
     expect(paths.has('.gravit-panel-runtime.zip')).toBe(false)
+    expect(files.get('runtime/runtime_en.properties')).toContain(
+      'Complete authorization in the opened browser window',
+    )
+    expect(files.get('runtime/overlay/webauth/webauth.fxml')).not.toContain(
+      'styleClass="tooltip"',
+    )
     expect(commands).toEqual([
       'modules list',
       'modules launcher-load JavaRuntime.jar',
@@ -98,11 +129,21 @@ describe('LauncherRuntimeService', () => {
   })
 
   test('keeps an installed and loaded runtime without downloading or loading twice', async () => {
-    const { paths, volume } = volumeHarness()
+    const { files, paths, volume } = volumeHarness()
     paths.set('JavaRuntime.jar', 'file')
     paths.set('runtime', 'directory')
     paths.set('runtime/runtime_en.properties', 'file')
     paths.set('runtime/scenes/login/login.fxml', 'file')
+    paths.set('runtime/overlay/webauth/webauth.fxml', 'file')
+    files.set(
+      'runtime/runtime_en.properties',
+      'runtime.overlay.webauth.webauth.description=Copy the code below\n',
+    )
+    files.set('runtime/scenes/login/login.fxml', '<AnchorPane />')
+    files.set(
+      'runtime/overlay/webauth/webauth.fxml',
+      '<Label id="link" styleClass="tooltip" />',
+    )
     let downloads = 0
     const service = new LauncherRuntimeService(
       {
@@ -122,6 +163,12 @@ describe('LauncherRuntimeService', () => {
     expect(downloads).toBe(0)
     expect(result.alreadyInstalled).toBe(true)
     expect(result.alreadyLoaded).toBe(true)
+    expect(files.get('runtime/runtime_en.properties')).toContain(
+      'Complete authorization in the opened browser window',
+    )
+    expect(files.get('runtime/overlay/webauth/webauth.fxml')).not.toContain(
+      'styleClass="tooltip"',
+    )
   })
 
   test('replaces an incomplete runtime directory while retaining its snapshot', async () => {

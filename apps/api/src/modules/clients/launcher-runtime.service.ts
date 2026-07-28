@@ -28,6 +28,10 @@ interface RuntimeVolumeOperations extends Pick<
   VolumeFileOperations,
   'exists' | 'writeFileAtomic' | 'move' | 'remove'
 > {
+  readFile(
+    installation: GravitInstallation,
+    relativePath: string,
+  ): Promise<string>
   extractZipToNewDirectory(
     installation: GravitInstallation,
     archiveRelativePath: string,
@@ -39,10 +43,35 @@ const runtimeModuleLine = '[launcher module] javaruntime.jar'
 const runtimeSentinels = [
   'runtime/runtime_en.properties',
   'runtime/scenes/login/login.fxml',
+  'runtime/overlay/webauth/webauth.fxml',
 ] as const
+const webAuthFxmlPath = 'runtime/overlay/webauth/webauth.fxml'
+const webAuthDescriptionKey = 'runtime.overlay.webauth.webauth.description'
+const webAuthDescriptions = {
+  'runtime/runtime_en.properties':
+    'Complete authorization in the opened browser window, then return here and confirm the login.',
+  'runtime/runtime_ru.properties':
+    'Завершите авторизацию в открывшемся окне браузера, затем вернитесь сюда и подтвердите вход.',
+  'runtime/runtime_pl.properties':
+    'Dokończ autoryzację w otwartym oknie przeglądarki, następnie wróć tutaj i potwierdź logowanie.',
+  'runtime/runtime_uk.properties':
+    'Завершіть авторизацію у відкритому вікні браузера, потім поверніться сюди та підтвердьте вхід.',
+  'runtime/runtime_be.properties':
+    'Завяршыце аўтарызацыю ў адкрытым акне браўзера, затым вярніцеся сюды і пацвердзіце ўваход.',
+} as const
 const isRuntimeLoaded = (lines: string[]) =>
   lines.some((line) => line.toLowerCase().startsWith(runtimeModuleLine))
 const safeTimestamp = () => new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
+
+const replaceProperty = (source: string, key: string, value: string) => {
+  const lines = source.split(/\r?\n/)
+  const index = lines.findIndex((line) => line.startsWith(`${key}=`))
+  if (index === -1) {
+    throw new Error(`LauncherRuntime resource is missing property "${key}"`)
+  }
+  lines[index] = `${key}=${value}`
+  return lines.join('\n')
+}
 
 export class LauncherRuntimeService {
   constructor(
@@ -147,6 +176,8 @@ export class LauncherRuntimeService {
       await this.volume.remove(installation, archivePath)
     }
 
+    await this.applyWebAuthResourceFix(installation, context)
+
     context.progress(25, 'Checking LauncherRuntime module state')
     const beforeLoad = await this.control.executeModuleCommand(installation, 'modules list')
     beforeLoad.forEach(context.log)
@@ -174,6 +205,44 @@ export class LauncherRuntimeService {
       alreadyInstalled,
       alreadyLoaded,
     }
+  }
+
+  private async applyWebAuthResourceFix(
+    installation: GravitInstallation,
+    context: JobTaskContext,
+  ) {
+    let updated = 0
+    const fxml = await this.volume.readFile(installation, webAuthFxmlPath)
+    const nextFxml = fxml.replace(' styleClass="tooltip"', '')
+    if (nextFxml !== fxml) {
+      await this.volume.writeFileAtomic(
+        installation,
+        webAuthFxmlPath,
+        new TextEncoder().encode(nextFxml),
+        '0644',
+      )
+      updated += 1
+    }
+
+    for (const [path, description] of Object.entries(webAuthDescriptions)) {
+      if (!(await this.volume.exists(installation, path))) continue
+      const current = await this.volume.readFile(installation, path)
+      const next = replaceProperty(current, webAuthDescriptionKey, description)
+      if (next === current) continue
+      await this.volume.writeFileAtomic(
+        installation,
+        path,
+        new TextEncoder().encode(next),
+        '0644',
+      )
+      updated += 1
+    }
+
+    context.log(
+      updated
+        ? `Applied LauncherRuntime external OAuth UI fix to ${updated} resources`
+        : 'LauncherRuntime external OAuth UI fix is current',
+    )
   }
 }
 

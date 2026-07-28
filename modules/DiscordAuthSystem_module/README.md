@@ -36,7 +36,7 @@
    ```bash
    gradle build
    ```
-4. Скопируйте `build/libs/DiscordAuthSystem_module-1.0.1.jar` в `LaunchServer/modules/`.
+4. Скопируйте `build/libs/DiscordAuthSystem_module-1.0.4.jar` в `LaunchServer/modules/`.
 5. Запустите LaunchServer и выполните `modules load DiscordAuthSystem`.
 
 ## Конфигурация
@@ -106,7 +106,11 @@
 3. Discord редиректит на `/webapi/auth/discord?code=...&state=...`.
 4. Модуль обменивает `code` на access token, получает данные пользователя, проверяет гильдии и форматирует ник.
 5. Если пользователь новый и `autoRegister=true`, создаётся UUIDv5 на основе Discord ID.
-6. Модуль отправляет `AuthRequestEvent` в соответствующее WebSocket-соединение лаунчера.
+6. В браузере появляется подтверждение успешной авторизации. Пользователь возвращается в лаунчер и нажимает **Подтвердить вход**.
+7. Модуль передаёт сохранённый OAuth-результат штатному `AuthRequest` лаунчера. До этого момента WebSocket-клиент не помечается авторизованным, поэтому повторный запрос не конфликтует с состоянием LaunchServer.
+
+Завершённый результат хранится в памяти не более двух минут и привязан к тому
+же WebSocket-клиенту, который создал OAuth `state`.
 
 ## Безопасность никнеймов
 

@@ -5,10 +5,6 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.*;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import pro.gravit.launcher.base.ClientPermissions;
-import pro.gravit.launcher.base.events.RequestEvent;
-import pro.gravit.launcher.base.events.request.AuthRequestEvent;
-import pro.gravit.launcher.base.profiles.PlayerProfile;
 import pro.gravit.launcher.base.request.auth.password.AuthCodePassword;
 import pro.gravit.launchserver.LaunchServer;
 import pro.gravit.launchserver.auth.AuthException;
@@ -17,11 +13,9 @@ import pro.gravit.launchserver.manangers.AuthManager;
 import pro.gravit.launchserver.socket.Client;
 import pro.gravit.launchserver.socket.NettyConnectContext;
 import pro.gravit.launchserver.socket.handlers.NettyWebAPIHandler;
-import pro.gravit.launchserver.socket.response.auth.AuthResponse;
 
 import java.io.IOException;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
@@ -66,19 +60,23 @@ public class DiscordWebApiHandler implements NettyWebAPIHandler.SimpleSeverletHa
             return;
         }
 
-        AtomicBoolean stateMatched = new AtomicBoolean(false);
         AtomicReference<Client> matchedClient = new AtomicReference<>();
         server.nettyServerSocketHandler.nettyServer.service.forEachActiveChannels((ch, ws) -> {
             Client client = ws.getClient();
             if (client == null) return;
             if (provider.consumePendingState(state, client)) {
-                stateMatched.set(true);
-                matchedClient.set(client);
+                matchedClient.compareAndSet(null, client);
             }
         });
 
-        if (!stateMatched.get()) {
-            sendHttpResponse(ctx, simpleResponse(HttpResponseStatus.BAD_REQUEST, "Invalid or expired state"));
+        Client client = matchedClient.get();
+        if (client == null) {
+            sendHttpResponse(ctx, authorizationPage(
+                HttpResponseStatus.BAD_REQUEST,
+                "Authorization link expired",
+                "Return to the launcher and start Discord authorization again.",
+                false
+            ));
             return;
         }
 
@@ -87,35 +85,36 @@ public class DiscordWebApiHandler implements NettyWebAPIHandler.SimpleSeverletHa
             report = provider.authorize("", null, new AuthCodePassword(code), true);
         } catch (AuthException e) {
             logger.warn("Discord authorization failed: {}", e.getMessage());
-            sendHttpResponse(ctx, simpleHtmlResponse(HttpResponseStatus.FORBIDDEN, "Authorization failed: " + escapeHtml(e.getMessage())));
+            sendHttpResponse(ctx, authorizationPage(
+                HttpResponseStatus.FORBIDDEN,
+                "Authorization failed",
+                e.getMessage(),
+                false
+            ));
             return;
         } catch (Exception e) {
             logger.error("Discord authorization error", e);
-            sendHttpResponse(ctx, simpleResponse(HttpResponseStatus.INTERNAL_SERVER_ERROR, "Internal error"));
+            sendHttpResponse(ctx, authorizationPage(
+                HttpResponseStatus.INTERNAL_SERVER_ERROR,
+                "Authorization failed",
+                "An internal error occurred. Return to the launcher and try again.",
+                false
+            ));
             return;
         }
 
-        DiscordUser user = (DiscordUser) report.session().getUser();
-        String minecraftAccessToken = report.minecraftAccessToken();
-        AuthRequestEvent.OAuthRequestEvent oauth = new AuthRequestEvent.OAuthRequestEvent(
-            report.oauthAccessToken(), report.oauthRefreshToken(), report.oauthExpire()
-        );
-
-        server.nettyServerSocketHandler.nettyServer.service.forEachActiveChannels((ch, ws) -> {
-            Client client = ws.getClient();
-            if (client == null) return;
-            if (client != matchedClient.get()) return;
-
-            client.coreObject = user;
-            client.sessionObject = report.session();
-            server.authManager.internalAuth(client, AuthResponse.ConnectTypes.CLIENT, pair, user.getUsername(), user.getUUID(), ClientPermissions.DEFAULT, true);
-            PlayerProfile playerProfile = server.authManager.getPlayerProfile(client);
-            AuthRequestEvent event = new AuthRequestEvent(ClientPermissions.DEFAULT, playerProfile, minecraftAccessToken, null, null, oauth);
-            event.requestUUID = RequestEvent.eventUUID;
-            server.nettyServerSocketHandler.nettyServer.service.sendObject(ch, event);
-        });
-
-        sendHttpResponse(ctx, simpleHtmlResponse(HttpResponseStatus.OK, "Authorization successful. You can close this window and return to the launcher."));
+        // LauncherRuntime finishes external web auth with a normal AuthRequest
+        // after the user clicks its confirmation button. Keep the completed
+        // report pending for that request instead of marking the WebSocket
+        // client authenticated here; doing so would make the normal request
+        // fail with "You are already logged in".
+        provider.completeBrowserAuthorization(client, report);
+        sendHttpResponse(ctx, authorizationPage(
+            HttpResponseStatus.OK,
+            "Authorization complete",
+            "Return to the launcher and click Confirm login.",
+            true
+        ));
     }
 
     private AuthProviderPair findDiscordProvider() {
@@ -127,10 +126,26 @@ public class DiscordWebApiHandler implements NettyWebAPIHandler.SimpleSeverletHa
         return null;
     }
 
-    private FullHttpResponse simpleHtmlResponse(HttpResponseStatus status, String body) {
-        String html = "<!DOCTYPE html><html><head><meta charset='utf-8'></head><body>"
-            + escapeHtml(body)
-            + "</body></html>";
+    private FullHttpResponse authorizationPage(
+        HttpResponseStatus status,
+        String title,
+        String message,
+        boolean success
+    ) {
+        String accent = success ? "#34d399" : "#fb7185";
+        String icon = success ? "&#10003;" : "!";
+        String html = "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+            + "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            + "<title>" + escapeHtml(title) + "</title><style>"
+            + "*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;"
+            + "padding:24px;background:#09090b;color:#fafafa;font-family:Inter,system-ui,sans-serif}"
+            + "main{width:min(460px,100%);padding:36px;border:1px solid #27272a;border-radius:20px;"
+            + "background:#111113;box-shadow:0 24px 80px #0008;text-align:center}"
+            + ".icon{width:52px;height:52px;margin:0 auto 20px;display:grid;place-items:center;"
+            + "border:1px solid " + accent + ";border-radius:50%;color:" + accent + ";font-size:28px}"
+            + "h1{margin:0 0 12px;font-size:24px}p{margin:0;color:#a1a1aa;line-height:1.6}"
+            + "</style></head><body><main><div class='icon'>" + icon + "</div><h1>"
+            + escapeHtml(title) + "</h1><p>" + escapeHtml(message) + "</p></main></body></html>";
         FullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1, status, Unpooled.wrappedBuffer(html.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/html; charset=UTF-8");
         return response;

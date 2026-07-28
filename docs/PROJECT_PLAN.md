@@ -322,6 +322,13 @@ existing files are snapshotted, the applied digests are recorded in a local
 manifest, and artifacts are rebuilt in the same typed job. This customizes the
 Java launcher UI, not the separate LauncherPrestarter download window.
 
+LauncherRuntime external-browser OAuth resources receive a managed compatibility
+patch during every launcher build. It replaces the device-code-specific prompt
+with browser authorization instructions and removes the empty styled code label.
+The built-in Discord provider keeps the completed callback result pending until
+LauncherRuntime sends its normal confirmation request, avoiding a premature
+WebSocket auth state and the subsequent `You are already logged in` failure.
+
 ### Slice 10: Client Build
 
 Status: completed.

@@ -28,6 +28,7 @@ import java.util.concurrent.ConcurrentMap;
 public class DiscordAuthCoreProvider extends AuthCoreProvider {
     private static final String STATE_PROPERTY = "discordauthsystem.state";
     private static final long PENDING_STATE_TTL_MS = 10 * 60 * 1000L;
+    private static final long COMPLETED_AUTH_TTL_MS = 2 * 60 * 1000L;
     // These are runtime services initialized by the module after LaunchServer
     // has deserialized the core config. Gson must never persist them into
     // LaunchServer.json: Gson and HttpClient contain JDK-internal state.
@@ -36,6 +37,7 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
     private transient DiscordOAuthClient oauthClient;
 
     private transient final ConcurrentMap<String, PendingAuthState> pendingStates = new ConcurrentHashMap<>();
+    private transient final ConcurrentMap<Client, CompletedAuth> completedAuth = new ConcurrentHashMap<>();
 
     @Override
     public void init(LaunchServer server, AuthProviderPair pair) {
@@ -108,17 +110,34 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
     }
 
     public String createPendingState(Client client) {
-        pendingStates.entrySet().removeIf((entry) ->
-            System.currentTimeMillis() - entry.getValue().createdAt > PENDING_STATE_TTL_MS
-        );
+        cleanupExpiredStates();
+        pendingStates.entrySet().removeIf((entry) -> entry.getValue().client == client);
+        completedAuth.remove(client);
         String state = SecurityHelper.randomStringToken();
         pendingStates.put(state, new PendingAuthState(client));
         client.setProperty(STATE_PROPERTY, state);
         return state;
     }
 
-    public PendingAuthState removePendingState(String state) {
-        return pendingStates.remove(state);
+    public void completeBrowserAuthorization(Client client, AuthManager.AuthReport report) {
+        cleanupExpiredStates();
+        completedAuth.put(client, new CompletedAuth(report));
+    }
+
+    private AuthManager.AuthReport consumeBrowserAuthorization(Client client) {
+        cleanupExpiredStates();
+        CompletedAuth completed = completedAuth.remove(client);
+        return completed == null ? null : completed.report;
+    }
+
+    private void cleanupExpiredStates() {
+        long now = System.currentTimeMillis();
+        pendingStates.entrySet().removeIf((entry) ->
+            now - entry.getValue().createdAt > PENDING_STATE_TTL_MS
+        );
+        completedAuth.entrySet().removeIf((entry) ->
+            now - entry.getValue().createdAt > COMPLETED_AUTH_TTL_MS
+        );
     }
 
     private void ensureInitialized() throws IOException {
@@ -154,6 +173,16 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
     public AuthManager.AuthReport authorize(String login, AuthResponse.AuthContext context, pro.gravit.launcher.base.request.auth.AuthRequest.AuthPasswordInterface password, boolean minecraftAccess) throws IOException {
         ensureInitialized();
         if (password instanceof AuthCodePassword codePassword) {
+            if (codePassword.uri == null || codePassword.uri.isBlank()) {
+                if (context == null || context.client == null) {
+                    throw new AuthException("Discord browser authorization requires a launcher connection");
+                }
+                AuthManager.AuthReport completed = consumeBrowserAuthorization(context.client);
+                if (completed == null) {
+                    throw new AuthException("Complete Discord authorization in your browser first");
+                }
+                return completed;
+            }
             return authorizeByCode(codePassword.uri, minecraftAccess);
         }
         if (password instanceof AuthPlainPassword plainPassword && "sudo".equals(plainPassword.password)) {
@@ -230,6 +259,7 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
     @Override
     public void close() {
         pendingStates.clear();
+        completedAuth.clear();
         if (storage != null) {
             storage.save();
         }
@@ -245,6 +275,16 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
 
         public PendingAuthState(Client client) {
             this.client = client;
+            this.createdAt = System.currentTimeMillis();
+        }
+    }
+
+    private static class CompletedAuth {
+        public final AuthManager.AuthReport report;
+        public final long createdAt;
+
+        public CompletedAuth(AuthManager.AuthReport report) {
+            this.report = report;
             this.createdAt = System.currentTimeMillis();
         }
     }

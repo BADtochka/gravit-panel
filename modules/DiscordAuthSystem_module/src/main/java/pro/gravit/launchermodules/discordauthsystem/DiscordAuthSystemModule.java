@@ -16,7 +16,7 @@ import pro.gravit.utils.helper.LogHelper;
 import java.io.IOException;
 
 public class DiscordAuthSystemModule extends LauncherModule {
-    public static final Version VERSION = new Version(1, 0, 3, 0, Version.Type.LTS);
+    public static final Version VERSION = new Version(1, 0, 4, 0, Version.Type.LTS);
     private static boolean registered = false;
 
     private final Logger logger = LogManager.getLogger();
