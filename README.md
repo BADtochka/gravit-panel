@@ -32,6 +32,14 @@ https://panel.example.com  → reverse proxy → gravit-panel web (127.0.0.1:808
 https://mine.example.com   → reverse proxy → installation nginx (host:17549)
 ```
 
+The Compose files also include an **optional standalone `launchserver`
+service** built from the stock official image (`ghcr.io/gravitlauncher/launcher`,
+no custom build). It is a convenience for simple setups: the panel does not
+manage it, it keeps its data in `PANEL_DATA_DIR/launchserver`, and its netty
+port (`127.0.0.1:9274`, WebSocket API plus update files when
+`fileServerEnabled`) stays on the host loopback until you proxy a game domain
+to it. Managed game servers are always LauncherDockered installations.
+
 ## Development
 
 ```bash

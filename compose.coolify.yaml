@@ -1,11 +1,12 @@
 # Deploy with Coolify's Docker Compose build pack.
 #
-# The panel itself is just the API and the web UI. Game servers are NOT part of
-# this stack: create or attach LauncherDockered installations from the panel UI.
-# Each installation runs the official ghcr.io/gravitlauncher/launcher image and
-# publishes its own nginx facade on the Docker host (port 17549 by default).
-# Route your game domain to that host port — see README.md, "Game domain
-# routing" — and keep REMOTE_CONTROL_ENDPOINT pointed at it.
+# Panel-managed game servers are NOT part of this stack: create or attach
+# LauncherDockered installations from the panel UI. Each installation runs the
+# official ghcr.io/gravitlauncher/launcher image and publishes its own nginx
+# facade on the Docker host (port 17549 by default). Route your game domain to
+# that host port — see README.md, "Game domain routing" — and keep
+# REMOTE_CONTROL_ENDPOINT pointed at it. The optional stock `launchserver`
+# service at the bottom is unmanaged and bound to the host loopback only.
 #
 # Data lives at a fixed absolute host path because Coolify rejects variable
 # interpolation in bind-mount paths as a command-injection safeguard. Do not
@@ -83,3 +84,25 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # Optional standalone stock LaunchServer. The panel does NOT manage it;
+  # managed game servers are LauncherDockered installations created from the
+  # panel UI. Intentionally exposed only on the host loopback: assign no domain
+  # to it in Coolify, and proxy a game domain to 127.0.0.1:9274 manually if you
+  # actually use it (WebSocket upgrade required). Its netty port serves the
+  # launcher API and, when fileServerEnabled, the update files directly.
+  launchserver:
+    image: ${LAUNCHSERVER_IMAGE:-ghcr.io/gravitlauncher/launcher:v5.7.9}
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    environment:
+      ADDRESS: ${LAUNCHSERVER_ADDRESS:-localhost:9274}
+      PROJECTNAME: ${LAUNCHSERVER_PROJECT_NAME:-main}
+      JAVA_OPTS: ${LAUNCHSERVER_JAVA_OPTS:-}
+    ports:
+      - "127.0.0.1:${LAUNCHSERVER_PORT:-9274}:9274"
+    volumes:
+      - type: bind
+        source: /data/gravit-panel/launchserver
+        target: /app/data
