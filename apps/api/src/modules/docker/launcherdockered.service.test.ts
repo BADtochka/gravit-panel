@@ -154,7 +154,7 @@ describe('LauncherDockeredService', () => {
     await writeFile(join(installationPath, 'nginx.conf'), nginxConfig)
     await writeFile(
       join(installationPath, '.env'),
-      'ADDRESS=mine.roflan.ru\nPROJECTNAME=TEST\n',
+      'ADDRESS=mine.example.com\nPROJECTNAME = TEST\n',
     )
     await writeFile(
       join(installationPath, 'launcher', 'LaunchServer.json'),
@@ -186,7 +186,7 @@ describe('LauncherDockeredService', () => {
       id: crypto.randomUUID(),
       name: 'default',
       path: installationPath,
-      address: 'mine.roflan.ru',
+      address: 'mine.example.com',
       projectName: 'TEST',
       sourceRepository: launcherDockeredSource.repository,
       sourceRevision: launcherDockeredSource.revision,
@@ -206,13 +206,13 @@ describe('LauncherDockeredService', () => {
       expect(config).toMatchObject({
         updatesProvider: {
           urls: {
-            EXE_WINDOWS_X86_64: 'https://mine.roflan.ru/Launcher.exe',
-            JAR: 'https://mine.roflan.ru/Launcher.jar',
+            EXE_WINDOWS_X86_64: 'https://mine.example.com/Launcher.exe',
+            JAR: 'https://mine.example.com/Launcher.jar',
           },
         },
         netty: {
-          downloadURL: 'https://mine.roflan.ru/',
-          address: 'wss://mine.roflan.ru/api',
+          downloadURL: 'https://mine.example.com/',
+          address: 'wss://mine.example.com/api',
         },
       })
       expect(await readFile(join(installationPath, 'nginx.conf'), 'utf8')).toContain(
@@ -231,7 +231,7 @@ describe('LauncherDockeredService', () => {
     await writeFile(join(installationPath, 'nginx.conf'), nginxConfig)
     await writeFile(
       join(installationPath, '.env'),
-      'ADDRESS=mine.roflan.ru\nPROJECTNAME=TEST\n',
+      'ADDRESS=mine.example.com\nPROJECTNAME=TEST\n',
     )
     await writeFile(
       join(installationPath, 'launcher', 'LaunchServer.json'),
@@ -264,7 +264,7 @@ describe('LauncherDockeredService', () => {
       id: crypto.randomUUID(),
       name: 'default',
       path: installationPath,
-      address: 'mine.roflan.ru',
+      address: 'mine.example.com',
       projectName: 'TEST',
       sourceRepository: launcherDockeredSource.repository,
       sourceRevision: launcherDockeredSource.revision,
@@ -283,13 +283,13 @@ describe('LauncherDockeredService', () => {
       expect(config).toMatchObject({
         updatesProvider: {
           urls: {
-            JAR: 'https://mine.roflan.ru/Launcher.jar',
-            EXE_WINDOWS_X86_64: 'https://mine.roflan.ru/Launcher.exe',
+            JAR: 'https://mine.example.com/Launcher.jar',
+            EXE_WINDOWS_X86_64: 'https://mine.example.com/Launcher.exe',
           },
         },
         netty: {
-          downloadURL: 'https://mine.roflan.ru/%dirname%/',
-          address: 'wss://mine.roflan.ru/api',
+          downloadURL: 'https://mine.example.com/%dirname%/',
+          address: 'wss://mine.example.com/api',
         },
       })
     } finally {

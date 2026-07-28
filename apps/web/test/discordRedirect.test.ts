@@ -3,8 +3,8 @@ import { defaultDiscordRedirectUrl } from '../src/lib/discord-redirect'
 
 describe('default Discord OAuth redirect URL', () => {
   test('uses the selected public Launcher address', () => {
-    expect(defaultDiscordRedirectUrl('mine.roflan.ru')).toBe(
-      'https://mine.roflan.ru/webapi/auth/discord',
+    expect(defaultDiscordRedirectUrl('mine.example.com')).toBe(
+      'https://mine.example.com/webapi/auth/discord',
     )
   })
 
