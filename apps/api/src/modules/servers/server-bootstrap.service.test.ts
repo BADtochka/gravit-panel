@@ -112,7 +112,12 @@ test('server bootstrap claim is one-time and renders a secret only after claim',
   const script = await service.claim(installation, claim!)
   expect(script).toContain('SERVERWRAPPER_CHECK_SERVER_TOKEN')
   expect(script).toContain('header.payload.signature')
-  expect(script).toContain('User=$SERVICE_USER')
+  expect(script).toContain('SERVICE_UID="$(id -u "$SERVICE_USER")"')
+  expect(script).toContain('User=$SERVICE_UID')
+  expect(script).toContain('Group=$SERVICE_GID')
+  expect(script).toContain('WorkingDirectory=$SERVICE_ROOT')
+  expect(script).not.toContain('WorkingDirectory="$WORKDIR"')
+  expect(script).toContain('systemd-analyze verify "$UNIT_TMP"')
   expect(script).toContain('systemctl enable --now gravit-')
   const scriptDirectory = await mkdtemp(join(tmpdir(), 'gravit-bootstrap-script-'))
   try {

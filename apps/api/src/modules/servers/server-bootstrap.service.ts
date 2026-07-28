@@ -514,10 +514,12 @@ umask 077
 REPORT_URL=${shellQuote(reportUrl)}
 PAYLOAD=
 BACKUP=
+UNIT_TMP_DIR=
 UPDATE=false
 report_failure() {
   local code="$?"
   [[ -z "$PAYLOAD" ]] || rm -rf "$PAYLOAD"
+  [[ -z "$UNIT_TMP_DIR" ]] || rm -rf "$UNIT_TMP_DIR"
   if [[ -n "$BACKUP" && -f "$BACKUP" ]]; then
     tar -xzf "$BACKUP" -C "$WORKDIR" || true
     systemctl start ${serviceName}.service >/dev/null 2>&1 || true
@@ -533,13 +535,20 @@ if [[ "$EUID" -ne 0 || -z "\${SUDO_USER:-}" || "$SUDO_USER" == root ]]; then
   echo "Run this command from a non-root account through sudo." >&2
   exit 1
 fi
-for command in curl tar sha256sum systemctl install; do
+for command in curl tar sha256sum systemctl systemd-analyze install ln sed; do
   command -v "$command" >/dev/null || { echo "Missing dependency: $command" >&2; exit 1; }
 done
 
 WORKDIR="$(pwd -P)"
 SERVICE_USER="$SUDO_USER"
 SERVICE_GROUP="$(id -gn "$SERVICE_USER")"
+SERVICE_UID="$(id -u "$SERVICE_USER")"
+SERVICE_GID="$(id -g "$SERVICE_USER")"
+SERVICE_ROOT=/var/lib/gravit-panel/servers/${config.binding.id!}
+if [[ "$SERVICE_UID" -eq 0 || ! -d "$WORKDIR" ]]; then
+  echo "Unable to resolve the non-root service account or working directory." >&2
+  exit 1
+fi
 MARKER="$WORKDIR/.gravit-panel-server"
 if [[ -f "$MARKER" ]]; then
   grep -qx ${shellQuote(config.binding.id!)} "$MARKER" || {
@@ -617,8 +626,16 @@ ${launchCommand}
 GRAVIT_START
 chmod 0750 "$WORKDIR/start-gravit-server.sh"
 chown -R "$SERVICE_USER:$SERVICE_GROUP" "$WORKDIR"
+install -d -m 0755 /var/lib/gravit-panel/servers
+if [[ -e "$SERVICE_ROOT" && ! -L "$SERVICE_ROOT" ]]; then
+  echo "Reserved service path is not a symbolic link: $SERVICE_ROOT" >&2
+  exit 1
+fi
+ln -sfn "$WORKDIR" "$SERVICE_ROOT"
 
-cat > /etc/systemd/system/${serviceName}.service <<SYSTEMD_UNIT
+UNIT_TMP_DIR="$(mktemp -d /run/gravit-systemd.XXXXXXXX)"
+UNIT_TMP="$UNIT_TMP_DIR/${serviceName}.service"
+cat > "$UNIT_TMP" <<SYSTEMD_UNIT
 [Unit]
 Description=Gravit Minecraft server
 After=network-online.target
@@ -626,10 +643,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=$SERVICE_USER
-Group=$SERVICE_GROUP
-WorkingDirectory="$WORKDIR"
-ExecStart="$WORKDIR/start-gravit-server.sh"
+User=$SERVICE_UID
+Group=$SERVICE_GID
+WorkingDirectory=$SERVICE_ROOT
+ExecStart=$SERVICE_ROOT/start-gravit-server.sh
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=120
@@ -638,7 +655,14 @@ KillSignal=SIGINT
 [Install]
 WantedBy=multi-user.target
 SYSTEMD_UNIT
-chmod 0644 /etc/systemd/system/${serviceName}.service
+if ! systemd-analyze verify "$UNIT_TMP"; then
+  echo "Generated systemd unit is invalid:" >&2
+  sed -n '1,160p' "$UNIT_TMP" >&2
+  exit 1
+fi
+install -m 0644 "$UNIT_TMP" /etc/systemd/system/${serviceName}.service
+rm -rf "$UNIT_TMP_DIR"
+UNIT_TMP_DIR=
 systemctl daemon-reload
 systemctl enable --now ${serviceName}.service
 systemctl is-active --quiet ${serviceName}.service
