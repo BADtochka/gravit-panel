@@ -494,6 +494,35 @@ Status: completed.
   control commands and Database.json reads, and shows adaptive guidance for
   unmanaged cores.
 
+### Slice 16: Profile Server Binding and Bootstrap
+
+Status: completed.
+
+- Manage multiple `ClientProfile.ServerProfile` records from the selected
+  client profile, including explicit legacy adoption, default-server
+  reconciliation, recoverable profile snapshots, and controlled LaunchServer
+  reloads.
+- Keep server-only mods and configuration in an independent per-profile
+  workspace. Modrinth installs reject client-only projects, resolve required
+  dependencies, and verify CDN SHA-512 digests. Explicit publication creates an
+  immutable, checksummed server-pack archive.
+- Prepare source-verified Linux bootstrap bundles for Vanilla, Fabric, Forge,
+  and NeoForge. Loader versions are extracted from the generated client
+  profile; non-Vanilla preparation fails closed when the exact version is
+  unavailable. Quilt and the legacy Java 8 bridge remain unsupported.
+- Bundle the pinned Launcher `v5.7.9` ServerWrapper artifacts, compatible
+  LauncherAuthlib, the selected server pack, and architecture-specific
+  Adoptium Java 21 runtimes. The generated systemd installer supports x86_64
+  and aarch64, works in the invoking `SUDO_USER` directory, accepts EULA only
+  after explicit panel confirmation, and backs up patched JARs before updates.
+- Issue the curl command through a 15-minute one-use claim. Store only claim,
+  artifact, and report-token hashes; generate the native profile-scoped
+  `token server` JWT only while serving the script; never persist it in panel
+  jobs or SQLite.
+- Surface the upstream security limitation prominently: the native checkServer
+  JWT has no expiry or per-server revocation and the LaunchServer token command
+  writes it to LaunchServer logs. Key rotation is required after compromise.
+
 ## Secondary Scope
 
 - Built-in standalone Discord OAuth auth and other community auth modules beyond
@@ -528,3 +557,4 @@ Status: completed.
 - Tailwind Vite guide: https://tailwindcss.com/docs
 - shadcn-vue Vite guide: https://www.shadcn-vue.com/docs/installation/vite
 - Modrinth API: https://docs.modrinth.com/api/
+- ServerWrapper: https://gravitlauncher.com/serverwrapper/

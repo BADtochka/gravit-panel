@@ -71,4 +71,81 @@ export const schema = `
 
   CREATE INDEX IF NOT EXISTS panel_sessions_expires_at_idx
     ON panel_sessions (expires_at);
+
+  CREATE TABLE IF NOT EXISTS server_bindings (
+    id TEXT PRIMARY KEY,
+    installation_id TEXT NOT NULL REFERENCES gravit_installations(id) ON DELETE CASCADE,
+    profile_name TEXT NOT NULL,
+    server_name TEXT NOT NULL,
+    server_address TEXT NOT NULL,
+    server_port INTEGER NOT NULL CHECK (server_port BETWEEN 1 AND 65535),
+    is_default INTEGER NOT NULL CHECK (is_default IN (0, 1)),
+    auth_id TEXT NOT NULL,
+    pack_version_id TEXT REFERENCES server_pack_versions(id) ON DELETE SET NULL,
+    xms TEXT NOT NULL,
+    xmx TEXT NOT NULL,
+    jvm_args_json TEXT NOT NULL,
+    game_args_json TEXT NOT NULL,
+    deployment_state TEXT NOT NULL CHECK (
+      deployment_state IN ('pending', 'ready', 'requires-update', 'installed', 'failed')
+    ),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (installation_id, profile_name, server_name)
+  );
+
+  CREATE INDEX IF NOT EXISTS server_bindings_profile_idx
+    ON server_bindings (installation_id, profile_name, updated_at DESC);
+
+  CREATE TABLE IF NOT EXISTS server_pack_versions (
+    id TEXT PRIMARY KEY,
+    installation_id TEXT NOT NULL REFERENCES gravit_installations(id) ON DELETE CASCADE,
+    profile_name TEXT NOT NULL,
+    minecraft_version TEXT NOT NULL,
+    loader TEXT NOT NULL,
+    loader_version TEXT,
+    version_number INTEGER NOT NULL,
+    file_count INTEGER NOT NULL,
+    size INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    archive_path TEXT NOT NULL,
+    manifest_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (installation_id, profile_name, version_number)
+  );
+
+  CREATE INDEX IF NOT EXISTS server_pack_versions_profile_idx
+    ON server_pack_versions (installation_id, profile_name, version_number DESC);
+
+  CREATE TABLE IF NOT EXISTS server_bootstrap_drafts (
+    id TEXT PRIMARY KEY,
+    binding_id TEXT NOT NULL REFERENCES server_bindings(id) ON DELETE CASCADE,
+    installation_id TEXT NOT NULL REFERENCES gravit_installations(id) ON DELETE CASCADE,
+    profile_name TEXT NOT NULL,
+    server_name TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+      status IN ('preparing', 'ready', 'issued', 'claimed', 'installed', 'failed')
+    ),
+    error TEXT,
+    config_json TEXT NOT NULL,
+    bundle_path TEXT,
+    bundle_sha256 TEXT,
+    jre_x64_path TEXT,
+    jre_x64_sha256 TEXT,
+    jre_aarch64_path TEXT,
+    jre_aarch64_sha256 TEXT,
+    claim_hash TEXT UNIQUE,
+    claim_expires_at TEXT,
+    artifact_hash TEXT UNIQUE,
+    artifact_expires_at TEXT,
+    report_hash TEXT UNIQUE,
+    created_at TEXT NOT NULL,
+    prepared_at TEXT,
+    issued_at TEXT,
+    claimed_at TEXT,
+    installed_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS server_bootstrap_binding_idx
+    ON server_bootstrap_drafts (binding_id, created_at DESC);
 `

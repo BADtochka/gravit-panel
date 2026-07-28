@@ -12,6 +12,7 @@ import { modulesRoutes } from './modules/modules/modules.routes'
 import { createPanelAuthGuard, createPanelAuthRoutes } from './modules/panel-auth/panel-auth.routes'
 import { panelAuthService } from './modules/panel-auth/panel-auth.runtime'
 import { setupRoutes } from './modules/setup/setup.routes'
+import { serverBootstrapRoutes, serversRoutes } from './modules/servers/servers.routes'
 
 export const app = new Elysia({ prefix: '/api' })
   .use(
@@ -45,5 +46,7 @@ export const app = new Elysia({ prefix: '/api' })
   .use(modulesRoutes)
   .use(clientsRoutes)
   .use(modsRoutes)
+  .use(serversRoutes)
+  .use(serverBootstrapRoutes)
 
 export type App = typeof app

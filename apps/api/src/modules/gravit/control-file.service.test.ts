@@ -130,4 +130,20 @@ describe('ControlFileService', () => {
       ),
     ).rejects.toThrow('LaunchServer rejected command')
   })
+
+  test('parses a server token without exposing unrelated LaunchServer output', async () => {
+    const profileUuid = '6830f39d-23bd-4653-aecd-81f08af4ec2e'
+    const runner: ControlCommandRunner = async (command) =>
+      isProbe(command)
+        ? { exitCode: 0, stdout: '', stderr: '' }
+        : {
+            exitCode: 0,
+            stdout:
+              `[INFO] Server token ${profileUuid} authId std: header.payload.signature\n`,
+            stderr: '',
+          }
+    const token = await new ControlFileService(1_000, 1_000, runner)
+      .createServerToken(installation, profileUuid, 'std')
+    expect(token).toBe('header.payload.signature')
+  })
 })

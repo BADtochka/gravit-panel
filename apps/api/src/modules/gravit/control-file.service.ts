@@ -38,6 +38,8 @@ export type ClientControlCommand =
   | `installClient ${string} ${string} ${string}`
   | `installClient ${string} ${string} ${string} ${string}`
   | `installMods ${string} ${string} ${string} ${string}`
+export type ServerTokenControlCommand =
+  `token server ${string} ${string} false`
 
 const stripAnsi = (value: string) =>
   value.replace(
@@ -201,6 +203,27 @@ export class ControlFileService {
 
   executeClientCommand(installation: GravitInstallation, command: ClientControlCommand) {
     return this.executeCommand(installation, command, this.longCommandTimeoutMs)
+  }
+
+  async createServerToken(
+    installation: GravitInstallation,
+    profileUuid: string,
+    authId: string,
+  ) {
+    if (
+      !/^[0-9a-f-]{36}$/i.test(profileUuid) ||
+      !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(authId)
+    ) throw new Error('Unsafe server token command arguments')
+    const command =
+      `token server ${profileUuid} ${authId} false` as ServerTokenControlCommand
+    const lines = await this.executeCommand(installation, command)
+    const prefix = `Server token ${profileUuid} authId ${authId}: `
+    const line = lines.find((value) => value.includes(prefix))
+    const token = line?.slice(line.indexOf(prefix) + prefix.length).trim()
+    if (!token || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)) {
+      throw new Error('LaunchServer did not return a valid server token')
+    }
+    return token
   }
 
   private async executeCommand(

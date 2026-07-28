@@ -16,6 +16,7 @@ import type {
   LauncherCustomizationState,
   LauncherRuntimeInstallResult,
   PrestarterInstallResult,
+  ProfileServer,
   WorkspaceApplyResult,
 } from '@gravit-panel/shared'
 import {
@@ -128,6 +129,15 @@ interface LaunchProfileConfig {
   assetIndex?: unknown
 }
 
+interface LaunchProfileServer {
+  name?: unknown
+  serverAddress?: unknown
+  serverPort?: unknown
+  isDefault?: unknown
+  protocol?: unknown
+  socketPing?: unknown
+}
+
 const profileUuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -154,7 +164,38 @@ const profileDescriptor = (
       ? profile.version
       : null,
   loader: inferProfileLoader(profile),
+  loaderVersion: inferProfileLoaderVersion(profile),
+  servers: parseProfileServers(profile.servers),
 })
+
+const parseProfileServers = (value: unknown): ClientProfileDescriptor['servers'] => {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const server = item as LaunchProfileServer
+    if (
+      typeof server.name !== 'string' ||
+      !server.name.trim() ||
+      typeof server.serverAddress !== 'string' ||
+      !server.serverAddress.trim() ||
+      typeof server.serverPort !== 'number' ||
+      !Number.isSafeInteger(server.serverPort) ||
+      server.serverPort < 1 ||
+      server.serverPort > 65_535
+    ) return []
+    return [{
+      name: server.name,
+      serverAddress: server.serverAddress,
+      serverPort: server.serverPort,
+      isDefault: server.isDefault === true,
+      protocol:
+        typeof server.protocol === 'number' && Number.isSafeInteger(server.protocol)
+          ? server.protocol
+          : -1,
+      socketPing: server.socketPing !== false,
+    }]
+  })
+}
 
 const profileAssetIndexPath = (profile: LaunchProfileConfig) => {
   const assetDir =
@@ -203,6 +244,28 @@ export const inferProfileLoader = (
     signals.includes('net.minecraftforge.')
   ) return 'FORGE'
   return 'VANILLA'
+}
+
+export const inferProfileLoaderVersion = (
+  profile: LaunchProfileConfig,
+): string | null => {
+  const values = [
+    ...(Array.isArray(profile.classPath) ? profile.classPath : []),
+    ...(Array.isArray(profile.clientArgs) ? profile.clientArgs : []),
+  ].filter((value): value is string => typeof value === 'string')
+  const joined = values.join('\n')
+  const patterns = [
+    /fabric-loader[/:\\]([0-9][0-9A-Za-z.+_-]*)/i,
+    /net[/:\\]neoforged[/:\\]neoforge[/:\\]([0-9][0-9A-Za-z.+_-]*)/i,
+    /net[/:\\]minecraftforge[/:\\]forge[/:\\](?:[0-9.]+-)?([0-9][0-9A-Za-z.+_-]*)/i,
+    /--fml\.neoForgeVersion(?:=|\s+)([0-9][0-9A-Za-z.+_-]*)/i,
+    /--fml\.forgeVersion(?:=|\s+)([0-9][0-9A-Za-z.+_-]*)/i,
+  ]
+  for (const pattern of patterns) {
+    const match = joined.match(pattern)
+    if (match?.[1]) return match[1]
+  }
+  return inferProfileLoader(profile) === 'VANILLA' ? null : null
 }
 
 const assertInside = (root: string, path: string) => {
@@ -307,6 +370,8 @@ export class ClientBuildService {
           sortIndex: 0,
           minecraftVersion: null,
           loader: null,
+          loaderVersion: null,
+          servers: [],
         }
       }
     }))
@@ -317,6 +382,55 @@ export class ClientBuildService {
         left.name.localeCompare(right.name),
     )
     return { items }
+  }
+
+  async getProfile(
+    installation: GravitInstallation,
+    name: string,
+  ): Promise<ClientProfileDescriptor> {
+    this.validateProfile(name)
+    const current = await this.readProfileConfig(installation, name)
+    return profileDescriptor(name, current.profile)
+  }
+
+  async replaceProfileServers(
+    installation: GravitInstallation,
+    name: string,
+    servers: ProfileServer[],
+    context: JobTaskContext,
+  ): Promise<{ profile: ClientProfileDescriptor; backupPath: string }> {
+    this.validateProfile(name)
+    const path = join('profiles', `${name}.json`)
+    const current = await this.readProfileConfig(installation, name)
+    const backupRelativePath = join(
+      '.gravit-panel-profile-backups',
+      `${name}.servers-${safeTimestamp()}.json`,
+    )
+    await this.volume.copy(installation, path, backupRelativePath)
+    context.progress(25, `Snapshotting ${name} server list`)
+    const next = { ...current.profile, servers }
+    await this.volume.writeFileAtomic(
+      installation,
+      path,
+      new TextEncoder().encode(`${JSON.stringify(next, null, 2)}\n`),
+      '0644',
+    )
+    try {
+      await this.reloadProfilesAndUpdates(installation, context, 65)
+    } catch (error) {
+      await this.volume.writeFileAtomic(
+        installation,
+        path,
+        new TextEncoder().encode(current.raw),
+        '0644',
+      )
+      await this.reloadProfilesAndUpdates(installation, context, 80).catch(() => {})
+      throw error
+    }
+    return {
+      profile: profileDescriptor(name, next),
+      backupPath: join(launcherRoot(installation), backupRelativePath),
+    }
   }
 
   async updateProfile(

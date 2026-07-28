@@ -35,6 +35,11 @@ export type JobType =
   | 'gravit.client.build'
   | 'gravit.profile.update'
   | 'gravit.profile.remove'
+  | 'gravit.server.binding.apply'
+  | 'gravit.server.binding.remove'
+  | 'gravit.server-pack.modify'
+  | 'gravit.server-pack.publish'
+  | 'gravit.server-bootstrap.prepare'
   | 'gravit.mods.install'
   | 'gravit.mods.update'
   | 'gravit.mods.toggle'
@@ -623,6 +628,104 @@ export interface ClientProfileDescriptor {
   sortIndex: number
   minecraftVersion: string | null
   loader: MinecraftLoader | null
+  loaderVersion: string | null
+  servers: ProfileServer[]
+}
+
+export interface ProfileServer {
+  name: string
+  serverAddress: string
+  serverPort: number
+  isDefault: boolean
+  protocol: number
+  socketPing: boolean
+}
+
+export type ServerBindingDeploymentState =
+  | 'pending'
+  | 'ready'
+  | 'requires-update'
+  | 'installed'
+  | 'failed'
+
+export interface ProfileServerBinding extends ProfileServer {
+  id: string | null
+  installationId: string
+  profileName: string
+  authId: string | null
+  packVersionId: string | null
+  xms: string | null
+  xmx: string | null
+  jvmArgs: string[]
+  gameArgs: string[]
+  managed: boolean
+  deploymentState: ServerBindingDeploymentState
+  updatedAt: string | null
+}
+
+export interface ServerBindingInput {
+  installationId: string
+  profileName: string
+  name: string
+  serverAddress: string
+  serverPort: number
+  isDefault: boolean
+  authId: string
+  packVersionId: string | null
+  xms: string
+  xmx: string
+  jvmArgs: string[]
+  gameArgs: string[]
+}
+
+export interface ServerPackFile {
+  path: string
+  size: number
+  sha256: string
+  modifiedAt: string
+}
+
+export interface ServerPackVersion {
+  id: string
+  installationId: string
+  profileName: string
+  minecraftVersion: string
+  loader: MinecraftLoader
+  loaderVersion: string | null
+  versionNumber: number
+  fileCount: number
+  size: number
+  sha256: string
+  createdAt: string
+}
+
+export type ServerBootstrapStatus =
+  | 'preparing'
+  | 'ready'
+  | 'issued'
+  | 'claimed'
+  | 'installed'
+  | 'failed'
+
+export interface ServerBootstrapDraft {
+  id: string
+  bindingId: string
+  installationId: string
+  profileName: string
+  serverName: string
+  status: ServerBootstrapStatus
+  error: string | null
+  createdAt: string
+  preparedAt: string | null
+  issuedAt: string | null
+  claimedAt: string | null
+  installedAt: string | null
+}
+
+export interface ServerBootstrapIssueResult {
+  draft: ServerBootstrapDraft
+  command: string
+  expiresAt: string
 }
 
 export interface ClientProfileUpdateInput {
@@ -695,6 +798,7 @@ export interface ModrinthProject {
   downloads: number
   versions: string[]
   loaders: string[]
+  serverSide?: 'required' | 'optional' | 'unsupported' | 'unknown'
 }
 
 export interface InstalledMod {

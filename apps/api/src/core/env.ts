@@ -2,6 +2,13 @@ import { dirname, join, resolve } from 'node:path'
 
 const databasePath = Bun.env.DATABASE_PATH ?? './data/gravit-panel.sqlite'
 const panelAuthMode = Bun.env.PANEL_AUTH_MODE ?? 'disabled'
+const positiveInteger = (name: string, fallback: number) => {
+  const value = Number(Bun.env[name] ?? fallback)
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer`)
+  }
+  return value
+}
 
 export const env = {
   HOST: Bun.env.HOST ?? '127.0.0.1',
@@ -34,4 +41,12 @@ export const env = {
     Bun.env.PANEL_AUTH_COOKIE_SECURE === undefined
       ? Bun.env.NODE_ENV === 'production'
       : Bun.env.PANEL_AUTH_COOKIE_SECURE !== 'false',
+  SERVER_PACK_MAX_FILE_BYTES: positiveInteger(
+    'SERVER_PACK_MAX_FILE_BYTES',
+    256 * 1024 * 1024,
+  ),
+  SERVER_PACK_MAX_BYTES: positiveInteger(
+    'SERVER_PACK_MAX_BYTES',
+    4 * 1024 * 1024 * 1024,
+  ),
 }

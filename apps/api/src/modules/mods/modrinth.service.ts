@@ -19,6 +19,7 @@ interface SearchResponse {
     downloads: number
     versions: string[]
     categories: string[]
+    server_side?: 'required' | 'optional' | 'unsupported' | 'unknown'
   }>
 }
 
@@ -36,6 +37,17 @@ export interface ModrinthVersion {
     primary: boolean
     size: number
   }>
+  dependencies?: Array<{
+    project_id: string | null
+    version_id: string | null
+    dependency_type: 'required' | 'optional' | 'incompatible' | 'embedded'
+  }>
+}
+
+interface ModrinthProjectDetail {
+  id: string
+  slug: string
+  server_side: 'required' | 'optional' | 'unsupported' | 'unknown'
 }
 
 const requestHeaders = {
@@ -72,9 +84,18 @@ export class ModrinthService {
           downloads: item.downloads,
           versions: item.versions,
           loaders: item.categories,
+          serverSide: item.server_side,
         }),
       ),
       source: modrinthSource,
+    }
+  }
+
+  async searchServer(query: string, minecraftVersion: string, loader: string) {
+    const result = await this.search(query, minecraftVersion, loader)
+    return {
+      ...result,
+      items: result.items.filter((item) => item.serverSide !== 'unsupported'),
     }
   }
 
@@ -95,6 +116,68 @@ export class ModrinthService {
       projects.push({ slug, projectId: versions[0]!.project_id })
     }
     return projects
+  }
+
+  async resolveServerInstall(slug: string, minecraftVersion: string, loader: string) {
+    const resolved: Array<{
+      projectId: string
+      slug: string
+      version: ModrinthVersion
+      file: ModrinthVersion['files'][number]
+    }> = []
+    const visited = new Set<string>()
+    const visit = async (projectRef: string) => {
+      if (visited.has(projectRef)) return
+      if (visited.size >= 64) throw new Error('Modrinth dependency graph exceeds 64 projects')
+      visited.add(projectRef)
+      const projectResponse = await this.fetcher(
+        `${modrinthSource.api}/project/${encodeURIComponent(projectRef)}`,
+        { headers: requestHeaders },
+      )
+      if (!projectResponse.ok) {
+        throw new Error(`${projectRef} is not available from the pinned Modrinth API`)
+      }
+      const project = (await projectResponse.json()) as ModrinthProjectDetail
+      if (project.server_side === 'unsupported') {
+        throw new Error(`${project.slug} is marked as unsupported on dedicated servers`)
+      }
+      const versionsUrl = new URL(
+        `${modrinthSource.api}/project/${encodeURIComponent(project.id)}/version`,
+      )
+      versionsUrl.searchParams.set('loaders', JSON.stringify([loader.toLowerCase()]))
+      versionsUrl.searchParams.set('game_versions', JSON.stringify([minecraftVersion]))
+      const versionsResponse = await this.fetcher(versionsUrl, { headers: requestHeaders })
+      if (!versionsResponse.ok) {
+        throw new Error(`Failed to resolve a server version for ${project.slug}`)
+      }
+      const versions = (await versionsResponse.json()) as ModrinthVersion[]
+      const version = versions[0]
+      if (!version) {
+        throw new Error(`${project.slug} has no compatible ${minecraftVersion}/${loader} version`)
+      }
+      for (const dependency of version.dependencies ?? []) {
+        if (dependency.dependency_type !== 'required') continue
+        if (dependency.project_id) {
+          await visit(dependency.project_id)
+          continue
+        }
+        if (!dependency.version_id) continue
+        const dependencyResponse = await this.fetcher(
+          `${modrinthSource.api}/version/${encodeURIComponent(dependency.version_id)}`,
+          { headers: requestHeaders },
+        )
+        if (!dependencyResponse.ok) {
+          throw new Error(`Failed to resolve required Modrinth dependency ${dependency.version_id}`)
+        }
+        const dependencyVersion = (await dependencyResponse.json()) as ModrinthVersion
+        await visit(dependencyVersion.project_id)
+      }
+      const file = version.files.find((item) => item.primary) ?? version.files[0]
+      if (!file) throw new Error(`${project.slug} version does not contain a downloadable file`)
+      resolved.push({ projectId: project.id, slug: project.slug, version, file })
+    }
+    await visit(slug)
+    return resolved
   }
 
   async versionsFromHashes(hashes: string[]) {

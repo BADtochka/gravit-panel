@@ -15,7 +15,11 @@ import type { VolumeFileOperations } from '../docker/container-volume.service'
 import type { JobTaskContext } from '../jobs/jobs.runner'
 import type { ModuleManagementService } from '../modules/module-management.service'
 import { ModuleManagementService as RuntimeModuleManagementService } from '../modules/module-management.service'
-import { ClientBuildService, inferProfileLoader } from './client-build.service'
+import {
+  ClientBuildService,
+  inferProfileLoader,
+  inferProfileLoaderVersion,
+} from './client-build.service'
 import type { LoaderInstallerProvider } from './loader-installer.service'
 
 const context = (): JobTaskContext => ({
@@ -39,6 +43,14 @@ describe('ClientBuildService', () => {
     ['VANILLA', { mainClass: 'net.minecraft.client.main.Main' }],
   ] as const)('detects %s from generated profile metadata', (loader, profile) => {
     expect(inferProfileLoader(profile)).toBe(loader)
+  })
+
+  test.each([
+    ['/net/fabricmc/fabric-loader/0.16.14/fabric-loader-0.16.14.jar', '0.16.14'],
+    ['/net/neoforged/neoforge/21.1.244/neoforge-21.1.244.jar', '21.1.244'],
+    ['/net/minecraftforge/forge/1.20.1-47.3.0/forge-1.20.1-47.3.0.jar', '47.3.0'],
+  ])('extracts exact server loader version from %s', (classPath, version) => {
+    expect(inferProfileLoaderVersion({ classPath: [classPath] })).toBe(version)
   })
 
   test('lists built profiles with detected Minecraft version and loader', async () => {
@@ -79,6 +91,8 @@ describe('ClientBuildService', () => {
           sortIndex: -10,
           minecraftVersion: '1.21.1',
           loader: 'NEOFORGE',
+          loaderVersion: '21.1.244',
+          servers: [],
         },
         {
           name: 'broken',
@@ -88,6 +102,8 @@ describe('ClientBuildService', () => {
           sortIndex: 0,
           minecraftVersion: null,
           loader: null,
+          loaderVersion: null,
+          servers: [],
         },
       ],
     })

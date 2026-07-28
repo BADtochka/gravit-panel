@@ -96,7 +96,11 @@ export const createPanelAuthGuard = (service: PanelAuthService) => {
   return ({ request }: { request: Request }) => {
     if (!service.enabled) return
     const path = new URL(request.url).pathname
-    if (publicPaths.has(path) || path.startsWith('/api/panel-auth/')) return
+    if (
+      publicPaths.has(path) ||
+      path.startsWith('/api/panel-auth/') ||
+      /^\/api\/server-bootstrap\/(?:[A-Za-z0-9_-]{32,128}|artifacts\/[A-Za-z0-9_-]{32,128}\/(?:bundle|jre-x64|jre-aarch64)|report\/[A-Za-z0-9_-]{32,128})$/.test(path)
+    ) return
     const session = service.session(parseCookie(request.headers.get('cookie'), sessionCookie))
     if (session) return
     return Response.json({ message: 'Discord authentication is required.' }, { status: 401 })
