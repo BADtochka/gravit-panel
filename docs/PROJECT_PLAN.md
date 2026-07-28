@@ -359,12 +359,15 @@ file service. Client names, versions, loaders, and Modrinth slugs are schema-val
 before constructing the typed command.
 
 Before `installClient`, the panel persists
-`mirrorhelper setDisableDownloadAssets true`. This uses the dedicated
+`mirrorhelper setDisableDownloadAssets false`. This uses the dedicated
 MirrorHelper configuration command from
 `GravitLauncher/LauncherModules@0fcdfade1960c353a9f0bbb2f92055f05e22867d`
-and prevents LaunchServer's single control-file thread from being held by the
-optional eager Mojang asset download. Profiles retain the source-defined
-`USE_DEFAULT_ASSETS` behavior.
+and makes MirrorHelper populate the shared Mojang assets update before the
+profile is published. LauncherRuntime requires
+`updates/<assetDir>/indexes/<assetIndex>.json`; a profile build is rejected if
+that index is absent. The initial client build may therefore take longer while
+LaunchServer downloads missing asset objects. Profiles retain the
+source-defined `USE_DEFAULT_ASSETS` behavior.
 
 Forge and NeoForge installer resolution follows the pinned
 `MirrorHelper_module/installers/DownloadInstallerCommand` URL and version

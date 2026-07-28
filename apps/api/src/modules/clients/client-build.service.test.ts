@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import type { GravitInstallation } from '@gravit-panel/shared'
-import { lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ControlFileService } from '../gravit/control-file.service'
@@ -347,6 +354,7 @@ describe('ClientBuildService', () => {
     })
     await mkdir(join(launcher, 'profiles'), { recursive: true })
     await mkdir(join(launcher, 'updates', 'fabric-1214'), { recursive: true })
+    await mkdir(join(launcher, 'updates', 'assets', 'indexes'), { recursive: true })
     await writeFile(
       join(
         launcher,
@@ -358,7 +366,11 @@ describe('ClientBuildService', () => {
       ),
       'authlib',
     )
-    await writeFile(join(launcher, 'profiles', 'fabric-1214.json'), '{}')
+    await writeFile(
+      join(launcher, 'profiles', 'fabric-1214.json'),
+      JSON.stringify({ assetDir: 'assets', assetIndex: '17' }),
+    )
+    await writeFile(join(launcher, 'updates', 'assets', 'indexes', '17.json'), '{}')
     const commands: string[] = []
     const control = {
       executeClientCommand: async (_installation: GravitInstallation, command: string) => {
@@ -380,6 +392,13 @@ describe('ClientBuildService', () => {
           throw error
         }
       },
+      readFile: async (_installation: GravitInstallation, path: string) =>
+        readFile(join(launcher, path), 'utf8'),
+      writeFileAtomic: async (
+        _installation: GravitInstallation,
+        path: string,
+        bytes: Uint8Array,
+      ) => writeFile(join(launcher, path), bytes),
     } as VolumeFileOperations
     const service = new ClientBuildService(control, volume)
     const now = new Date().toISOString()
@@ -409,7 +428,7 @@ describe('ClientBuildService', () => {
       )
 
       expect(commands).toEqual([
-        'mirrorhelper setDisableDownloadAssets true',
+        'mirrorhelper setDisableDownloadAssets false',
         'installClient fabric-1214 1.21.4 FABRIC fabric-api,sodium',
         'config profileProvider sync',
       ])
@@ -420,12 +439,59 @@ describe('ClientBuildService', () => {
     }
   })
 
+  test('rejects a client build when MirrorHelper omits the asset index', async () => {
+    const paths = new Map<string, 'file' | 'directory'>([
+      ['config/MirrorHelper/workspace/authlib/LauncherAuthlib6.jar', 'file'],
+      ['profiles/main.json', 'file'],
+      ['updates/main', 'directory'],
+    ])
+    const volume = {
+      exists: async (_installation: GravitInstallation, path: string, kind = 'file') =>
+        paths.get(path) === kind,
+      readFile: async () =>
+        JSON.stringify({ assetDir: 'assets', assetIndex: '17' }),
+    } as unknown as VolumeFileOperations
+    const control = {
+      executeClientCommand: async () => ['Completed'],
+    } as unknown as ControlFileService
+    const service = new ClientBuildService(control, volume)
+    const now = new Date().toISOString()
+    const installation: GravitInstallation = {
+      id: crypto.randomUUID(),
+      name: 'default',
+      path: '/srv/gravit/default',
+      address: 'localhost:17549',
+      projectName: 'TEST',
+      sourceRepository: 'https://github.com/GravitLauncher/LauncherDockered',
+      sourceRevision: '723203b56f8d58f2447edd20ac8a5b84a31ef816',
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    await expect(
+      service.buildClient(
+        installation,
+        {
+          installationId: installation.id,
+          name: 'main',
+          minecraftVersion: '1.21.4',
+          loader: 'FABRIC',
+          mods: [],
+        },
+        context(),
+      ),
+    ).rejects.toThrow(
+      'MirrorHelper did not download the required asset index updates/assets/indexes/17.json',
+    )
+  })
+
   test('preserves profile identity and presentation metadata across rebuilds', async () => {
     const oldUuid = '65f6ac32-f8d2-4c63-8ebb-733e50d613d5'
     const paths = new Map<string, 'file' | 'directory'>([
       ['config/MirrorHelper/workspace/authlib/LauncherAuthlib6.jar', 'file'],
       ['profiles/main.json', 'file'],
       ['updates/main', 'directory'],
+      ['updates/assets/indexes/17.json', 'file'],
     ])
     const files = new Map<string, string>([
       [
@@ -468,6 +534,8 @@ describe('ClientBuildService', () => {
               servers: [{ name: 'main', serverAddress: 'localhost', serverPort: 25565 }],
               version: '1.21.4',
               mainClass: 'net.fabricmc.loader.impl.launch.knot.KnotClient',
+              assetDir: 'assets',
+              assetIndex: '17',
             }),
           )
         }
@@ -511,7 +579,7 @@ describe('ClientBuildService', () => {
       version: '1.21.4',
     })
     expect(commands).toEqual([
-      'mirrorhelper setDisableDownloadAssets true',
+      'mirrorhelper setDisableDownloadAssets false',
       'installClient main 1.21.4 FABRIC',
       'config profileProvider sync',
     ])
@@ -521,6 +589,7 @@ describe('ClientBuildService', () => {
     const paths = new Map<string, 'file' | 'directory'>([
       ['config/MirrorHelper/workspace/authlib/LauncherAuthlib6.jar', 'file'],
     ])
+    const files = new Map<string, string>()
     const commands: string[] = []
     const volume: VolumeFileOperations = {
       exists: async (_installation, path, kind = 'file') => paths.get(path) === kind,
@@ -529,6 +598,11 @@ describe('ClientBuildService', () => {
       },
       writeFileAtomic: async (_installation, path) => {
         paths.set(path, 'file')
+      },
+      readFile: async (_installation, path) => {
+        const value = files.get(path)
+        if (value === undefined) throw new Error(`Missing ${path}`)
+        return value
       },
       copy: async (_installation, source, target) => {
         const kind = paths.get(source)
@@ -549,6 +623,11 @@ describe('ClientBuildService', () => {
         if (command === 'installClient main 1.21.1 NEOFORGE') {
           paths.set('profiles/main.json', 'file')
           paths.set('updates/main', 'directory')
+          paths.set('updates/assets/indexes/17.json', 'file')
+          files.set(
+            'profiles/main.json',
+            JSON.stringify({ assetDir: 'assets', assetIndex: '17' }),
+          )
         }
         return ['Completed']
       },
@@ -598,7 +677,7 @@ describe('ClientBuildService', () => {
     )
 
     expect(commands).toEqual([
-      'mirrorhelper setDisableDownloadAssets true',
+      'mirrorhelper setDisableDownloadAssets false',
       'installClient main 1.21.1 NEOFORGE',
       'config profileProvider sync',
     ])
@@ -615,10 +694,16 @@ describe('ClientBuildService', () => {
       ['config/MirrorHelper/workspace/authlib/LauncherAuthlib6.jar', 'file'],
       ['config/MirrorHelper/workspace/clients/forge/1.21.1', 'directory'],
     ])
+    const files = new Map<string, string>()
     const commands: string[] = []
     const volume = {
       exists: async (_installation: GravitInstallation, path: string, kind = 'file') =>
         paths.get(path) === kind,
+      readFile: async (_installation: GravitInstallation, path: string) => {
+        const value = files.get(path)
+        if (value === undefined) throw new Error(`Missing ${path}`)
+        return value
+      },
     } as VolumeFileOperations
     const control = {
       executeClientCommand: async (_installation: GravitInstallation, command: string) => {
@@ -626,6 +711,11 @@ describe('ClientBuildService', () => {
         if (command === 'installClient forge-main 1.21.1 FORGE') {
           paths.set('profiles/forge-main.json', 'file')
           paths.set('updates/forge-main', 'directory')
+          paths.set('updates/assets/indexes/17.json', 'file')
+          files.set(
+            'profiles/forge-main.json',
+            JSON.stringify({ assetDir: 'assets', assetIndex: '17' }),
+          )
         }
         return ['Completed']
       },
@@ -657,7 +747,7 @@ describe('ClientBuildService', () => {
     )
 
     expect(commands).toEqual([
-      'mirrorhelper setDisableDownloadAssets true',
+      'mirrorhelper setDisableDownloadAssets false',
       'installClient forge-main 1.21.1 FORGE',
       'config profileProvider sync',
     ])

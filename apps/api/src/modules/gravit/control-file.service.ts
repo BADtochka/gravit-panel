@@ -34,7 +34,7 @@ export type AuthControlCommand =
 export type ClientControlCommand =
   | `applyworkspace ${string}`
   | 'config profileProvider sync'
-  | 'mirrorhelper setDisableDownloadAssets true'
+  | `mirrorhelper setDisableDownloadAssets ${'true' | 'false'}`
   | `downloadinstaller ${'FORGE' | 'NEOFORGE'} ${string}`
   | `installClient ${string} ${string} ${string}`
   | `installClient ${string} ${string} ${string} ${string}`

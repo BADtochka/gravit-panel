@@ -63,6 +63,7 @@ export interface LaunchServerLifecycle {
 
 const safeTimestamp = () => new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
 const profilePattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/
+const assetPathSegmentPattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/
 const versionPattern = /^[0-9]+(?:\.[0-9]+){1,3}$/
 const modPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/
 const mirrorHelperModule = (() => {
@@ -123,6 +124,8 @@ interface LaunchProfileConfig {
   mainClass?: unknown
   clientArgs?: unknown
   classPath?: unknown
+  assetDir?: unknown
+  assetIndex?: unknown
 }
 
 const profileUuidPattern =
@@ -800,7 +803,7 @@ export class ClientBuildService {
     context.progress(20, 'Configuring MirrorHelper client build')
     const configLines = await this.control.executeClientCommand(
       installation,
-      'mirrorhelper setDisableDownloadAssets true',
+      'mirrorhelper setDisableDownloadAssets false',
     )
     configLines.forEach(context.log)
     await this.ensureLoaderInstaller(installation, input.loader, input.minecraftVersion, context)
@@ -816,10 +819,39 @@ export class ClientBuildService {
     if (!hasProfile || !hasUpdates) {
       throw new Error('MirrorHelper did not produce the expected profile and updates directory')
     }
-    if (previousProfile && this.volume.readFile) {
-      const generated = JSON.parse(
-        await this.volume.readFile(installation, profileRelativePath),
-      ) as LaunchProfileConfig
+    const { profile: generated } = await this.readProfileConfig(
+      installation,
+      input.name,
+    )
+    const assetDir =
+      typeof generated.assetDir === 'string' &&
+      assetPathSegmentPattern.test(generated.assetDir)
+        ? generated.assetDir
+        : null
+    const assetIndex =
+      typeof generated.assetIndex === 'string' &&
+      assetPathSegmentPattern.test(generated.assetIndex)
+        ? generated.assetIndex
+        : null
+    if (!assetDir || !assetIndex) {
+      throw new Error(
+        'MirrorHelper produced a profile without a safe assetDir and assetIndex',
+      )
+    }
+    const assetIndexRelativePath = join(
+      'updates',
+      assetDir,
+      'indexes',
+      `${assetIndex}.json`,
+    )
+    if (!(await this.volume.exists(installation, assetIndexRelativePath))) {
+      throw new Error(
+        `MirrorHelper did not download the required asset index ${assetIndexRelativePath}`,
+      )
+    }
+    context.log(`Verified Minecraft asset index ${assetIndexRelativePath}`)
+
+    if (previousProfile) {
       if (
         typeof previousProfile.uuid === 'string' &&
         profileUuidPattern.test(previousProfile.uuid)
