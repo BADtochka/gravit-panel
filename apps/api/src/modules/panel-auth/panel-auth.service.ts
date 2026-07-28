@@ -71,7 +71,7 @@ export class PanelAuthService {
   get configured() {
     return (
       this.enabled &&
-      Boolean(this.publicUrl) &&
+      Boolean(this.redirectUri) &&
       Boolean(this.configuration.discordClientId) &&
       Boolean(this.configuration.discordClientSecret) &&
       this.configuration.allowedDiscordUserIds.length > 0
@@ -99,6 +99,11 @@ export class PanelAuthService {
   get publicPath() {
     if (!this.publicUrl) return '/'
     return new URL(this.publicUrl).pathname || '/'
+  }
+
+  get redirectUri() {
+    const publicUrl = this.publicUrl
+    return publicUrl ? `${publicUrl}/api/panel-auth/callback` : null
   }
 
   get authCookiePath() {
@@ -136,7 +141,7 @@ export class PanelAuthService {
     this.requireConfigured()
     const url = new URL(discordAuthorizeUrl)
     url.searchParams.set('client_id', this.configuration.discordClientId!)
-    url.searchParams.set('redirect_uri', this.configuration.redirectUri!)
+    url.searchParams.set('redirect_uri', this.redirectUri!)
     url.searchParams.set('response_type', 'code')
     url.searchParams.set('scope', 'identify')
     url.searchParams.set('state', state)
@@ -150,7 +155,7 @@ export class PanelAuthService {
       client_secret: this.configuration.discordClientSecret!,
       grant_type: 'authorization_code',
       code,
-      redirect_uri: this.configuration.redirectUri!,
+      redirect_uri: this.redirectUri!,
     })
     const tokenResponse = await this.fetcher(discordTokenUrl, {
       method: 'POST',

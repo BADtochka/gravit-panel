@@ -74,7 +74,9 @@ and add this exact redirect URI:
 https://panel.example.com/api/panel-auth/callback
 ```
 
-Then set `PANEL_DISCORD_CLIENT_ID`, `PANEL_DISCORD_CLIENT_SECRET`, and
+Set `PANEL_PUBLIC_URL` to the public panel URL. The callback is derived
+automatically as `${PANEL_PUBLIC_URL}/api/panel-auth/callback`; register that
+exact value in Discord. Then set `PANEL_DISCORD_CLIENT_ID`, `PANEL_DISCORD_CLIENT_SECRET`, and
 `PANEL_DISCORD_ALLOWED_USER_IDS` (a comma-separated allowlist of Discord user
 IDs). The allowlist is required: a successful Discord login alone does not
 grant administrative access.
@@ -84,7 +86,7 @@ grant administrative access.
 The panel supports a public subroute such as `https://host.example/panel`.
 Set `PANEL_PUBLIC_PATH=/panel` for the `web` service and
 `PANEL_PUBLIC_URL=https://host.example/panel` for the API. The public Discord
-callback must include the same prefix:
+callback is derived automatically and includes the same prefix:
 
 ```text
 https://host.example/panel/api/panel-auth/callback

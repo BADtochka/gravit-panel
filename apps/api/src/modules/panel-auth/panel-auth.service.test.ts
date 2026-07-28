@@ -32,6 +32,7 @@ describe('PanelAuthService', () => {
 
     expect(url.origin).toBe('https://discord.com')
     expect(url.searchParams.get('scope')).toBe('identify')
+    expect(url.searchParams.get('redirect_uri')).toBe('https://panel.example.com/api/panel-auth/callback')
     expect(url.searchParams.get('state')).toBe(state)
     expect(service.consumeState(state)).toBe(true)
     expect(service.consumeState(state)).toBe(false)
@@ -87,11 +88,12 @@ describe('PanelAuthService', () => {
     const service = new PanelAuthService(database, {
       ...configuration,
       publicUrl: 'https://panel.example.com/panel/',
-      redirectUri: 'https://panel.example.com/panel/api/panel-auth/callback',
+      redirectUri: 'https://ignored.example.test/callback',
     })
 
     expect(service.publicUrl).toBe('https://panel.example.com/panel')
     expect(service.publicPath).toBe('/panel')
+    expect(service.redirectUri).toBe('https://panel.example.com/panel/api/panel-auth/callback')
     expect(service.authCookiePath).toBe('/panel/api/panel-auth')
   })
 })

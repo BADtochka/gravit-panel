@@ -22,7 +22,6 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       PANEL_AUTH_MODE: discord
       PANEL_PUBLIC_URL: https://${SERVICE_FQDN_PANELWEB}${PANEL_PUBLIC_PATH:-}
-      PANEL_AUTH_REDIRECT_URI: https://${SERVICE_FQDN_PANELWEB}${PANEL_PUBLIC_PATH:-}/api/panel-auth/callback
       PANEL_DISCORD_CLIENT_ID: ${PANEL_DISCORD_CLIENT_ID:?Set the Discord OAuth2 client ID}
       PANEL_DISCORD_CLIENT_SECRET: ${PANEL_DISCORD_CLIENT_SECRET:?Set the Discord OAuth2 client secret}
       PANEL_DISCORD_ALLOWED_USER_IDS: ${PANEL_DISCORD_ALLOWED_USER_IDS:?Set at least one allowed Discord user ID}
