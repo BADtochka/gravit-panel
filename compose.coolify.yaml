@@ -1,8 +1,14 @@
-# Deploy this file with Coolify's Docker Compose build pack. Configure the
+# Deploy with Coolify's Docker Compose build pack.
+#
 # Data lives at a fixed absolute host path because Coolify rejects variable
 # interpolation in bind-mount paths as a command-injection safeguard. Do not
 # replace this bind mount with a named volume: the panel starts nested Compose
 # projects and Docker must resolve their bind mounts on the host.
+#
+# Coolify provides the following magic variables:
+#   SERVICE_REALBASE64_32_GRAVITPANEL — stable base64 32-byte encryption key
+#   SERVICE_FQDN_PANELWEB             — auto-generated FQDN for the web service
+#   SERVICE_FQDN_LAUNCHSERVERWEB       — auto-generated FQDN for launchserver-web
 name: gravit-panel
 
 services:
@@ -15,11 +21,13 @@ services:
       DATABASE_PATH: /data/gravit-panel/gravit-panel.sqlite
       INSTALLATIONS_ROOT: /data/gravit-panel/installations
       MODULE_ARTIFACTS_DIR: /data/gravit-panel/modules
-      # LauncherDockered publishes its nginx facade on the Docker host.
       REMOTE_CONTROL_ENDPOINT: http://host.docker.internal:17549
-      # Coolify generates a stable base64-encoded 32-byte key per resource.
       CREDENTIAL_ENCRYPTION_KEY: ${SERVICE_REALBASE64_32_GRAVITPANEL}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # PANEL_PUBLIC_URL is the single source of truth for the panel's
+      # public address. Its path component drives the SPA sub-route and
+      # OAuth callback URI. PANEL_PUBLIC_PATH is an optional override
+      # for edge cases where the proxy strips a different prefix.
       PANEL_AUTH_MODE: discord
       PANEL_PUBLIC_URL: https://${SERVICE_FQDN_PANELWEB}${PANEL_PUBLIC_PATH:-}
       PANEL_DISCORD_CLIENT_ID: ${PANEL_DISCORD_CLIENT_ID:?Set the Discord OAuth2 client ID}
@@ -51,17 +59,15 @@ services:
     expose:
       - "80"
     environment:
-      # Creates the Coolify wildcard-domain route used by the panel OAuth callback.
       SERVICE_URL_PANELWEB_80: ${PANEL_PUBLIC_PATH:-/}
+      # The web container derives the SPA sub-path from PANEL_PUBLIC_URL.
+      # PANEL_PUBLIC_PATH is supplied as an explicit override.
+      PANEL_PUBLIC_URL: https://${SERVICE_FQDN_PANELWEB}${PANEL_PUBLIC_PATH:-}
       PANEL_PUBLIC_PATH: ${PANEL_PUBLIC_PATH:-}
     labels:
-      # Normalise /panel to /panel/ before StripPrefix so relative Vite assets
-      # are resolved below the public route. An empty path never matches.
       - "traefik.http.middlewares.gravit-panel-trailing.redirectregex.regex=^https?://([^/]+)${PANEL_PUBLIC_PATH:-/__gravit-panel-disabled__}$$"
       - "traefik.http.middlewares.gravit-panel-trailing.redirectregex.replacement=https://$${1}${PANEL_PUBLIC_PATH:-/__gravit-panel-disabled__}/"
       - "traefik.http.middlewares.gravit-panel-trailing.redirectregex.permanent=true"
-      # Set PANEL_PUBLIC_PATH=/panel to expose the panel below /panel and
-      # remove that prefix before forwarding the request to nginx.
       - "traefik.http.middlewares.gravit-panel-strip.stripprefix.prefixes=${PANEL_PUBLIC_PATH:-/__gravit-panel-disabled__}"
       - "coolify.traefik.middlewares=gravit-panel-trailing@docker,gravit-panel-strip@docker"
     healthcheck:
@@ -77,8 +83,8 @@ services:
     stdin_open: true
     tty: true
     environment:
-      # Use a custom game domain when it is routed to launchserver-web; otherwise
-      # fall back to the Coolify-generated FQDN for that service.
+      # Defaults to the Coolify-generated FQDN for launchserver-web when
+      # custom LAUNCHSERVER_ADDRESS is not set.
       ADDRESS: ${LAUNCHSERVER_ADDRESS:-${SERVICE_FQDN_LAUNCHSERVERWEB}}
       PROJECTNAME: ${LAUNCHSERVER_PROJECT_NAME:-main}
       JAVA_OPTS: ${LAUNCHSERVER_JAVA_OPTS:-}
@@ -96,7 +102,6 @@ services:
     expose:
       - "80"
     environment:
-      # Creates a Coolify wildcard-domain route to this service's port 80.
       SERVICE_URL_LAUNCHSERVERWEB_80: /
     volumes:
       - type: bind

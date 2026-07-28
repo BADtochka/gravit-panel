@@ -1,18 +1,29 @@
 name: gravit-panel
 
+x-panel-data: &panel-data
+  # Absolute path on the Docker host. Must exist before starting the project
+  # and must be the same inside the container — LauncherDockered Compose
+  # projects use relative bind mounts resolved by the host daemon.
+  DATABASE_PATH: ${PANEL_DATA_DIR:-/data/gravit-panel}/gravit-panel.sqlite
+  MODULE_ARTIFACTS_DIR: ${PANEL_DATA_DIR:-/data/gravit-panel}/modules
+  INSTALLATIONS_ROOT: ${PANEL_DATA_DIR:-/data/gravit-panel}/installations
+
 services:
+  # ------------------------------------------------------------------
+  # API — Bun + Elysia server. Manages installations, modules, builds.
+  # ------------------------------------------------------------------
   api:
     image: ${PANEL_API_IMAGE:-ghcr.io/badtochka/gravit-panel-api:latest}
     restart: unless-stopped
     environment:
       HOST: 0.0.0.0
       PORT: 3000
-      DATABASE_PATH: ${PANEL_DATA_DIR:-/data/gravit-panel}/gravit-panel.sqlite
-      INSTALLATIONS_ROOT: ${PANEL_DATA_DIR:-/data/gravit-panel}/installations
-      MODULE_ARTIFACTS_DIR: ${PANEL_DATA_DIR:-/data/gravit-panel}/modules
+      <<: *panel-data
       REMOTE_CONTROL_ENDPOINT: ${REMOTE_CONTROL_ENDPOINT:-http://host.docker.internal:17549}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # Panel auth. Set PANEL_AUTH_MODE=discord and configure the OAuth
+      # variables to enable Discord-based panel authentication.
       PANEL_AUTH_MODE: ${PANEL_AUTH_MODE:-disabled}
       PANEL_PUBLIC_URL: ${PANEL_PUBLIC_URL:-}
       PANEL_DISCORD_CLIENT_ID: ${PANEL_DISCORD_CLIENT_ID:-}
@@ -20,8 +31,6 @@ services:
       PANEL_DISCORD_ALLOWED_USER_IDS: ${PANEL_DISCORD_ALLOWED_USER_IDS:-}
       PANEL_AUTH_COOKIE_SECURE: ${PANEL_AUTH_COOKIE_SECURE:-true}
     volumes:
-      # Keep the host and container paths identical. LauncherDockered's own
-      # Compose projects use relative bind mounts, resolved by the host daemon.
       - type: bind
         source: ${PANEL_DATA_DIR:-/data/gravit-panel}
         target: ${PANEL_DATA_DIR:-/data/gravit-panel}
@@ -37,6 +46,9 @@ services:
       retries: 5
       start_period: 20s
 
+  # ------------------------------------------------------------------
+  # Web — nginx that serves the Vue SPA and proxies /api/ to the API.
+  # ------------------------------------------------------------------
   web:
     image: ${PANEL_WEB_IMAGE:-ghcr.io/badtochka/gravit-panel-web:latest}
     restart: unless-stopped
@@ -46,6 +58,10 @@ services:
     ports:
       - "127.0.0.1:${PANEL_PORT:-8080}:80"
     environment:
+      # PANEL_PUBLIC_URL is the single source of truth for deriving
+      # the SPA sub-path. PANEL_PUBLIC_PATH is an optional override
+      # when the proxy strips a different prefix than the URL path.
+      PANEL_PUBLIC_URL: ${PANEL_PUBLIC_URL:-}
       PANEL_PUBLIC_PATH: ${PANEL_PUBLIC_PATH:-}
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
@@ -54,6 +70,9 @@ services:
       retries: 5
       start_period: 10s
 
+  # ------------------------------------------------------------------
+  # LaunchServer — GravitLauncher game server runtime.
+  # ------------------------------------------------------------------
   launchserver:
     image: ${PANEL_LAUNCHSERVER_IMAGE:-ghcr.io/badtochka/gravit-panel-launchserver:latest}
     restart: unless-stopped
@@ -68,6 +87,9 @@ services:
         source: ${PANEL_DATA_DIR:-/data/gravit-panel}/launchserver
         target: /app/data
 
+  # ------------------------------------------------------------------
+  # LaunchServer Web — nginx reverse proxy + static updates for launchers.
+  # ------------------------------------------------------------------
   launchserver-web:
     image: ${PANEL_LAUNCHSERVER_WEB_IMAGE:-ghcr.io/badtochka/gravit-panel-launchserver-web:latest}
     restart: unless-stopped
