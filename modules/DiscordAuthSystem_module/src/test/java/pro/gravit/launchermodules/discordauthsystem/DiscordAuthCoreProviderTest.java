@@ -2,6 +2,7 @@ package pro.gravit.launchermodules.discordauthsystem;
 
 import org.junit.jupiter.api.Test;
 import pro.gravit.launcher.base.ClientPermissions;
+import pro.gravit.launchserver.socket.Client;
 
 import java.util.UUID;
 import org.junit.jupiter.api.io.TempDir;
@@ -9,12 +10,28 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DiscordAuthCoreProviderTest {
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void keepsEarlierAuthorizationLinkValidWhenLauncherRequestsAnotherOne() {
+        DiscordAuthCoreProvider provider = new DiscordAuthCoreProvider();
+        Client client = new Client();
+
+        String firstState = provider.createPendingState(client);
+        String secondState = provider.createPendingState(client);
+
+        assertNotEquals(firstState, secondState);
+        assertTrue(provider.consumePendingState(firstState, client));
+        assertTrue(provider.consumePendingState(secondState, client));
+        assertFalse(provider.consumePendingState(firstState, client));
+    }
 
     @Test
     void keepsMinecraftAndOAuthAccessTokensInTheirProtocolFields() {

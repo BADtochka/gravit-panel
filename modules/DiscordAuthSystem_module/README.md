@@ -38,7 +38,7 @@
    ```bash
    gradle build
    ```
-4. Скопируйте `build/libs/DiscordAuthSystem_module-1.0.7.jar` в `LaunchServer/modules/`.
+4. Скопируйте `build/libs/DiscordAuthSystem_module-1.0.8.jar` в `LaunchServer/modules/`.
 5. Запустите LaunchServer и выполните `modules load DiscordAuthSystem`.
 
 ## Конфигурация

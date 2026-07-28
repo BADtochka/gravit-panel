@@ -21,15 +21,16 @@ import pro.gravit.utils.helper.SecurityHelper;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.UUID;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 public class DiscordAuthCoreProvider extends AuthCoreProvider {
-    private static final String STATE_PROPERTY = "discordauthsystem.state";
     private static final long PENDING_STATE_TTL_MS = 10 * 60 * 1000L;
     private static final long COMPLETED_AUTH_TTL_MS = 2 * 60 * 1000L;
+    private static final int MAX_PENDING_STATES_PER_CLIENT = 5;
     // These are runtime services initialized by the module after LaunchServer
     // has deserialized the core config. Gson must never persist them into
     // LaunchServer.json: Gson and HttpClient contain JDK-internal state.
@@ -64,21 +65,12 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
         return oauthClient.buildAuthorizeUrl(state);
     }
 
-    public static String getStateProperty() {
-        return STATE_PROPERTY;
-    }
-
     public boolean consumePendingState(String state, Client client) {
+        cleanupExpiredStates();
         PendingAuthState pending = pendingStates.get(state);
-        if (pending == null || pending.client != client || !pendingStates.remove(state, pending)) {
-            return false;
-        }
-        String currentState = client.getProperty(STATE_PROPERTY);
-        if (!state.equals(currentState)) {
-            return false;
-        }
-        client.setProperty(STATE_PROPERTY, null);
-        return true;
+        return pending != null &&
+            pending.client == client &&
+            pendingStates.remove(state, pending);
     }
 
     private void refreshRuntimeServices() throws IOException {
@@ -112,17 +104,36 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
 
     public String createPendingState(Client client) {
         cleanupExpiredStates();
-        pendingStates.entrySet().removeIf((entry) -> entry.getValue().client == client);
+        trimPendingStates(client);
         completedAuth.remove(client);
         String state = SecurityHelper.randomStringToken();
         pendingStates.put(state, new PendingAuthState(client));
-        client.setProperty(STATE_PROPERTY, state);
         return state;
     }
 
     public void completeBrowserAuthorization(Client client, AuthManager.AuthReport report) {
         cleanupExpiredStates();
+        pendingStates.entrySet().removeIf((entry) -> entry.getValue().client == client);
         completedAuth.put(client, new CompletedAuth(report));
+    }
+
+    private void trimPendingStates(Client client) {
+        while (pendingStates.values().stream().filter((pending) -> pending.client == client).count()
+            >= MAX_PENDING_STATES_PER_CLIENT) {
+            Map.Entry<String, PendingAuthState> oldest = null;
+            for (Map.Entry<String, PendingAuthState> entry : pendingStates.entrySet()) {
+                PendingAuthState pending = entry.getValue();
+                if (
+                    pending.client == client &&
+                    (oldest == null || pending.createdAt < oldest.getValue().createdAt)
+                ) {
+                    oldest = entry;
+                }
+            }
+            if (oldest == null || !pendingStates.remove(oldest.getKey(), oldest.getValue())) {
+                return;
+            }
+        }
     }
 
     private AuthManager.AuthReport consumeBrowserAuthorization(Client client) {
