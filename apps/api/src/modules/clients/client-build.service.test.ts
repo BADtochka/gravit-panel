@@ -51,6 +51,10 @@ describe('ClientBuildService', () => {
       readFile: async (_installation: GravitInstallation, path: string) => {
         if (path === 'profiles/broken.json') return '{'
         return JSON.stringify({
+          uuid: '65f6ac32-f8d2-4c63-8ebb-733e50d613d5',
+          title: 'Main client',
+          info: 'Primary profile',
+          sortIndex: -10,
           version: '1.21.1',
           clientArgs: ['--fml.neoForgeVersion', '21.1.244'],
         })
@@ -60,10 +64,144 @@ describe('ClientBuildService', () => {
 
     expect(await service.listProfiles(installation)).toEqual({
       items: [
-        { name: 'main', minecraftVersion: '1.21.1', loader: 'NEOFORGE' },
-        { name: 'broken', minecraftVersion: null, loader: null },
+        {
+          name: 'main',
+          uuid: '65f6ac32-f8d2-4c63-8ebb-733e50d613d5',
+          title: 'Main client',
+          description: 'Primary profile',
+          sortIndex: -10,
+          minecraftVersion: '1.21.1',
+          loader: 'NEOFORGE',
+        },
+        {
+          name: 'broken',
+          uuid: null,
+          title: 'broken',
+          description: '',
+          sortIndex: 0,
+          minecraftVersion: null,
+          loader: null,
+        },
       ],
     })
+  })
+
+  test('updates profile metadata and moves removed profile data to recoverable trash', async () => {
+    const profileJson = JSON.stringify({
+      uuid: '65f6ac32-f8d2-4c63-8ebb-733e50d613d5',
+      title: 'Main',
+      info: 'Old description',
+      dir: 'main',
+      sortIndex: 0,
+      version: '1.21.1',
+      servers: [],
+    })
+    const paths = new Map<string, 'file' | 'directory'>([
+      ['profiles/main.json', 'file'],
+      ['updates/main', 'directory'],
+    ])
+    const files = new Map([['profiles/main.json', profileJson]])
+    const volume = {
+      exists: async (_installation: GravitInstallation, path: string, kind = 'file') =>
+        paths.get(path) === kind,
+      readFile: async (_installation: GravitInstallation, path: string) => {
+        const value = files.get(path)
+        if (value === undefined) throw new Error(`Missing ${path}`)
+        return value
+      },
+      writeFileAtomic: async (
+        _installation: GravitInstallation,
+        path: string,
+        bytes: Uint8Array,
+      ) => {
+        paths.set(path, 'file')
+        files.set(path, new TextDecoder().decode(bytes))
+      },
+      copy: async (_installation: GravitInstallation, source: string, target: string) => {
+        const kind = paths.get(source)
+        if (!kind) throw new Error(`Missing ${source}`)
+        paths.set(target, kind)
+        const value = files.get(source)
+        if (value !== undefined) files.set(target, value)
+      },
+      move: async (_installation: GravitInstallation, source: string, target: string) => {
+        const kind = paths.get(source)
+        if (!kind) throw new Error(`Missing ${source}`)
+        paths.delete(source)
+        paths.set(target, kind)
+        const value = files.get(source)
+        if (value !== undefined) {
+          files.delete(source)
+          files.set(target, value)
+        }
+      },
+    } as VolumeFileOperations
+    const commands: string[] = []
+    const control = {
+      executeClientCommand: async (_installation: GravitInstallation, command: string) => {
+        commands.push(command)
+        return ['Profiles and updates synced']
+      },
+    } as unknown as ControlFileService
+    const service = new ClientBuildService(control, volume)
+    const now = new Date().toISOString()
+    const installation: GravitInstallation = {
+      id: crypto.randomUUID(),
+      name: 'default',
+      path: '/srv/gravit/default',
+      address: 'localhost:17549',
+      projectName: 'TEST',
+      sourceRepository: 'https://github.com/GravitLauncher/LauncherDockered',
+      sourceRevision: '723203b56f8d58f2447edd20ac8a5b84a31ef816',
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    const updated = await service.updateProfile(
+      installation,
+      {
+        installationId: installation.id,
+        name: 'main',
+        title: 'Main server',
+        description: 'Updated description',
+        sortIndex: 20,
+      },
+      context(),
+    )
+    const saved = JSON.parse(files.get('profiles/main.json')!) as Record<string, unknown>
+
+    expect(saved).toMatchObject({
+      uuid: '65f6ac32-f8d2-4c63-8ebb-733e50d613d5',
+      title: 'Main server',
+      info: 'Updated description',
+      sortIndex: 20,
+      version: '1.21.1',
+    })
+    expect(updated.profile.title).toBe('Main server')
+    expect(paths.get(updated.backupPath.split('/launcher/')[1]!)).toBe('file')
+
+    const removed = await service.removeProfile(
+      installation,
+      {
+        installationId: installation.id,
+        name: 'main',
+        confirmRemove: true,
+      },
+      context(),
+    )
+
+    expect(paths.has('profiles/main.json')).toBe(false)
+    expect(paths.has('updates/main')).toBe(false)
+    expect(
+      [...paths.keys()].some((path) =>
+        path.startsWith('.gravit-panel-trash/profiles/main-'),
+      ),
+    ).toBe(true)
+    expect(removed.trashPath).toContain('.gravit-panel-trash/profiles/main-')
+    expect(commands).toEqual([
+      'config profileProvider sync',
+      'config profileProvider sync',
+    ])
   })
 
   test('keeps an already loaded Prestarter module and installs the verified executable', async () => {
@@ -273,12 +411,110 @@ describe('ClientBuildService', () => {
       expect(commands).toEqual([
         'mirrorhelper setDisableDownloadAssets true',
         'installClient fabric-1214 1.21.4 FABRIC fabric-api,sodium',
+        'config profileProvider sync',
       ])
       expect(result.compatibility.authlibArtifact).toBe('LauncherAuthlib6.jar')
       expect(result.profilePath).toEndWith('profiles/fabric-1214.json')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  test('preserves profile identity and presentation metadata across rebuilds', async () => {
+    const oldUuid = '65f6ac32-f8d2-4c63-8ebb-733e50d613d5'
+    const paths = new Map<string, 'file' | 'directory'>([
+      ['config/MirrorHelper/workspace/authlib/LauncherAuthlib6.jar', 'file'],
+      ['profiles/main.json', 'file'],
+      ['updates/main', 'directory'],
+    ])
+    const files = new Map<string, string>([
+      [
+        'profiles/main.json',
+        JSON.stringify({
+          uuid: oldUuid,
+          title: 'Public title',
+          info: 'Public description',
+          sortIndex: 7,
+          servers: [{ name: 'Play', serverAddress: 'play.example.com', serverPort: 25565 }],
+          version: '1.21.1',
+        }),
+      ],
+    ])
+    const commands: string[] = []
+    const volume = {
+      exists: async (_installation: GravitInstallation, path: string, kind = 'file') =>
+        paths.get(path) === kind,
+      readFile: async (_installation: GravitInstallation, path: string) => files.get(path)!,
+      writeFileAtomic: async (
+        _installation: GravitInstallation,
+        path: string,
+        bytes: Uint8Array,
+      ) => {
+        paths.set(path, 'file')
+        files.set(path, new TextDecoder().decode(bytes))
+      },
+    } as VolumeFileOperations
+    const control = {
+      executeClientCommand: async (_installation: GravitInstallation, command: string) => {
+        commands.push(command)
+        if (command === 'installClient main 1.21.4 FABRIC') {
+          files.set(
+            'profiles/main.json',
+            JSON.stringify({
+              uuid: '1948970e-c046-40e0-9c0b-ea1c87c0fa30',
+              title: 'main',
+              info: 'Generated',
+              sortIndex: 0,
+              servers: [{ name: 'main', serverAddress: 'localhost', serverPort: 25565 }],
+              version: '1.21.4',
+              mainClass: 'net.fabricmc.loader.impl.launch.knot.KnotClient',
+            }),
+          )
+        }
+        return ['Completed']
+      },
+    } as unknown as ControlFileService
+    const service = new ClientBuildService(control, volume)
+    const now = new Date().toISOString()
+    const installation: GravitInstallation = {
+      id: crypto.randomUUID(),
+      name: 'default',
+      path: '/srv/gravit/default',
+      address: 'localhost:17549',
+      projectName: 'TEST',
+      sourceRepository: 'https://github.com/GravitLauncher/LauncherDockered',
+      sourceRevision: '723203b56f8d58f2447edd20ac8a5b84a31ef816',
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    await service.buildClient(
+      installation,
+      {
+        installationId: installation.id,
+        name: 'main',
+        minecraftVersion: '1.21.4',
+        loader: 'FABRIC',
+        mods: [],
+      },
+      context(),
+    )
+
+    expect(JSON.parse(files.get('profiles/main.json')!)).toMatchObject({
+      uuid: oldUuid,
+      title: 'Public title',
+      info: 'Public description',
+      sortIndex: 7,
+      servers: [
+        { name: 'Play', serverAddress: 'play.example.com', serverPort: 25565 },
+      ],
+      version: '1.21.4',
+    })
+    expect(commands).toEqual([
+      'mirrorhelper setDisableDownloadAssets true',
+      'installClient main 1.21.4 FABRIC',
+      'config profileProvider sync',
+    ])
   })
 
   test('downloads a missing NeoForge installer before building the client', async () => {
@@ -364,6 +600,7 @@ describe('ClientBuildService', () => {
     expect(commands).toEqual([
       'mirrorhelper setDisableDownloadAssets true',
       'installClient main 1.21.1 NEOFORGE',
+      'config profileProvider sync',
     ])
     expect(
       paths.get(
@@ -422,6 +659,7 @@ describe('ClientBuildService', () => {
     expect(commands).toEqual([
       'mirrorhelper setDisableDownloadAssets true',
       'installClient forge-main 1.21.1 FORGE',
+      'config profileProvider sync',
     ])
   })
 

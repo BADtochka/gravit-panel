@@ -3,15 +3,91 @@
     <div>
       <h2 class="text-2xl font-semibold tracking-tight">Clients</h2>
       <p class="mt-1 text-sm text-muted-foreground">
-        Create a client profile or rebuild the profile selected in the sidebar.
+        Create, edit, rebuild, or remove the client profile selected in the sidebar.
       </p>
     </div>
 
     <Alert v-if="pageError" variant="destructive">
       <TriangleAlert class="size-4" />
-      <AlertTitle>Client build failed</AlertTitle>
+      <AlertTitle>Profile operation failed</AlertTitle>
       <AlertDescription>{{ pageError.message }}</AlertDescription>
     </Alert>
+
+    <Card v-if="!creatingProfile && selectedProfile">
+      <CardHeader>
+        <CardTitle class="text-base">Profile information</CardTitle>
+        <CardDescription>
+          Launcher-visible metadata. The technical profile ID remains stable so client files and
+          saved launcher settings keep their association.
+        </CardDescription>
+      </CardHeader>
+      <CardContent class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label class="text-xs font-medium" for="profile-title">Display name</label>
+          <Input id="profile-title" v-model="profileTitle" class="mt-1" maxlength="64" />
+        </div>
+        <div>
+          <label class="text-xs font-medium" for="profile-sort-index">Sort order</label>
+          <Input
+            id="profile-sort-index"
+            v-model.number="profileSortIndex"
+            class="mt-1"
+            max="10000"
+            min="-10000"
+            type="number"
+          />
+        </div>
+        <div class="md:col-span-2">
+          <label class="text-xs font-medium" for="profile-description">Description</label>
+          <Input
+            id="profile-description"
+            v-model="profileDescription"
+            class="mt-1"
+            maxlength="512"
+          />
+        </div>
+      </CardContent>
+      <CardFooter class="flex flex-wrap justify-between gap-3">
+        <Button
+          :disabled="!canSaveProfile || operationPending"
+          type="button"
+          @click="saveProfile"
+        >
+          <Save class="size-4" />
+          Save profile
+        </Button>
+        <AlertDialog>
+          <AlertDialogTrigger as-child>
+            <Button
+              :disabled="operationPending"
+              type="button"
+              variant="destructive"
+            >
+              <Trash2 class="size-4" />
+              Delete profile
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete {{ selectedProfile.title }}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                The profile JSON and its client files will disappear from LaunchServer immediately
+                and be moved to recoverable panel trash.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                @click="deleteProfile"
+              >
+                Delete profile
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </CardFooter>
+    </Card>
 
     <Card>
       <CardHeader>
@@ -30,9 +106,19 @@
       <CardContent class="grid gap-4 md:grid-cols-2">
         <div>
           <label class="text-xs font-medium" for="client-name">Profile name</label>
-          <Input id="client-name" v-model="clientName" class="mt-1" />
+          <Input
+            id="client-name"
+            v-model="clientName"
+            class="mt-1"
+            :disabled="!creatingProfile"
+          />
           <p class="mt-1 text-xs text-muted-foreground">
-            New profiles appear in the sidebar switcher after the build completes.
+            <template v-if="creatingProfile">
+              New profiles appear in the sidebar switcher after the build completes.
+            </template>
+            <template v-else>
+              Technical IDs cannot be renamed. Change the launcher-visible name above.
+            </template>
           </p>
         </div>
         <div>
@@ -77,7 +163,7 @@
       </CardFooter>
     </Card>
 
-    <JobLogCard :job="activeJob" title="Client build" @finished="jobFinished" />
+    <JobLogCard :job="activeJob" title="Profile operation" @finished="jobFinished" />
   </section>
 </template>
 
@@ -85,6 +171,17 @@
 import MinecraftVersionCombobox from '@/components/clients/MinecraftVersionCombobox.vue'
 import JobLogCard from '@/components/jobs/JobLogCard.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
@@ -104,7 +201,7 @@ import type {
 } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
-  CircleCheck, PackagePlus, RefreshCw, ShieldCheck, TriangleAlert,
+  CircleCheck, PackagePlus, RefreshCw, Save, ShieldCheck, Trash2, TriangleAlert,
 } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { computed, ref, watch } from 'vue'
@@ -128,12 +225,15 @@ const {
   finishJob,
 } = useInstallationJob(
   () => installationId.value,
-  ['gravit.client.build'],
+  ['gravit.client.build', 'gravit.profile.update', 'gravit.profile.remove'],
 )
 const clientName = ref('')
 const version = ref('')
 const loader = ref<MinecraftLoader>('FABRIC')
 const mods = ref('')
+const profileTitle = ref('')
+const profileDescription = ref('')
+const profileSortIndex = ref(0)
 const newProfileToken = computed(() =>
   typeof route.query.new === 'string' ? route.query.new : '',
 )
@@ -178,6 +278,15 @@ watch(versionCatalog, (catalog) => {
 }, { immediate: true })
 const selectedProfile = computed(
   () => profiles.value?.items.find((item) => item.name === selectedProfileName.value) ?? null,
+)
+watch(
+  selectedProfile,
+  (profile) => {
+    profileTitle.value = profile?.title ?? ''
+    profileDescription.value = profile?.description ?? ''
+    profileSortIndex.value = profile?.sortIndex ?? 0
+  },
+  { immediate: true },
 )
 let appliedDraftKey = ''
 watch(
@@ -238,6 +347,38 @@ const {
     }),
   onSuccess: attachJob,
 })
+const {
+  mutate: updateProfile,
+  isPending: updatePending,
+  error: updateError,
+} = useMutation({
+  mutationFn: (body: Record<string, unknown>) =>
+    getJson<JobRecord>(
+      `/api/clients/profiles/${encodeURIComponent(selectedProfileName.value)}/update`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    ),
+  onSuccess: attachJob,
+})
+const {
+  mutate: removeProfile,
+  isPending: removePending,
+  error: removeError,
+} = useMutation({
+  mutationFn: (body: Record<string, unknown>) =>
+    getJson<JobRecord>(
+      `/api/clients/profiles/${encodeURIComponent(selectedProfileName.value)}/remove`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    ),
+  onSuccess: attachJob,
+})
 const startClientBuild = () => buildClient({
   installationId: installationId.value,
   name: clientName.value,
@@ -245,18 +386,45 @@ const startClientBuild = () => buildClient({
   loader: loader.value,
   mods: mods.value.split(',').map((item) => item.trim()).filter(Boolean),
 })
+const saveProfile = () => updateProfile({
+  installationId: installationId.value,
+  title: profileTitle.value.trim(),
+  description: profileDescription.value.trim(),
+  sortIndex: profileSortIndex.value,
+})
+const deleteProfile = () => removeProfile({
+  installationId: installationId.value,
+  confirmRemove: true,
+})
 const canBuildClient = computed(
   () => Boolean(installationId.value && validClientName.value && version.value && loader.value),
+)
+const canSaveProfile = computed(
+  () =>
+    Boolean(
+      installationId.value &&
+      selectedProfile.value &&
+      profileTitle.value.trim() &&
+      profileTitle.value.trim().length <= 64 &&
+      profileDescription.value.trim() &&
+      profileDescription.value.trim().length <= 512 &&
+      Number.isSafeInteger(profileSortIndex.value) &&
+      Math.abs(profileSortIndex.value) <= 10_000,
+    ),
 )
 const operationPending = computed(
   () =>
     mutationPending.value ||
+    updatePending.value ||
+    removePending.value ||
     activeJob.value?.status === 'queued' ||
     activeJob.value?.status === 'running',
 )
 const pageError = computed(
   () => (
     mutationError.value ||
+    updateError.value ||
+    removeError.value ||
     compatibilityError.value ||
     versionsError.value ||
     configurationError.value ||
@@ -265,15 +433,24 @@ const pageError = computed(
 )
 const jobFinished = async (job: JobRecord) => {
   await finishJob(job)
+  const affectedName =
+    typeof job.input.name === 'string' ? job.input.name : clientName.value
   await Promise.all([
     queryClient.invalidateQueries({
-      queryKey: ['client-profile-state', installationId.value, clientName.value],
+      queryKey: ['client-profile-state', installationId.value, affectedName],
     }),
     queryClient.invalidateQueries({
       queryKey: ['client-profiles', installationId.value],
     }),
+    queryClient.invalidateQueries({
+      queryKey: ['installed-mods', installationId.value, affectedName],
+    }),
   ])
-  if (job.status === 'succeeded' && typeof job.input.name === 'string') {
+  if (
+    job.status === 'succeeded' &&
+    job.type === 'gravit.client.build' &&
+    typeof job.input.name === 'string'
+  ) {
     selectedProfileName.value = job.input.name
     await router.replace('/clients')
   }

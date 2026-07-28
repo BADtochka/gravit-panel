@@ -3,7 +3,11 @@ import type {
   ClientBuildResult,
   ClientPreparationState,
   ClientProfileDescriptor,
+  ClientProfileRemoveInput,
+  ClientProfileRemoveResult,
   ClientProfileState,
+  ClientProfileUpdateInput,
+  ClientProfileUpdateResult,
   GravitInstallation,
   LauncherArtifact,
   LauncherBuildResult,
@@ -109,11 +113,45 @@ const exists = async (path: string) => {
 const launcherRoot = (installation: GravitInstallation) => join(installation.path, 'launcher')
 
 interface LaunchProfileConfig {
+  uuid?: unknown
+  title?: unknown
+  info?: unknown
+  dir?: unknown
+  sortIndex?: unknown
+  servers?: unknown
   version?: unknown
   mainClass?: unknown
   clientArgs?: unknown
   classPath?: unknown
 }
+
+const profileUuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+const profileDescriptor = (
+  name: string,
+  profile: LaunchProfileConfig,
+): ClientProfileDescriptor => ({
+  name,
+  uuid:
+    typeof profile.uuid === 'string' && profileUuidPattern.test(profile.uuid)
+      ? profile.uuid
+      : null,
+  title:
+    typeof profile.title === 'string' && profile.title.trim()
+      ? profile.title
+      : name,
+  description: typeof profile.info === 'string' ? profile.info : '',
+  sortIndex:
+    typeof profile.sortIndex === 'number' && Number.isSafeInteger(profile.sortIndex)
+      ? profile.sortIndex
+      : 0,
+  minecraftVersion:
+    typeof profile.version === 'string' && versionPattern.test(profile.version)
+      ? profile.version
+      : null,
+  loader: inferProfileLoader(profile),
+})
 
 export const inferProfileLoader = (
   profile: LaunchProfileConfig,
@@ -241,20 +279,157 @@ export class ClientBuildService {
         const profile = JSON.parse(
           await this.volume.readFile!(installation, join('profiles', file)),
         ) as LaunchProfileConfig
-        const minecraftVersion =
-          typeof profile.version === 'string' && versionPattern.test(profile.version)
-            ? profile.version
-            : null
+        return profileDescriptor(name, profile)
+      } catch {
         return {
           name,
-          minecraftVersion,
-          loader: inferProfileLoader(profile),
+          uuid: null,
+          title: name,
+          description: '',
+          sortIndex: 0,
+          minecraftVersion: null,
+          loader: null,
         }
-      } catch {
-        return { name, minecraftVersion: null, loader: null }
       }
     }))
+    items.sort(
+      (left, right) =>
+        left.sortIndex - right.sortIndex ||
+        left.title.localeCompare(right.title) ||
+        left.name.localeCompare(right.name),
+    )
     return { items }
+  }
+
+  async updateProfile(
+    installation: GravitInstallation,
+    input: ClientProfileUpdateInput,
+    context: JobTaskContext,
+  ): Promise<ClientProfileUpdateResult> {
+    this.validateProfile(input.name)
+    const title = input.title.trim()
+    const description = input.description.trim()
+    if (!title || title.length > 64) {
+      throw new Error('Profile title must be between 1 and 64 characters')
+    }
+    if (!description || description.length > 512) {
+      throw new Error('Profile description must be between 1 and 512 characters')
+    }
+    if (!Number.isSafeInteger(input.sortIndex) || Math.abs(input.sortIndex) > 10_000) {
+      throw new Error('Profile sort index must be an integer between -10000 and 10000')
+    }
+
+    const path = join('profiles', `${input.name}.json`)
+    const current = await this.readProfileConfig(installation, input.name)
+    const backupRelativePath = join(
+      '.gravit-panel-profile-backups',
+      `${input.name}.backup-${safeTimestamp()}.json`,
+    )
+    context.progress(20, `Snapshotting profile ${input.name}`)
+    await this.volume.copy(installation, path, backupRelativePath)
+
+    const next = {
+      ...current.profile,
+      title,
+      info: description,
+      sortIndex: input.sortIndex,
+    }
+    context.progress(45, `Saving profile ${input.name}`)
+    await this.volume.writeFileAtomic(
+      installation,
+      path,
+      new TextEncoder().encode(`${JSON.stringify(next, null, 2)}\n`),
+      '0644',
+    )
+
+    try {
+      await this.syncProfiles(installation, context, 65)
+    } catch (error) {
+      await this.volume.writeFileAtomic(
+        installation,
+        path,
+        new TextEncoder().encode(current.raw),
+        '0644',
+      )
+      await this.control
+        .executeClientCommand(installation, 'config profileProvider sync')
+        .catch(() => [])
+      throw error
+    }
+
+    context.progress(95, `Profile ${input.name} updated`)
+    return {
+      installationId: installation.id,
+      profile: profileDescriptor(input.name, next),
+      backupPath: join(launcherRoot(installation), backupRelativePath),
+    }
+  }
+
+  async removeProfile(
+    installation: GravitInstallation,
+    input: ClientProfileRemoveInput,
+    context: JobTaskContext,
+  ): Promise<ClientProfileRemoveResult> {
+    this.validateProfile(input.name)
+    if (input.confirmRemove !== true) {
+      throw new Error('Profile removal requires explicit confirmation')
+    }
+    const current = await this.readProfileConfig(installation, input.name)
+    const profilePath = join('profiles', `${input.name}.json`)
+    if (
+      current.profile.dir !== undefined &&
+      (typeof current.profile.dir !== 'string' ||
+        !profilePattern.test(current.profile.dir) ||
+        current.profile.dir === 'assets')
+    ) {
+      throw new Error(`Profile ${input.name} contains an unsafe client directory`)
+    }
+    const profileDir =
+      typeof current.profile.dir === 'string' ? current.profile.dir : input.name
+    const updatesPath = join('updates', profileDir)
+    const trashRelativePath = join(
+      '.gravit-panel-trash',
+      'profiles',
+      `${input.name}-${safeTimestamp()}`,
+    )
+    const trashedProfilePath = join(trashRelativePath, 'profile.json')
+    const trashedUpdatesPath = join(trashRelativePath, 'client')
+    const updatesExist = await this.volume.exists(
+      installation,
+      updatesPath,
+      'directory',
+    )
+    let profileMoved = false
+    let updatesMoved = false
+
+    try {
+      context.progress(30, `Moving profile ${input.name} to recoverable trash`)
+      await this.volume.move(installation, profilePath, trashedProfilePath)
+      profileMoved = true
+      if (updatesExist) {
+        await this.volume.move(installation, updatesPath, trashedUpdatesPath)
+        updatesMoved = true
+      }
+      await this.syncProfiles(installation, context, 70)
+    } catch (error) {
+      if (updatesMoved) {
+        await this.volume.move(installation, trashedUpdatesPath, updatesPath)
+      }
+      if (profileMoved) {
+        await this.volume.move(installation, trashedProfilePath, profilePath)
+      }
+      await this.control
+        .executeClientCommand(installation, 'config profileProvider sync')
+        .catch(() => [])
+      throw error
+    }
+
+    context.progress(95, `Profile ${input.name} removed`)
+    return {
+      installationId: installation.id,
+      name: input.name,
+      trashPath: join(launcherRoot(installation), trashRelativePath),
+    }
   }
 
   async applyWorkspace(
@@ -602,6 +777,22 @@ export class ClientBuildService {
     context.log(
       `Compatibility decision: ${input.minecraftVersion} requires ${compatibility.authlibArtifact}`,
     )
+    const profileRelativePath = join('profiles', `${input.name}.json`)
+    let previousProfile: LaunchProfileConfig | null = null
+    if (
+      this.volume.readFile &&
+      (await this.volume.exists(installation, profileRelativePath))
+    ) {
+      try {
+        previousProfile = JSON.parse(
+          await this.volume.readFile(installation, profileRelativePath),
+        ) as LaunchProfileConfig
+      } catch {
+        context.log(
+          `Existing profile ${input.name} is invalid; its identity metadata cannot be preserved`,
+        )
+      }
+    }
 
     const suffix = input.mods.length ? ` ${input.mods.join(',')}` : ''
     const command =
@@ -617,7 +808,6 @@ export class ClientBuildService {
     const lines = await this.control.executeClientCommand(installation, command)
     lines.forEach(context.log)
 
-    const profileRelativePath = join('profiles', `${input.name}.json`)
     const updatesRelativePath = join('updates', input.name)
     const [hasProfile, hasUpdates] = await Promise.all([
       this.volume.exists(installation, profileRelativePath),
@@ -626,6 +816,40 @@ export class ClientBuildService {
     if (!hasProfile || !hasUpdates) {
       throw new Error('MirrorHelper did not produce the expected profile and updates directory')
     }
+    if (previousProfile && this.volume.readFile) {
+      const generated = JSON.parse(
+        await this.volume.readFile(installation, profileRelativePath),
+      ) as LaunchProfileConfig
+      if (
+        typeof previousProfile.uuid === 'string' &&
+        profileUuidPattern.test(previousProfile.uuid)
+      ) {
+        generated.uuid = previousProfile.uuid
+      }
+      if (typeof previousProfile.title === 'string' && previousProfile.title.trim()) {
+        generated.title = previousProfile.title
+      }
+      if (typeof previousProfile.info === 'string' && previousProfile.info.trim()) {
+        generated.info = previousProfile.info
+      }
+      if (
+        typeof previousProfile.sortIndex === 'number' &&
+        Number.isSafeInteger(previousProfile.sortIndex)
+      ) {
+        generated.sortIndex = previousProfile.sortIndex
+      }
+      if (Array.isArray(previousProfile.servers)) {
+        generated.servers = previousProfile.servers
+      }
+      await this.volume.writeFileAtomic(
+        installation,
+        profileRelativePath,
+        new TextEncoder().encode(`${JSON.stringify(generated, null, 2)}\n`),
+        '0644',
+      )
+      context.log(`Preserved stable identity and metadata for profile ${input.name}`)
+    }
+    await this.syncProfiles(installation, context, 90)
     const profilePath = join(launcherRoot(installation), profileRelativePath)
     const updatesPath = join(launcherRoot(installation), updatesRelativePath)
     context.progress(95, 'Client profile and update files verified')
@@ -786,6 +1010,43 @@ export class ClientBuildService {
       launcherRoot(installation),
       join(launcherRoot(installation), updatesDir, artifact.filename),
     )
+  }
+
+  private async readProfileConfig(
+    installation: GravitInstallation,
+    name: string,
+  ): Promise<{ raw: string; profile: LaunchProfileConfig }> {
+    if (!this.volume.readFile) {
+      throw new Error('Container volume profile reads are unavailable')
+    }
+    const path = join('profiles', `${name}.json`)
+    if (!(await this.volume.exists(installation, path))) {
+      throw new Error(`Profile ${name} does not exist`)
+    }
+    const raw = await this.volume.readFile(installation, path)
+    let profile: LaunchProfileConfig
+    try {
+      profile = JSON.parse(raw) as LaunchProfileConfig
+    } catch (error) {
+      throw new Error(`Profile ${name} contains invalid JSON`, { cause: error })
+    }
+    if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+      throw new Error(`Profile ${name} has an invalid structure`)
+    }
+    return { raw, profile }
+  }
+
+  private async syncProfiles(
+    installation: GravitInstallation,
+    context: JobTaskContext,
+    progress: number,
+  ) {
+    context.progress(progress, 'Synchronizing LaunchServer profiles and updates')
+    const lines = await this.control.executeClientCommand(
+      installation,
+      'config profileProvider sync',
+    )
+    lines.forEach(context.log)
   }
 
   private validateProfile(value: string) {

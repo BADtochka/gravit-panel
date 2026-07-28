@@ -76,9 +76,19 @@ const createHarness = (
     }),
     listProfiles: async () => ({
       items: [
-        { name: 'main', minecraftVersion: '1.21.1', loader: 'NEOFORGE' },
+        {
+          name: 'main',
+          uuid: '65f6ac32-f8d2-4c63-8ebb-733e50d613d5',
+          title: 'Main',
+          description: 'Primary profile',
+          sortIndex: 0,
+          minecraftVersion: '1.21.1',
+          loader: 'NEOFORGE',
+        },
       ],
     }),
+    updateProfile: async () => ({}),
+    removeProfile: async () => ({}),
     listLauncherArtifacts: async () => [],
     artifactPath: async () => null,
     customizationState: async () => ({
@@ -218,8 +228,64 @@ describe('clients workspace API', () => {
     })
     expect(profilesResponse.status).toBe(200)
     expect(await profilesResponse.json()).toEqual({
-      items: [{ name: 'main', minecraftVersion: '1.21.1', loader: 'NEOFORGE' }],
+      items: [
+        {
+          name: 'main',
+          uuid: '65f6ac32-f8d2-4c63-8ebb-733e50d613d5',
+          title: 'Main',
+          description: 'Primary profile',
+          sortIndex: 0,
+          minecraftVersion: '1.21.1',
+          loader: 'NEOFORGE',
+        },
+      ],
     })
+  })
+
+  test.each([
+    {
+      name: 'profile metadata update',
+      path: `/api/clients/profiles/main/update`,
+      body: {
+        installationId: installation.id,
+        title: 'Main server',
+        description: 'Updated description',
+        sortIndex: 10,
+      },
+      type: 'gravit.profile.update',
+      method: 'updateProfile',
+    },
+    {
+      name: 'profile removal',
+      path: `/api/clients/profiles/main/remove`,
+      body: {
+        installationId: installation.id,
+        confirmRemove: true,
+      },
+      type: 'gravit.profile.remove',
+      method: 'removeProfile',
+    },
+  ])('queues and completes $name', async ({ path, body, type, method }) => {
+    let receivedName = ''
+    const { request, store } = createHarness({
+      [method]: async (_installation: GravitInstallation, input: { name: string }) => {
+        receivedName = input.name
+        return { installationId: installation.id, name: input.name }
+      },
+    } as Partial<ClientBuildService>)
+
+    const response = await request(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const queued = await response.json()
+    const completed = await waitForTerminalJob(store, queued.id)
+
+    expect(response.status).toBe(202)
+    expect(queued.type).toBe(type)
+    expect(receivedName).toBe('main')
+    expect(completed.status).toBe('succeeded')
   })
 
   test('returns customization state and queues a PNG customization rebuild', async () => {

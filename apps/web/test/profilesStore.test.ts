@@ -5,6 +5,10 @@ import { reconcileProfileSelection, useProfilesStore } from '../src/stores/profi
 
 const profile = (name: string): ClientProfileDescriptor => ({
   name,
+  uuid: crypto.randomUUID(),
+  title: name,
+  description: `${name} profile`,
+  sortIndex: 0,
   minecraftVersion: '1.21.1',
   loader: 'FABRIC',
 })
@@ -29,5 +33,14 @@ describe('profile selection reconciliation', () => {
 
     expect(store.profiles).toEqual([])
     expect(store.selectedProfileName).toBe('beta')
+  })
+
+  test('deduplicates repeated catalog entries by stable profile name', () => {
+    setActivePinia(createPinia())
+    const store = useProfilesStore()
+
+    store.setProfiles([profile('alpha'), profile('alpha'), profile('beta')])
+
+    expect(store.profiles.map((item) => item.name)).toEqual(['alpha', 'beta'])
   })
 })

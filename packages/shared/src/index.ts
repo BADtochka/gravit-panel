@@ -33,6 +33,8 @@ export type JobType =
   | 'gravit.launcher.customize'
   | 'gravit.launchserver.restart'
   | 'gravit.client.build'
+  | 'gravit.profile.update'
+  | 'gravit.profile.remove'
   | 'gravit.mods.install'
   | 'gravit.mods.update'
   | 'gravit.mods.toggle'
@@ -615,8 +617,38 @@ export interface ClientProfileState {
 
 export interface ClientProfileDescriptor {
   name: string
+  uuid: string | null
+  title: string
+  description: string
+  sortIndex: number
   minecraftVersion: string | null
   loader: MinecraftLoader | null
+}
+
+export interface ClientProfileUpdateInput {
+  installationId: string
+  name: string
+  title: string
+  description: string
+  sortIndex: number
+}
+
+export interface ClientProfileUpdateResult {
+  installationId: string
+  profile: ClientProfileDescriptor
+  backupPath: string
+}
+
+export interface ClientProfileRemoveInput {
+  installationId: string
+  name: string
+  confirmRemove: true
+}
+
+export interface ClientProfileRemoveResult {
+  installationId: string
+  name: string
+  trashPath: string
 }
 
 export interface MinecraftVersionCatalog {

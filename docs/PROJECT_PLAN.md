@@ -441,6 +441,15 @@ Status: completed.
   discovered from that LaunchServer.
 - Expose an explicit New profile action that opens a clean client draft without
   creating another LauncherDockered workspace.
+- Keep the technical profile ID immutable after creation while exposing editable
+  launcher-visible title, description, and sort order.
+- Preserve the existing profile UUID and presentation metadata across
+  MirrorHelper rebuilds, then run the source-defined
+  `config profileProvider sync` action so replaced UUIDs cannot remain as
+  duplicate launcher entries.
+- Remove profiles through an explicitly confirmed background job that moves the
+  profile JSON and client update directory to recoverable panel trash before
+  synchronizing LaunchServer.
 - Use the singleton LaunchServer across Status, Modules, Auth, Users, Launcher,
   Clients, and Mods.
 - Remove install controls for already loaded modules and configured file auth.

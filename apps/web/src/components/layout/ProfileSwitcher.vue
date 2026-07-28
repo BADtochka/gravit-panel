@@ -13,23 +13,32 @@
       </SelectTrigger>
       <SelectContent>
         <SelectItem v-for="item in profiles" :key="item.name" :value="item.name">
-          {{ item.name }}
+          {{ item.title }}
+          <span v-if="item.title !== item.name" class="text-muted-foreground">
+            · {{ item.name }}
+          </span>
           <span v-if="item.minecraftVersion" class="text-muted-foreground">
             · {{ item.minecraftVersion }}<template v-if="item.loader"> / {{ item.loader }}</template>
           </span>
         </SelectItem>
       </SelectContent>
     </Select>
-    <Button
-      class="w-full"
-      size="sm"
-      type="button"
-      variant="outline"
-      @click="addProfile"
-    >
-      <Plus class="size-4" />
-      New profile
-    </Button>
+    <div class="grid grid-cols-2 gap-2">
+      <Button size="sm" type="button" variant="outline" @click="addProfile">
+        <Plus class="size-4" />
+        New
+      </Button>
+      <Button
+        size="sm"
+        type="button"
+        variant="outline"
+        :disabled="!selectedProfileName"
+        @click="manageProfile"
+      >
+        <Pencil class="size-4" />
+        Manage
+      </Button>
+    </div>
     <p v-if="error" class="text-xs text-destructive">
       {{ error.message }}
     </p>
@@ -41,7 +50,7 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useClientProfiles } from '@/composables/useClientProfiles'
 import { useProfilesStore } from '@/stores/profiles'
-import { Plus } from '@lucide/vue'
+import { Pencil, Plus } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -65,5 +74,10 @@ const profileSelected = () => {
 const addProfile = () => {
   emit('selected')
   void router.push({ path: '/clients', query: { new: crypto.randomUUID() } })
+}
+
+const manageProfile = () => {
+  emit('selected')
+  void router.push('/clients')
 }
 </script>

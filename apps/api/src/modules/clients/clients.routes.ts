@@ -1,5 +1,7 @@
 import type {
   ClientBuildInput,
+  ClientProfileRemoveInput,
+  ClientProfileUpdateInput,
   JobRecord,
   LaunchServerRuntimeHealth,
   MinecraftLoader,
@@ -71,6 +73,8 @@ type ClientOperations = Pick<
   | 'preparationState'
   | 'profileState'
   | 'listProfiles'
+  | 'updateProfile'
+  | 'removeProfile'
   | 'listLauncherArtifacts'
   | 'artifactPath'
   | 'applyWorkspace'
@@ -129,6 +133,74 @@ export const createClientsRoutes = ({
       return service.listProfiles(installation)
     },
     { query: t.Object({ installationId }) },
+  )
+  .post(
+    '/profiles/:name/update',
+    ({ params, body, set }) => {
+      const input = {
+        ...body,
+        name: params.name,
+      } as ClientProfileUpdateInput
+      const installation = findInstallation(input.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = activeJob(installation.id)
+      if (conflict) {
+        set.status = 409
+        return { message: 'Another client operation is active.', jobId: conflict.id }
+      }
+      const job = jobs.create(
+        'gravit.profile.update',
+        { ...input },
+        `${input.name} profile update queued`,
+        async (context) => ({
+          ...(await service.updateProfile(installation, input, context)),
+        }),
+      )
+      set.status = 202
+      return job
+    },
+    {
+      params: t.Object({ name: profile }),
+      body: t.Object({
+        installationId,
+        title: t.String({ minLength: 1, maxLength: 64 }),
+        description: t.String({ minLength: 1, maxLength: 512 }),
+        sortIndex: t.Integer({ minimum: -10_000, maximum: 10_000 }),
+      }),
+    },
+  )
+  .post(
+    '/profiles/:name/remove',
+    ({ params, body, set }) => {
+      const input = {
+        ...body,
+        name: params.name,
+      } as ClientProfileRemoveInput
+      const installation = findInstallation(input.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = activeJob(installation.id)
+      if (conflict) {
+        set.status = 409
+        return { message: 'Another client operation is active.', jobId: conflict.id }
+      }
+      const job = jobs.create(
+        'gravit.profile.remove',
+        { ...input },
+        `${input.name} profile removal queued`,
+        async (context) => ({
+          ...(await service.removeProfile(installation, input, context)),
+        }),
+      )
+      set.status = 202
+      return job
+    },
+    {
+      params: t.Object({ name: profile }),
+      body: t.Object({
+        installationId,
+        confirmRemove: t.Literal(true),
+      }),
+    },
   )
   .get(
     '/state',

@@ -19,8 +19,12 @@ export const useProfilesStore = defineStore('profiles', () => {
   )
 
   const setProfiles = (items: ClientProfileDescriptor[]) => {
-    profiles.value = items
-    selectedProfileName.value = reconcileProfileSelection(selectedProfileName.value, items)
+    const uniqueItems = [...new Map(items.map((item) => [item.name, item])).values()]
+    profiles.value = uniqueItems
+    selectedProfileName.value = reconcileProfileSelection(
+      selectedProfileName.value,
+      uniqueItems,
+    )
   }
 
   const clearProfiles = () => {
