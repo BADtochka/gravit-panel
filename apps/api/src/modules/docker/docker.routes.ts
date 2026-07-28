@@ -29,6 +29,7 @@ const provisioning = new ProfileProvisioningService(
   remoteControlStore,
   remoteControlSetup,
   clientBuildService,
+  env.REMOTE_CONTROL_ENDPOINT,
 )
 
 const installationFields = {

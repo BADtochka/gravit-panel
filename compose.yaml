@@ -10,6 +10,7 @@ services:
       DATABASE_PATH: ${PANEL_DATA_DIR:-/data/gravit-panel}/gravit-panel.sqlite
       INSTALLATIONS_ROOT: ${PANEL_DATA_DIR:-/data/gravit-panel}/installations
       MODULE_ARTIFACTS_DIR: ${PANEL_DATA_DIR:-/data/gravit-panel}/modules
+      REMOTE_CONTROL_ENDPOINT: ${REMOTE_CONTROL_ENDPOINT:-http://host.docker.internal:17549}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       PANEL_AUTH_MODE: ${PANEL_AUTH_MODE:-disabled}
@@ -28,6 +29,8 @@ services:
       - type: bind
         source: /var/run/docker.sock
         target: /var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"const response = await fetch('http://127.0.0.1:3000/api/health'); process.exit(response.ok ? 0 : 1)\""]
       interval: 15s

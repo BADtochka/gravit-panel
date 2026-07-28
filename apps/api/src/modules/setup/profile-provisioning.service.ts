@@ -24,6 +24,7 @@ export class ProfileProvisioningService {
     private readonly remoteStore: Pick<RemoteControlStore, 'hasEncryptedCredentials'>,
     private readonly remoteSetup: Pick<RemoteControlSetupService, 'setup'>,
     private readonly clients: Pick<ClientBuildService, 'applyWorkspace' | 'installPrestarter'>,
+    private readonly remoteControlEndpoint = 'http://127.0.0.1:17549',
   ) {}
 
   async prepare(
@@ -45,7 +46,7 @@ export class ProfileProvisioningService {
 
     const remoteInput: RemoteControlSetupInput = {
       installationId: installation.id,
-      endpoint: `http://${installation.address}`,
+      endpoint: this.remoteControlEndpoint,
       replaceExistingTokens: true,
     }
     const remoteControl = await this.remoteSetup.setup(

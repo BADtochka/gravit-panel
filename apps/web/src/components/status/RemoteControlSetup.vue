@@ -177,9 +177,9 @@ const {
 })
 
 watch(
-  () => props.installation,
-  (installation) => {
-    endpoint.value = `http://${installation.address}`
+  () => [props.installation, configuration.value?.defaultEndpoint] as const,
+  ([installation, defaultEndpoint]) => {
+    endpoint.value = defaultEndpoint ?? `http://${installation.address}`
     confirmed.value = false
     job.value = null
     events.value = []

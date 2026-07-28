@@ -41,7 +41,7 @@ describe('ProfileProvisioningService', () => {
           order.push('remote-control')
           expect(input).toEqual({
             installationId: installation.id,
-            endpoint: 'http://launcher.example.com:17549',
+            endpoint: 'http://host.docker.internal:17549',
             replaceExistingTokens: true,
           })
           context.progress(100, 'RemoteControl ready')
@@ -60,6 +60,7 @@ describe('ProfileProvisioningService', () => {
           return { step: 'prestarter' } as never
         },
       },
+      'http://host.docker.internal:17549',
     )
     const context: JobTaskContext = {
       signal: new AbortController().signal,

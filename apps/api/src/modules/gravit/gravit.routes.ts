@@ -4,6 +4,7 @@ import type {
   RemoteControlSetupInput,
 } from '@gravit-panel/shared'
 import { Elysia, t } from 'elysia'
+import { env } from '../../core/env'
 import type { CredentialCipher } from '../../core/credential-cipher'
 import type { CredentialKeyService } from '../../core/credential-key.service'
 import type { JobsRunner } from '../jobs/jobs.runner'
@@ -40,6 +41,7 @@ export interface GravitRoutesDependencies {
   >
   jobs: Pick<JobsRunner, 'create'>
   activeJob: (installationId: string) => JobRecord | null | undefined
+  remoteControlDefaultEndpoint?: string
 }
 
 export const createGravitRoutes = ({
@@ -51,6 +53,7 @@ export const createGravitRoutes = ({
   remoteStore,
   jobs,
   activeJob,
+  remoteControlDefaultEndpoint = env.REMOTE_CONTROL_ENDPOINT,
 }: GravitRoutesDependencies) => {
   const executeInspection = async (
     installationId: string,
@@ -80,6 +83,7 @@ export const createGravitRoutes = ({
     encryptionSource: keyService.status.source,
     canGenerateEncryptionKey: keyService.status.canGenerate,
     configuredInstallationIds: remoteStore.listConfiguredInstallationIds(),
+    defaultEndpoint: remoteControlDefaultEndpoint,
     allowedCommands: ['serverStatus', 'securitycheck'],
     source: remoteControlSource,
   }))

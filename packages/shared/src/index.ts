@@ -395,6 +395,7 @@ export interface RemoteControlConfiguration {
   encryptionSource: 'environment' | 'generated' | 'memory' | null
   canGenerateEncryptionKey: boolean
   configuredInstallationIds: string[]
+  defaultEndpoint?: string
   allowedCommands: LaunchServerInspectionCommand[]
   source: {
     repository: string
