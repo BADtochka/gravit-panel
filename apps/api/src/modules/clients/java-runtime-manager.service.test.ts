@@ -264,4 +264,30 @@ describe('JavaRuntimeManagerService', () => {
       installed: true,
     })
   })
+
+  test('repairs previously installed runtimes after an API restart', async () => {
+    const harness = createHarness()
+    harness.directories.add('updates/java21-linux-x86-64')
+    harness.directories.add('updates/java21-windows-x86-64')
+    harness.files.set(
+      'LaunchServer.json',
+      new TextEncoder().encode(JSON.stringify({
+        launcher: {
+          customJavaDownload: {
+            'java21-linux-x86-64': 'Java 21 b8 linux X86_64 javafx false',
+            'java21-windows-x86-64': 'Java 21 b8 mustdie X86_64 javafx false',
+          },
+        },
+      })),
+    )
+
+    expect(await harness.service.repairRegisteredRuntimes(installation)).toEqual([
+      'java21-linux-x86-64',
+      'java21-windows-x86-64',
+    ])
+    expect(harness.preparedRuntimes).toEqual([
+      'updates/java21-linux-x86-64',
+      'updates/java21-windows-x86-64',
+    ])
+  })
 })

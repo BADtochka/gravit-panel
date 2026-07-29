@@ -110,6 +110,20 @@ export class JavaRuntimeManagerService {
     }
   }
 
+  async repairRegisteredRuntimes(installation: GravitInstallation) {
+    const { config } = await this.readConfig(installation)
+    const entries = config.launcher?.customJavaDownload ?? {}
+    const repaired: string[] = []
+    for (const directory of Object.keys(entries)) {
+      if (!directoryPattern.test(directory)) continue
+      const target = `${updatesDirectory}/${directory}`
+      if (!(await this.volume.exists(installation, target, 'directory'))) continue
+      await this.volume.prepareJavaRuntimePermissions(installation, target)
+      repaired.push(directory)
+    }
+    return repaired
+  }
+
   async install(
     installation: GravitInstallation,
     input: JavaRuntimeInstallInput,

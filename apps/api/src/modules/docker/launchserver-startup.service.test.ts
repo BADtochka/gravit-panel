@@ -49,4 +49,24 @@ describe('LaunchServerStartupService', () => {
     await service.recoverUnhealthyInstallations()
     expect(restarts).toBe(0)
   })
+
+  test('repairs registered Java runtimes after the LaunchServer is ready', async () => {
+    const repaired: string[] = []
+    const service = new LaunchServerStartupService(
+      { list: () => [installation] },
+      {
+        checkLaunchServer: async () => health('healthy'),
+        restartLaunchServer: async () => {},
+      },
+      {
+        repairRegisteredRuntimes: async (current) => {
+          repaired.push(current.id)
+          return ['java21-linux-x86-64']
+        },
+      },
+    )
+
+    await service.recoverUnhealthyInstallations()
+    expect(repaired).toEqual([installation.id])
+  })
 })

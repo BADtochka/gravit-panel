@@ -44,7 +44,7 @@ export const clientBuildService = new ClientBuildService(
   undefined,
   launcherLifecycle,
 )
-const javaRuntimes = new JavaRuntimeManagerService(
+export const javaRuntimes = new JavaRuntimeManagerService(
   launcherLifecycle,
   clientBuildService,
 )

@@ -9,6 +9,10 @@ type LaunchServerLifecycle = Pick<
   'checkLaunchServer' | 'restartLaunchServer'
 >
 
+interface JavaRuntimeRepair {
+  repairRegisteredRuntimes(installation: GravitInstallation): Promise<string[]>
+}
+
 const startupContext = (): JobTaskContext => ({
   signal: new AbortController().signal,
   log: (message) => logger.info(`[LaunchServer startup recovery] ${message}`),
@@ -19,6 +23,7 @@ export class LaunchServerStartupService {
   constructor(
     private readonly installations: Pick<InstallationsStore, 'list'>,
     private readonly lifecycle: LaunchServerLifecycle,
+    private readonly javaRuntimes?: JavaRuntimeRepair,
   ) {}
 
   async recoverUnhealthyInstallations() {
@@ -32,18 +37,32 @@ export class LaunchServerStartupService {
     const health = await this.lifecycle.checkLaunchServer(installation)
     if (health.status === 'healthy') {
       logger.info(`LaunchServer ${installation.name} is healthy at API startup`)
-      return
+    } else {
+      logger.warn(`LaunchServer ${installation.name} is unhealthy at API startup; restarting`, {
+        installationId: installation.id,
+        reason: health.message,
+      })
+      try {
+        await this.lifecycle.restartLaunchServer(installation, startupContext())
+        logger.info(`LaunchServer ${installation.name} restarted successfully at API startup`)
+      } catch (error) {
+        logger.error(`LaunchServer ${installation.name} startup recovery failed`, error)
+        return
+      }
     }
 
-    logger.warn(`LaunchServer ${installation.name} is unhealthy at API startup; restarting`, {
-      installationId: installation.id,
-      reason: health.message,
-    })
-    try {
-      await this.lifecycle.restartLaunchServer(installation, startupContext())
-      logger.info(`LaunchServer ${installation.name} restarted successfully at API startup`)
-    } catch (error) {
-      logger.error(`LaunchServer ${installation.name} startup recovery failed`, error)
+    if (this.javaRuntimes) {
+      try {
+        const repaired = await this.javaRuntimes.repairRegisteredRuntimes(installation)
+        if (repaired.length) {
+          logger.info(`Prepared ${repaired.length} Java runtime(s) for download`, {
+            installationId: installation.id,
+            directories: repaired,
+          })
+        }
+      } catch (error) {
+        logger.error(`Java runtime startup repair failed for ${installation.name}`, error)
+      }
     }
   }
 }
