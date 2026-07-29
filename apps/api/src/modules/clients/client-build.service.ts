@@ -181,6 +181,37 @@ const optionalProjectId = (item: Record<string, unknown>) => {
 const profileUuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
+// MirrorHelper currently builds classPath from every JAR left by the NeoForge
+// installer. These artifacts belong to install_profile.json processors and must
+// not become Java modules in the launched game. In particular,
+// commons-collections4 conflicts with the copy shaded into Iris' glsl-transformer.
+const neoForgeInstallerOnlyLibraries = [
+  /^libraries\/com\/opencsv\/opencsv\/[^/]+\/[^/]+\.jar$/i,
+  /^libraries\/commons-beanutils\/commons-beanutils\/[^/]+\/[^/]+\.jar$/i,
+  /^libraries\/commons-collections\/commons-collections\/[^/]+\/[^/]+\.jar$/i,
+  /^libraries\/commons-logging\/commons-logging\/[^/]+\/[^/]+\.jar$/i,
+  /^libraries\/de\/siegmar\/fastcsv\/[^/]+\/[^/]+\.jar$/i,
+  /^libraries\/net\/md-5\/SpecialSource\/[^/]+\/[^/]+\.jar$/i,
+  /^libraries\/net\/neoforged\/srgutils\/[^/]+\/[^/]+\.jar$/i,
+  /^libraries\/org\/apache\/commons\/commons-collections4\/[^/]+\/[^/]+\.jar$/i,
+  /^libraries\/org\/apache\/commons\/commons-text\/[^/]+\/[^/]+\.jar$/i,
+  /^libraries\/net\/neoforged\/mergetool\/[^/]+\/mergetool-[^-/.]+(?:\.[^-/.]+)*\.jar$/i,
+] as const
+
+const removeNeoForgeInstallerLibraries = (profile: LaunchProfileConfig) => {
+  if (!Array.isArray(profile.classPath)) return [] as string[]
+  const removed: string[] = []
+  profile.classPath = profile.classPath.filter((item) => {
+    if (
+      typeof item !== 'string' ||
+      !neoForgeInstallerOnlyLibraries.some((pattern) => pattern.test(item))
+    ) return true
+    removed.push(item)
+    return false
+  })
+  return removed
+}
+
 const profileDescriptor = (
   name: string,
   profile: LaunchProfileConfig,
@@ -1384,6 +1415,20 @@ export class ClientBuildService {
       installation,
       input.name,
     )
+    const removedInstallerLibraries = input.loader === 'NEOFORGE'
+      ? removeNeoForgeInstallerLibraries(generated)
+      : []
+    if (removedInstallerLibraries.length) {
+      await this.volume.writeFileAtomic(
+        installation,
+        profileRelativePath,
+        new TextEncoder().encode(`${JSON.stringify(generated, null, 2)}\n`),
+        '0644',
+      )
+      context.log(
+        `Removed ${removedInstallerLibraries.length} NeoForge installer-only libraries from the runtime classpath`,
+      )
+    }
     const generatedLoaderVersion = inferProfileLoaderVersion(generated)
     if (input.loaderVersion && generatedLoaderVersion !== input.loaderVersion) {
       throw new Error(

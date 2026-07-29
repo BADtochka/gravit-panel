@@ -841,6 +841,9 @@ describe('ClientBuildService', () => {
               assetIndex: '17',
               classPath: [
                 'libraries/net/neoforged/neoforge/21.1.243/neoforge-21.1.243-universal.jar',
+                'libraries/org/apache/commons/commons-collections4/4.2/commons-collections4-4.2.jar',
+                'libraries/com/opencsv/opencsv/4.4/opencsv-4.4.jar',
+                'libraries/filesystemfixer.jar',
               ],
             }),
           )
@@ -853,13 +856,13 @@ describe('ClientBuildService', () => {
       download: async (loader, minecraftVersion, loaderVersion) => {
         downloads.push([loader, minecraftVersion, loaderVersion])
         return {
-        bytes: new TextEncoder().encode('verified-neoforge-installer'),
-        filename: 'neoforge-1.21.1-installer-nogui.jar',
-        loaderVersion: '21.1.243',
-        sha256: 'a'.repeat(64),
-        url:
-          'https://maven.neoforged.net/releases/net/neoforged/neoforge/' +
-          '21.1.243/neoforge-21.1.243-installer.jar',
+          bytes: new TextEncoder().encode('verified-neoforge-installer'),
+          filename: 'neoforge-1.21.1-installer-nogui.jar',
+          loaderVersion: '21.1.243',
+          sha256: 'a'.repeat(64),
+          url:
+            'https://maven.neoforged.net/releases/net/neoforged/neoforge/' +
+            '21.1.243/neoforge-21.1.243-installer.jar',
         }
       },
     }
@@ -915,6 +918,10 @@ describe('ClientBuildService', () => {
     )).toBe('21.1.243\n')
     expect(result.loader).toBe('NEOFORGE')
     expect(result.loaderVersion).toBe('21.1.243')
+    expect(JSON.parse(files.get('profiles/main.json')!).classPath).toEqual([
+      'libraries/net/neoforged/neoforge/21.1.243/neoforge-21.1.243-universal.jar',
+      'libraries/filesystemfixer.jar',
+    ])
   })
 
   test('reuses cached Forge installer data without downloading it again', async () => {
