@@ -104,7 +104,7 @@
       :minecraft-version="version"
       :loader="loader"
       :servers="managedServers"
-      :disabled="operationPending || !targetReady"
+      :disabled="modActionsPending || !targetReady"
       @job="attachJob"
       @error="childError = $event"
     />
@@ -126,12 +126,15 @@
             <div
               v-for="item in searchResults.items"
               :key="item.projectId"
-              class="block rounded-md border p-3 hover:bg-accent"
+              class="block cursor-pointer rounded-md border p-3 transition-colors hover:bg-accent"
+              :class="{ 'border-primary bg-primary/5': selectedSlugs.includes(item.slug) }"
+              @click="toggleSelected(item)"
             >
-              <div class="flex cursor-pointer items-start gap-3">
+              <div class="flex items-start gap-3">
                 <Checkbox
                   :model-value="selectedSlugs.includes(item.slug)"
                   class="mt-1"
+                  @click.stop
                   @update:model-value="toggleSelected(item)"
                 />
                 <img v-if="item.iconUrl" :src="item.iconUrl" alt="" class="size-10 rounded-md" />
@@ -146,6 +149,7 @@
               <div
                 v-if="selectedSlugs.includes(item.slug)"
                 class="mt-3 space-y-3 border-t pt-3 text-xs"
+                @click.stop
               >
                 <div class="grid gap-3 sm:grid-cols-2">
                   <div class="space-y-3 rounded-lg border bg-background p-3">
@@ -222,7 +226,7 @@
         <CardFooter>
           <Button
             class="w-full"
-            :disabled="!selectedSlugs.length || !selectedTargetsReady || !targetReady || operationPending"
+            :disabled="!selectedSlugs.length || !selectedTargetsReady || !targetReady || modActionsPending"
             @click="installSelected"
           >
             <Download /> Install selected ({{ selectedSlugs.length }})
@@ -232,40 +236,112 @@
 
       <Card>
         <CardHeader>
-          <CardTitle class="text-base">Installed files</CardTitle>
-          <CardDescription>Modrinth identity is resolved from each local file’s SHA-1 hash.</CardDescription>
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle class="text-base">Installed files</CardTitle>
+              <CardDescription>
+                Click anywhere on a file card to select it for bulk actions.
+              </CardDescription>
+            </div>
+            <Button
+              v-if="installed?.items.length"
+              size="sm"
+              variant="ghost"
+              :disabled="modActionsPending"
+              @click="toggleAllInstalled"
+            >
+              {{ allInstalledSelected ? 'Clear selection' : 'Select all' }}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent class="space-y-2">
+          <div
+            v-if="selectedInstalledItems.length"
+            class="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur"
+          >
+            <Badge variant="secondary">{{ selectedInstalledItems.length }} selected</Badge>
+            <Button size="sm" variant="outline" :disabled="modActionsPending" @click="runBulk('enable')">
+              <Power /> Enable
+            </Button>
+            <Button size="sm" variant="outline" :disabled="modActionsPending" @click="runBulk('disable')">
+              <Power /> Disable
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              :disabled="modActionsPending || !bulkUpdateReady"
+              @click="runBulk('update')"
+            >
+              <RefreshCw /> Update
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger as-child>
+                <Button size="sm" variant="destructive" :disabled="modActionsPending">
+                  <Trash2 /> Remove
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>
+                    Remove {{ selectedInstalledItems.length }} selected mods?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Every selected file will be moved to recoverable .gravit-panel-trash.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction @click="runBulk('remove')">
+                    Move selected to trash
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
           <p v-if="!stateReady" class="py-8 text-center text-sm text-muted-foreground">Select a complete target profile.</p>
           <p v-else-if="installedFetching" class="py-8 text-center text-sm text-muted-foreground">Hashing mod files…</p>
           <p v-else-if="!installed?.items.length" class="py-8 text-center text-sm text-muted-foreground">No mod JARs detected.</p>
-          <div v-for="item in installed?.items" :key="item.filename" class="rounded-md border p-3">
+          <div
+            v-for="item in installed?.items"
+            :key="item.filename"
+            class="cursor-pointer rounded-md border p-3 transition-colors hover:bg-accent"
+            :class="{ 'border-primary bg-primary/5': selectedInstalledFilenames.includes(item.filename) }"
+            @click="toggleInstalledSelection(item.filename)"
+          >
             <div class="flex items-start justify-between gap-2">
-              <div class="min-w-0">
-                <p class="truncate text-sm font-medium">{{ item.filename }}</p>
-                <p class="mt-1 text-xs text-muted-foreground">
-                  {{ item.versionName ?? 'Unknown to Modrinth' }} · {{ formatBytes(item.size) }}
-                </p>
+              <div class="flex min-w-0 items-start gap-3">
+                <Checkbox
+                  :model-value="selectedInstalledFilenames.includes(item.filename)"
+                  class="mt-1"
+                  @click.stop
+                  @update:model-value="toggleInstalledSelection(item.filename)"
+                />
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-medium">{{ item.filename }}</p>
+                  <p class="mt-1 text-xs text-muted-foreground">
+                    {{ item.versionName ?? 'Unknown to Modrinth' }} · {{ formatBytes(item.size) }}
+                  </p>
+                </div>
               </div>
               <Badge :variant="item.disabled ? 'outline' : 'secondary'">
                 {{ item.disabled ? 'Disabled' : 'Enabled' }}
               </Badge>
             </div>
-            <div class="mt-3 flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" :disabled="operationPending" @click="toggleMod(item)">
+            <div class="mt-3 flex flex-wrap gap-2" @click.stop>
+              <Button size="sm" variant="outline" :disabled="modActionsPending" @click="toggleMod(item)">
                 <Power /> {{ item.disabled ? 'Enable' : 'Disable' }}
               </Button>
               <Button
                 size="sm"
                 variant="outline"
-                :disabled="operationPending || !item.projectId || !targetReady"
+                :disabled="modActionsPending || !item.projectId || !targetReady"
                 @click="updateMod(item)"
               >
                 <RefreshCw /> Update
               </Button>
               <AlertDialog>
                 <AlertDialogTrigger as-child>
-                  <Button size="sm" variant="destructive" :disabled="operationPending"><Trash2 /> Remove</Button>
+                  <Button size="sm" variant="destructive" :disabled="modActionsPending"><Trash2 /> Remove</Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
@@ -289,7 +365,7 @@
     <OptionalModsCard
       :installation-id="installationId"
       :profile="profile"
-      :disabled="operationPending || !stateReady"
+      :disabled="modActionsPending || !stateReady"
       @job="attachJob"
       @error="childError = $event"
     />
@@ -341,6 +417,7 @@ const loader = ref<MinecraftLoader>('FABRIC')
 const constraintsLocked = ref(true)
 const searchText = ref('')
 const selectedSlugs = ref<string[]>([])
+const selectedInstalledFilenames = ref<string[]>([])
 const childError = ref<Error | null>(null)
 const selectionTargets = reactive<Record<string, ModInstallSelection>>({})
 const {
@@ -355,6 +432,7 @@ const {
     'gravit.mods.update',
     'gravit.mods.toggle',
     'gravit.mods.remove',
+    'gravit.mods.bulk',
     'gravit.mods.optional.update',
     'gravit.mods.optional.remove',
     'gravit.mods.modpack.import',
@@ -362,6 +440,7 @@ const {
 )
 watch(installationId, () => {
   selectedSlugs.value = []
+  selectedInstalledFilenames.value = []
   version.value = ''
   loader.value = 'FABRIC'
   constraintsLocked.value = true
@@ -406,6 +485,7 @@ watch(profiles, () => {
 }, { immediate: true })
 watch(profile, () => {
   selectedSlugs.value = []
+  selectedInstalledFilenames.value = []
   Object.keys(selectionTargets).forEach((key) => delete selectionTargets[key])
   if (constraintsLocked.value) applyProfileParameters()
 })
@@ -446,6 +526,30 @@ const { data: serverBindings } = useQuery({
 const managedServers = computed(
   () => serverBindings.value?.items.filter((item) => item.managed && item.id) ?? [],
 )
+const selectedInstalledItems = computed(
+  () => installed.value?.items.filter(
+    (item) => selectedInstalledFilenames.value.includes(item.filename),
+  ) ?? [],
+)
+const allInstalledSelected = computed(
+  () => Boolean(
+    installed.value?.items.length &&
+    selectedInstalledItems.value.length === installed.value.items.length,
+  ),
+)
+const bulkUpdateReady = computed(
+  () => Boolean(
+    targetReady.value &&
+    selectedInstalledItems.value.length &&
+    selectedInstalledItems.value.every((item) => item.projectId),
+  ),
+)
+watch(installed, (value) => {
+  const available = new Set(value?.items.map((item) => item.filename) ?? [])
+  selectedInstalledFilenames.value = selectedInstalledFilenames.value.filter(
+    (filename) => available.has(filename),
+  )
+})
 
 const {
   data: searchResults, error: searchError, isPending: searchPending, mutate: runSearch,
@@ -514,6 +618,9 @@ const {
   mutationFn: ({ url, body }: { url: string; body: Record<string, unknown> }) => postJob(url, body),
   onSuccess: attachJob,
 })
+const modActionsPending = computed(
+  () => operationPending.value || Boolean(activeJob.value),
+)
 const commonBody = () => ({
   installationId: installationId.value,
   profile: profile.value,
@@ -545,9 +652,37 @@ const removeMod = (item: InstalledMod) => runOperation({
   url: '/api/mods/remove',
   body: { ...commonBody(), filename: item.filename, confirmRemoval: true },
 })
+const toggleInstalledSelection = (filename: string) => {
+  selectedInstalledFilenames.value = selectedInstalledFilenames.value.includes(filename)
+    ? selectedInstalledFilenames.value.filter((item) => item !== filename)
+    : [...selectedInstalledFilenames.value, filename]
+}
+const toggleAllInstalled = () => {
+  selectedInstalledFilenames.value = allInstalledSelected.value
+    ? []
+    : installed.value?.items.map((item) => item.filename) ?? []
+}
+const runBulk = (action: 'enable' | 'disable' | 'update' | 'remove') => {
+  if (!selectedInstalledFilenames.value.length) return
+  runOperation({
+    url: '/api/mods/bulk',
+    body: {
+      ...commonBody(),
+      filenames: selectedInstalledFilenames.value,
+      action,
+      ...(action === 'update'
+        ? { minecraftVersion: version.value, loader: loader.value }
+        : {}),
+      ...(action === 'remove' ? { confirmRemoval: true } : {}),
+    },
+  })
+}
 const jobFinished = async (job: JobRecord) => {
   await finishJob(job)
-  if (job.status === 'succeeded') selectedSlugs.value = []
+  if (job.status === 'succeeded') {
+    selectedSlugs.value = []
+    selectedInstalledFilenames.value = []
+  }
   await queryClient.invalidateQueries({
     queryKey: ['installed-mods', installationId.value, profile.value],
   })

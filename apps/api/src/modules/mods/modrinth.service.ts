@@ -90,6 +90,11 @@ export interface ResolvedModrinthPack {
   }>
 }
 
+interface ParsedModrinthPack {
+  index: ModrinthPackIndex
+  overrides: ResolvedModrinthPack['overrides']
+}
+
 const requestHeaders = {
   Accept: 'application/json',
   'User-Agent': 'GravitPanel/0.1 (https://github.com/GravitLauncher)',
@@ -183,6 +188,64 @@ export class ModrinthService {
     if (!packFile) throw new Error('The selected Modrinth version has no .mrpack file')
     const archive = await this.download(packFile, 100 * 1024 * 1024)
     const parsed = await this.readModpackArchive(archive, includeOverrides)
+    return this.describeModpack(parsed, minecraftVersion, loader, {
+      projectId: project.id,
+      slug: project.slug,
+      name: parsed.index.name || project.title || project.slug,
+      summary: parsed.index.summary ?? project.description ?? '',
+      versionId: version.id,
+      versionName: version.version_number,
+    })
+  }
+
+  async inspectLocalModpack(
+    archive: Uint8Array,
+    minecraftVersion: string,
+    loader: Exclude<MinecraftLoader, 'VANILLA'>,
+  ) {
+    const resolved = await this.resolveLocalModpack(
+      archive,
+      minecraftVersion,
+      loader,
+      false,
+    )
+    return resolved.inspection
+  }
+
+  async resolveLocalModpack(
+    archive: Uint8Array,
+    minecraftVersion: string,
+    loader: Exclude<MinecraftLoader, 'VANILLA'>,
+    includeOverrides = true,
+  ) {
+    if (!archive.length || archive.length > 100 * 1024 * 1024) {
+      throw new Error('Local .mrpack must be between 1 byte and 100 MiB')
+    }
+    const parsed = await this.readModpackArchive(archive, includeOverrides)
+    const digest = new Bun.CryptoHasher('sha256').update(archive).digest('hex')
+    return this.describeModpack(parsed, minecraftVersion, loader, {
+      projectId: `local-${digest.slice(0, 40)}`,
+      slug: 'local-mrpack',
+      name: parsed.index.name,
+      summary: parsed.index.summary ?? '',
+      versionId: parsed.index.versionId,
+      versionName: parsed.index.versionId,
+    })
+  }
+
+  private async describeModpack(
+    parsed: ParsedModrinthPack,
+    minecraftVersion: string,
+    loader: Exclude<MinecraftLoader, 'VANILLA'>,
+    metadata: {
+      projectId: string
+      slug: string
+      name: string
+      summary: string
+      versionId: string
+      versionName: string
+    },
+  ): Promise<ResolvedModrinthPack> {
     const loaderDependency = {
       FABRIC: 'fabric-loader',
       FORGE: 'forge',
@@ -218,12 +281,7 @@ export class ModrinthService {
     })
     return {
       inspection: {
-        projectId: project.id,
-        slug: project.slug,
-        name: parsed.index.name || project.title || project.slug,
-        summary: parsed.index.summary ?? project.description ?? '',
-        versionId: version.id,
-        versionName: version.version_number,
+        ...metadata,
         minecraftVersion,
         loader,
         loaderVersion: parsed.index.dependencies[loaderDependency]!,
@@ -459,7 +517,10 @@ export class ModrinthService {
     )
   }
 
-  private async readModpackArchive(bytes: Uint8Array, includeOverrides: boolean) {
+  private async readModpackArchive(
+    bytes: Uint8Array,
+    includeOverrides: boolean,
+  ): Promise<ParsedModrinthPack> {
     const directory = await mkdtemp(join(tmpdir(), 'gravit-mrpack-'))
     const archivePath = join(directory, 'pack.mrpack')
     try {
@@ -502,6 +563,10 @@ export class ModrinthService {
       if (
         index.formatVersion !== 1 ||
         index.game !== 'minecraft' ||
+        typeof index.name !== 'string' ||
+        !index.name.trim() ||
+        typeof index.versionId !== 'string' ||
+        !index.versionId.trim() ||
         !Array.isArray(index.files) ||
         !index.dependencies ||
         typeof index.dependencies !== 'object'

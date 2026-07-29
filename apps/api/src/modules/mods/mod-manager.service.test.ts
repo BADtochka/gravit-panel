@@ -127,6 +127,37 @@ describe('ModManagerService', () => {
     }
   })
 
+  test('applies one bulk action to every selected installed mod', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gravit-mod-bulk-'))
+    const directory = join(root, 'launcher', 'updates', 'fabric', 'mods')
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'sodium.jar'), 'sodium')
+    await writeFile(join(directory, 'iris.jar'), 'iris')
+    const service = new ModManagerService(
+      {} as ControlFileService,
+      {} as ModrinthService,
+      localVolume,
+    )
+
+    try {
+      const result = await service.bulk(
+        installationFor(root),
+        {
+          profile: 'fabric',
+          filenames: ['sodium.jar', 'iris.jar'],
+          action: 'disable',
+        },
+        context,
+      )
+
+      expect(result.count).toBe(2)
+      expect(await readFile(join(directory, 'sodium.jar.disabled'), 'utf8')).toBe('sodium')
+      expect(await readFile(join(directory, 'iris.jar.disabled'), 'utf8')).toBe('iris')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('installs selected client files and publishes each server pack only once', async () => {
     const root = await mkdtemp(join(tmpdir(), 'gravit-mod-targets-'))
     const installation = installationFor(root)

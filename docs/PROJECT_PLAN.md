@@ -393,13 +393,17 @@ eligibility are filtered by project type, Minecraft version, and loader.
 Installed JARs are resolved through SHA-1; updates are downloaded only from the
 Modrinth CDN and verified with the API-provided SHA-512. Disable/enable uses
 renames, and removal or replacement moves the old file into recoverable
-profile-local trash.
+profile-local trash. Installed-file selection supports one queued bulk job for
+enable, disable, verified update, or recoverable removal, so operations cannot
+race each other through per-file requests.
 
 Modpack import follows the official Modrinth `.mrpack` format version 1:
-the panel resolves the latest compatible modpack version, validates archive and
-manifest paths, limits expanded archive sizes, verifies every downloaded file
-against its declared SHA-512, and applies `overrides`, `client-overrides`, and
-`server-overrides` to their respective managed destinations. Manifest
+the panel either resolves the latest compatible Modrinth version or accepts a
+local `.mrpack` upload, validates archive and manifest paths, limits compressed
+and expanded archive sizes, verifies every downloaded file against its declared
+SHA-512, and applies `overrides`, `client-overrides`, and `server-overrides` to
+their respective managed destinations. A local archive is hashed during
+inspection and must match that identity when the import job is queued. Manifest
 `required`, `optional`, and `unsupported` environments prefill the destination
 UI but remain operator-reviewable before the import job starts.
 

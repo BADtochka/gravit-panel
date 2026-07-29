@@ -1,17 +1,15 @@
 <template>
-  <Card>
-    <CardHeader>
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <CardTitle class="text-base">Server pack</CardTitle>
-          <CardDescription>
-            Files for {{ serverName }}. Every change publishes and assigns an immutable version.
-          </CardDescription>
-        </div>
-        <Badge v-if="latestVersion" variant="secondary">v{{ latestVersion.versionNumber }}</Badge>
+  <section class="space-y-5 border-t pt-4">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h4 class="text-sm font-semibold">Server pack</h4>
+        <p class="text-xs text-muted-foreground">
+          Files for {{ serverName }}. Every change publishes and assigns an immutable version.
+        </p>
       </div>
-    </CardHeader>
-    <CardContent class="space-y-5">
+      <Badge v-if="latestVersion" variant="secondary">v{{ latestVersion.versionNumber }}</Badge>
+    </div>
+    <div class="space-y-5">
       <Alert v-if="error" variant="destructive">
         <TriangleAlert class="size-4" />
         <AlertTitle>Server pack operation failed</AlertTitle>
@@ -48,7 +46,7 @@
         </Button>
       </div>
 
-      <div class="rounded-lg border">
+      <div class="divide-y border-y">
         <div
           v-if="!pack?.items.length"
           class="p-4 text-sm text-muted-foreground"
@@ -85,14 +83,14 @@
           </AlertDialog>
         </div>
       </div>
-    </CardContent>
-    <CardFooter>
+    </div>
+    <div>
       <p class="text-xs text-muted-foreground">
         Latest desired version: {{ latestVersion ? `v${latestVersion.versionNumber}` : 'empty' }}.
         The installed updater applies it automatically.
       </p>
-    </CardFooter>
-  </Card>
+    </div>
+  </section>
 </template>
 
 <script setup lang="ts">
@@ -104,9 +102,6 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
-} from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import type {
   JobRecord,

@@ -1,12 +1,46 @@
 <template>
   <Card>
     <CardHeader>
-      <CardTitle class="text-base">Import a Modrinth modpack</CardTitle>
+      <CardTitle class="text-base">Import a modpack</CardTitle>
       <CardDescription>
-        Import the latest compatible .mrpack, including verified files and side-specific overrides.
+        Upload a local .mrpack or select one from Modrinth. Files and side-specific overrides are
+        validated before import.
       </CardDescription>
     </CardHeader>
     <CardContent class="space-y-4">
+      <div class="space-y-3 rounded-lg border bg-muted/20 p-4">
+        <div>
+          <p class="text-sm font-medium">Local .mrpack</p>
+          <p class="text-xs text-muted-foreground">
+            Choose a pack exported by Modrinth App or another compatible tool, up to 100 MiB.
+          </p>
+        </div>
+        <div class="flex flex-col gap-2 sm:flex-row">
+          <Input
+            type="file"
+            accept=".mrpack,application/x-modrinth-modpack+zip,application/zip"
+            :disabled="!ready || inspecting"
+            @change="selectLocalFile"
+          />
+          <Button
+            variant="outline"
+            :disabled="!ready || !localFile || inspecting"
+            @click="inspectLocal"
+          >
+            <Upload /> Inspect local pack
+          </Button>
+        </div>
+        <p v-if="localFile" class="text-xs text-muted-foreground">
+          {{ localFile.name }} · {{ formatBytes(localFile.size) }}
+        </p>
+      </div>
+
+      <div class="flex items-center gap-3 text-xs text-muted-foreground">
+        <span class="h-px flex-1 bg-border" />
+        or import from Modrinth
+        <span class="h-px flex-1 bg-border" />
+      </div>
+
       <div class="flex gap-2">
         <Input v-model="query" placeholder="Search modpacks…" @keyup.enter="search" />
         <Button variant="outline" :disabled="!ready || !query.trim() || searching" @click="search">
@@ -41,7 +75,10 @@
               {{ inspection.serverOverrideCount }} server overrides
             </p>
           </div>
-          <Badge variant="secondary">{{ inspection.minecraftVersion }} / {{ inspection.loader }}</Badge>
+          <div class="flex flex-wrap gap-2">
+            <Badge v-if="source === 'local'" variant="outline">Local file</Badge>
+            <Badge variant="secondary">{{ inspection.minecraftVersion }} / {{ inspection.loader }}</Badge>
+          </div>
         </div>
 
         <div class="max-h-[28rem] space-y-2 overflow-auto pr-1">
@@ -130,7 +167,11 @@
       </div>
     </CardContent>
     <CardFooter v-if="inspection">
-      <Button class="w-full" :disabled="disabled || importing || !validDrafts" @click="importPack">
+      <Button
+        class="w-full"
+        :disabled="disabled || inspecting || importing || !validDrafts"
+        @click="importPack"
+      >
         <PackageOpen /> Import {{ inspection.name }}
       </Button>
     </CardFooter>
@@ -154,7 +195,7 @@ import type {
   ModrinthProject,
   ProfileServerBinding,
 } from '@gravit-panel/shared'
-import { PackageOpen, Search } from '@lucide/vue'
+import { PackageOpen, Search, Upload } from '@lucide/vue'
 import { computed, reactive, ref, watch } from 'vue'
 
 const props = defineProps<{
@@ -171,9 +212,12 @@ const emit = defineEmits<{
 }>()
 const query = ref('')
 const searching = ref(false)
+const inspecting = ref(false)
 const importing = ref(false)
 const results = ref<ModrinthProject[]>([])
 const selected = ref<ModrinthProject | null>(null)
+const localFile = ref<File | null>(null)
+const source = ref<'modrinth' | 'local'>('modrinth')
 const inspection = ref<ModrinthModpackInspection | null>(null)
 const drafts = reactive<Record<string, ModrinthModpackFileSelection>>({})
 const selectedServerIds = ref<string[]>([])
@@ -207,22 +251,70 @@ const search = async () => {
   }
 }
 const inspect = async (pack: ModrinthProject) => {
+  inspecting.value = true
   try {
-    selected.value = pack
-    inspection.value = await request<ModrinthModpackInspection>(
+    const value = await request<ModrinthModpackInspection>(
       `/api/mods/modpacks/inspect?projectId=${encodeURIComponent(pack.projectId)}` +
       `&minecraftVersion=${encodeURIComponent(props.minecraftVersion)}&loader=${props.loader}`,
     )
-    Object.keys(drafts).forEach((key) => delete drafts[key])
-    for (const file of inspection.value.files) drafts[file.path] = defaultDraft(file)
-    selectedServerIds.value = inspection.value.files.some(
-      (file) => file.server !== 'unsupported',
-    )
-      ? props.servers.flatMap((server) => server.id ? [server.id] : [])
-      : []
+    selected.value = pack
+    source.value = 'modrinth'
+    applyInspection(value)
   } catch (error) {
     emit('error', error instanceof Error ? error : new Error(String(error)))
+  } finally {
+    inspecting.value = false
   }
+}
+const selectLocalFile = (event: Event) => {
+  const file = (event.target as HTMLInputElement).files?.[0] ?? null
+  localFile.value = file
+  if (!file) return
+  if (!file.name.toLowerCase().endsWith('.mrpack')) {
+    localFile.value = null
+    emit('error', new Error('Choose a .mrpack file.'))
+  } else if (file.size > 100 * 1024 * 1024) {
+    localFile.value = null
+    emit('error', new Error('Local .mrpack must not exceed 100 MiB.'))
+  } else {
+    selected.value = null
+    source.value = 'local'
+    resetInspection()
+  }
+}
+const inspectLocal = async () => {
+  if (!localFile.value || props.loader === 'VANILLA') return
+  inspecting.value = true
+  try {
+    const body = new FormData()
+    body.set('minecraftVersion', props.minecraftVersion)
+    body.set('loader', props.loader)
+    body.set('file', localFile.value)
+    const value = await request<ModrinthModpackInspection>(
+      '/api/mods/modpacks/local/inspect',
+      { method: 'POST', body },
+    )
+    source.value = 'local'
+    selected.value = null
+    applyInspection(value)
+  } catch (error) {
+    emit('error', error instanceof Error ? error : new Error(String(error)))
+  } finally {
+    inspecting.value = false
+  }
+}
+const applyInspection = (value: ModrinthModpackInspection) => {
+  inspection.value = value
+  Object.keys(drafts).forEach((key) => delete drafts[key])
+  for (const file of value.files) drafts[file.path] = defaultDraft(file)
+  selectedServerIds.value = value.files.some((file) => file.server !== 'unsupported')
+    ? props.servers.flatMap((server) => server.id ? [server.id] : [])
+    : []
+}
+const resetInspection = () => {
+  inspection.value = null
+  selectedServerIds.value = []
+  Object.keys(drafts).forEach((key) => delete drafts[key])
 }
 const defaultDraft = (file: ModrinthModpackFile): ModrinthModpackFileSelection => ({
   path: file.path,
@@ -261,19 +353,32 @@ const importPack = async () => {
   if (!inspection.value || props.loader === 'VANILLA') return
   importing.value = true
   try {
-    const job = await request<JobRecord>('/api/mods/modpacks/import', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        installationId: props.installationId,
-        profile: props.profile,
-        projectId: inspection.value.projectId,
-        minecraftVersion: props.minecraftVersion,
-        loader: props.loader,
-        serverBindingIds: selectedServerIds.value,
-        files: inspection.value.files.map((file) => drafts[file.path]),
-      }),
-    })
+    const input = {
+      installationId: props.installationId,
+      profile: props.profile,
+      projectId: inspection.value.projectId,
+      minecraftVersion: props.minecraftVersion,
+      loader: props.loader,
+      serverBindingIds: selectedServerIds.value,
+      files: inspection.value.files.map((file) => drafts[file.path]),
+    }
+    let job: JobRecord
+    if (source.value === 'local') {
+      if (!localFile.value) throw new Error('Select and inspect the local .mrpack again.')
+      const body = new FormData()
+      body.set('input', JSON.stringify(input))
+      body.set('file', localFile.value)
+      job = await request<JobRecord>('/api/mods/modpacks/local/import', {
+        method: 'POST',
+        body,
+      })
+    } else {
+      job = await request<JobRecord>('/api/mods/modpacks/import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      })
+    }
     emit('job', job)
   } catch (error) {
     emit('error', error instanceof Error ? error : new Error(String(error)))
@@ -286,8 +391,9 @@ watch(
   () => {
     results.value = []
     selected.value = null
-    inspection.value = null
-    Object.keys(drafts).forEach((key) => delete drafts[key])
+    localFile.value = null
+    source.value = 'modrinth'
+    resetInspection()
   },
 )
 const formatBytes = (value: number) =>

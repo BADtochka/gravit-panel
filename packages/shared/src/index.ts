@@ -44,6 +44,7 @@ export type JobType =
   | 'gravit.mods.update'
   | 'gravit.mods.toggle'
   | 'gravit.mods.remove'
+  | 'gravit.mods.bulk'
   | 'gravit.mods.optional.update'
   | 'gravit.mods.optional.remove'
   | 'gravit.mods.modpack.import'

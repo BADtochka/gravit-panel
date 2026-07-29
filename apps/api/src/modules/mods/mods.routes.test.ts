@@ -34,6 +34,7 @@ const createHarness = (
     items: [],
     source: modrinthSource,
   }),
+  modrinthOverrides: Partial<ModrinthService> = {},
 ) => {
   const database = new Database(':memory:')
   databases.push(database)
@@ -50,6 +51,8 @@ const createHarness = (
     updateOptional: async () => ({}),
     removeOptional: async () => ({}),
     importModpack: async () => ({}),
+    importLocalModpack: async () => ({}),
+    bulk: async () => ({}),
     ...overrides,
   } as unknown as ModManagerService
   const app = new Elysia({ prefix: '/api' }).use(
@@ -67,6 +70,8 @@ const createHarness = (
         search,
         searchModpacks: search,
         inspectModpack: async () => ({} as never),
+        inspectLocalModpack: async () => ({} as never),
+        ...modrinthOverrides,
       },
     }),
   )
@@ -173,6 +178,18 @@ describe('mod management API', () => {
       },
     },
     {
+      name: 'bulk disable',
+      path: '/api/mods/bulk',
+      method: 'bulk',
+      type: 'gravit.mods.bulk',
+      body: {
+        installationId: installation.id,
+        profile: 'fabric',
+        filenames: ['sodium.jar', 'iris.jar'],
+        action: 'disable',
+      },
+    },
+    {
       name: 'Modrinth modpack import',
       path: '/api/mods/modpacks/import',
       method: 'importModpack',
@@ -265,6 +282,69 @@ describe('mod management API', () => {
     expect((await installed.json()).items[0]?.filename).toBe('sodium.jar')
   })
 
+  test('inspects an uploaded local mrpack', async () => {
+    let received: Uint8Array<ArrayBufferLike> = new Uint8Array()
+    const { request } = createHarness({}, undefined, {
+      inspectLocalModpack: async (archive) => {
+        received = archive
+        return { name: 'Local pack' } as never
+      },
+    })
+    const body = new FormData()
+    body.set('minecraftVersion', '1.21.4')
+    body.set('loader', 'FABRIC')
+    body.set('file', new File([new Uint8Array([1, 2, 3])], 'local.mrpack'))
+
+    const response = await request('/api/mods/modpacks/local/inspect', {
+      method: 'POST',
+      body,
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ name: 'Local pack' })
+    expect([...received]).toEqual([1, 2, 3])
+  })
+
+  test('queues a local mrpack import with its archive', async () => {
+    let received: Uint8Array<ArrayBufferLike> = new Uint8Array()
+    const input = {
+      installationId: installation.id,
+      profile: 'fabric',
+      projectId: 'local-0123456789abcdef',
+      minecraftVersion: '1.21.4',
+      loader: 'FABRIC',
+      serverBindingIds: [],
+      files: [{
+        path: 'mods/sodium.jar',
+        clientMode: 'required',
+        enabledByDefault: false,
+        installOnServer: false,
+        name: 'Sodium',
+        description: '',
+      }],
+    }
+    const { request, jobsStore } = createHarness({
+      importLocalModpack: async (_installation, _input, archive) => {
+        received = archive
+        return { installationId: installation.id } as never
+      },
+    })
+    const body = new FormData()
+    body.set('input', JSON.stringify(input))
+    body.set('file', new File([new Uint8Array([4, 5, 6])], 'local.mrpack'))
+
+    const response = await request('/api/mods/modpacks/local/import', {
+      method: 'POST',
+      body,
+    })
+    const queued = await response.json()
+
+    expect(response.status).toBe(202)
+    const completed = await waitForTerminalJob(jobsStore, queued.id)
+    expect(completed.status).toBe('succeeded')
+    expect([...received]).toEqual([4, 5, 6])
+  })
+
   test('rejects duplicate operations, missing confirmation, and unknown installations', async () => {
     let release: (() => void) | undefined
     const gate = new Promise<void>((resolve) => {
@@ -298,7 +378,6 @@ describe('mod management API', () => {
       filename: 'sodium.jar',
       enabled: true,
     }))
-
     expect(first.status).toBe(202)
     expect(duplicate.status).toBe(409)
     expect(invalidRemoval.status).toBe(422)
@@ -306,5 +385,12 @@ describe('mod management API', () => {
 
     release?.()
     expect((await waitForTerminalJob(jobsStore, firstJob.id)).status).toBe('succeeded')
+    const unconfirmedBulkRemoval = await request('/api/mods/bulk', post({
+      installationId: installation.id,
+      profile: 'fabric',
+      filenames: ['sodium.jar'],
+      action: 'remove',
+    }))
+    expect(unconfirmedBulkRemoval.status).toBe(422)
   })
 })

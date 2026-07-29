@@ -193,7 +193,8 @@ not mounted and remains untouched for recovery.
 - Launcher and Minecraft client builds with live job logs.
 - Launcher artifact hashing and server-scoped downloads.
 - Modrinth search, compatible mod installation, hash detection, verified
-  updates, disable/enable, and recoverable removal.
+  updates, local or catalog `.mrpack` import, disable/enable, and recoverable
+  removal.
 - Source-verified FileAuthSystem configuration with sanitized provider discovery
   and LaunchServer.json snapshots.
 - Built-in auth core recipes (memory, SQL, HTTP, merge, Mojang/Microsoft,

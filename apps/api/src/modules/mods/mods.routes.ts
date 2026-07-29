@@ -55,6 +55,26 @@ const projectId = t.String({
   pattern: '^[A-Za-z0-9_-]+$',
 })
 const packPath = t.String({ minLength: 1, maxLength: 512 })
+const modpackImportInput = t.Object({
+  installationId,
+  profile,
+  projectId,
+  minecraftVersion,
+  loader,
+  serverBindingIds: t.Array(t.String({ format: 'uuid' }), { maxItems: 32 }),
+  files: t.Array(t.Object({
+    path: packPath,
+    clientMode: t.Union([
+      t.Literal('required'),
+      t.Literal('optional'),
+      t.Literal('none'),
+    ]),
+    enabledByDefault: t.Boolean(),
+    installOnServer: t.Boolean(),
+    name: t.String({ minLength: 1, maxLength: 80 }),
+    description: t.String({ maxLength: 500 }),
+  }), { minItems: 1, maxItems: 2_000 }),
+})
 
 export interface ModsRoutesDependencies {
   installations: Pick<InstallationsStore, 'get'>
@@ -71,8 +91,13 @@ export interface ModsRoutesDependencies {
     | 'updateOptional'
     | 'removeOptional'
     | 'importModpack'
+    | 'importLocalModpack'
+    | 'bulk'
   >
-  modrinth: Pick<ModrinthService, 'search' | 'searchModpacks' | 'inspectModpack'>
+  modrinth: Pick<
+    ModrinthService,
+    'search' | 'searchModpacks' | 'inspectModpack' | 'inspectLocalModpack'
+  >
 }
 
 export const createModsRoutes = ({
@@ -145,6 +170,24 @@ export const createModsRoutes = ({
       ),
     {
       query: t.Object({ projectId, minecraftVersion, loader }),
+    },
+  )
+  .post(
+    '/modpacks/local/inspect',
+    async ({ body }) => {
+      const archive = new Uint8Array(await body.file.arrayBuffer())
+      return modrinth.inspectLocalModpack(
+        archive,
+        body.minecraftVersion,
+        body.loader,
+      )
+    },
+    {
+      body: t.Object({
+        minecraftVersion,
+        loader,
+        file: t.File({ maxSize: 100 * 1024 * 1024 }),
+      }),
     },
   )
   .post(
@@ -279,25 +322,92 @@ export const createModsRoutes = ({
       return job
     },
     {
+      body: modpackImportInput,
+    },
+  )
+  .post(
+    '/modpacks/local/import',
+    async ({ body, set }) => {
+      const input = body.input as ModrinthModpackImportInput
+      const installation = findInstallation(input.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = activeJob(installation.id)
+      if (conflict) {
+        set.status = 409
+        return { message: 'Another mod operation is active.', jobId: conflict.id }
+      }
+      const archive = new Uint8Array(await body.file.arrayBuffer())
+      const job = jobs.create(
+        'gravit.mods.modpack.import',
+        {
+          ...input,
+          source: 'local',
+          filename: body.file.name,
+          archiveSize: archive.length,
+        },
+        'Local Modrinth modpack import queued',
+        async (context) => ({
+          ...(await manager.importLocalModpack(
+            installation,
+            input,
+            archive,
+            context,
+          )),
+        }),
+      )
+      set.status = 202
+      return job
+    },
+    {
+      body: t.Object({
+        input: modpackImportInput,
+        file: t.File({ maxSize: 100 * 1024 * 1024 }),
+      }),
+    },
+  )
+  .post(
+    '/bulk',
+    ({ body, set }) => {
+      const installation = findInstallation(body.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = activeJob(installation.id)
+      if (conflict) {
+        set.status = 409
+        return { message: 'Another mod operation is active.', jobId: conflict.id }
+      }
+      if (body.action === 'remove' && body.confirmRemoval !== true) {
+        set.status = 422
+        return { message: 'Bulk removal requires explicit confirmation.' }
+      }
+      if (body.action === 'update' && (!body.minecraftVersion || !body.loader)) {
+        set.status = 422
+        return { message: 'Bulk update requires Minecraft version and loader.' }
+      }
+      const job = jobs.create(
+        'gravit.mods.bulk',
+        { ...body },
+        `Bulk ${body.action} queued for ${body.filenames.length} mods`,
+        async (context) => ({
+          ...(await manager.bulk(installation, body, context)),
+        }),
+      )
+      set.status = 202
+      return job
+    },
+    {
       body: t.Object({
         installationId,
         profile,
-        projectId,
-        minecraftVersion,
-        loader,
-        serverBindingIds: t.Array(t.String({ format: 'uuid' }), { maxItems: 32 }),
-        files: t.Array(t.Object({
-          path: packPath,
-          clientMode: t.Union([
-            t.Literal('required'),
-            t.Literal('optional'),
-            t.Literal('none'),
-          ]),
-          enabledByDefault: t.Boolean(),
-          installOnServer: t.Boolean(),
-          name: t.String({ minLength: 1, maxLength: 80 }),
-          description: t.String({ maxLength: 500 }),
-        }), { minItems: 1, maxItems: 2_000 }),
+        filenames: t.Array(filename, { minItems: 1, maxItems: 200, uniqueItems: true }),
+        action: t.Union([
+          t.Literal('enable'),
+          t.Literal('disable'),
+          t.Literal('update'),
+          t.Literal('remove'),
+        ]),
+        minecraftVersion: t.Optional(minecraftVersion),
+        loader: t.Optional(loader),
+        confirmRemoval: t.Optional(t.Boolean()),
       }),
     },
   )

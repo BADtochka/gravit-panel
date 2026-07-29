@@ -87,14 +87,14 @@
         </div>
       </div>
 
-      <div class="rounded-lg border">
+      <div>
         <div v-if="!bindings?.items.length" class="p-4 text-sm text-muted-foreground">
           No servers are attached to this profile.
         </div>
         <div
           v-for="binding in bindings?.items"
           :key="binding.id ?? binding.name"
-          class="space-y-3 border-b p-4 last:border-b-0"
+          class="space-y-3 border-t py-5 first:border-t-0"
         >
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -210,7 +210,7 @@
           </div>
           <div
             v-if="binding.managed && binding.id && binding.updaterInstalledAt"
-            class="rounded-md border p-3"
+            class="bg-muted/40 p-3"
           >
             <p class="text-xs font-medium">Manual pack update</p>
             <code class="mt-2 block overflow-x-auto rounded bg-muted p-2 text-xs">

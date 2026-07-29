@@ -17,7 +17,11 @@ import type { JobTaskContext } from '../jobs/jobs.runner'
 import type { ClientBuildService } from '../clients/client-build.service'
 import type { ServerPackService } from '../servers/server-pack.service'
 import type { ServerBindingsStore } from '../servers/server-bindings.store'
-import { ModrinthService, modrinthSource } from './modrinth.service'
+import {
+  ModrinthService,
+  modrinthSource,
+  type ResolvedModrinthPack,
+} from './modrinth.service'
 
 const profilePattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/
 const filenamePattern = /^[^/\\\0]{1,255}\.jar(?:\.disabled)?$/
@@ -284,16 +288,43 @@ export class ModManagerService {
     input: ModrinthModpackImportInput,
     context: JobTaskContext,
   ) {
-    this.validateProfile(input.profile)
-    if (!this.clients || !this.serverPacks || !this.serverBindings) {
-      throw new Error('Modpack destinations are unavailable')
-    }
     context.progress(5, 'Resolving and validating Modrinth modpack')
     const pack = await this.modrinth.resolveModpack(
       input.projectId,
       input.minecraftVersion,
       input.loader,
     )
+    return this.applyResolvedModpack(installation, input, pack, context)
+  }
+
+  async importLocalModpack(
+    installation: GravitInstallation,
+    input: ModrinthModpackImportInput,
+    archive: Uint8Array,
+    context: JobTaskContext,
+  ) {
+    context.progress(5, 'Reading and validating local Modrinth modpack')
+    const pack = await this.modrinth.resolveLocalModpack(
+      archive,
+      input.minecraftVersion,
+      input.loader,
+    )
+    if (pack.inspection.projectId !== input.projectId) {
+      throw new Error('Local .mrpack changed after inspection')
+    }
+    return this.applyResolvedModpack(installation, input, pack, context)
+  }
+
+  private async applyResolvedModpack(
+    installation: GravitInstallation,
+    input: ModrinthModpackImportInput,
+    pack: ResolvedModrinthPack,
+    context: JobTaskContext,
+  ) {
+    this.validateProfile(input.profile)
+    if (!this.clients || !this.serverPacks || !this.serverBindings) {
+      throw new Error('Modpack destinations are unavailable')
+    }
     const selections = new Map(input.files.map((item) => [item.path, item]))
     if (
       selections.size !== input.files.length ||
@@ -462,6 +493,72 @@ export class ModManagerService {
     context.log(`${enabled ? 'Enabled' : 'Disabled'} ${current}`)
     context.progress(95, 'Mod state updated')
     return { installationId: installation.id, profile, filename: targetName, enabled }
+  }
+
+  async bulk(
+    installation: GravitInstallation,
+    input: {
+      profile: string
+      filenames: string[]
+      action: 'enable' | 'disable' | 'update' | 'remove'
+      minecraftVersion?: string
+      loader?: string
+    },
+    context: JobTaskContext,
+  ) {
+    this.validateProfile(input.profile)
+    const filenames = [...new Set(input.filenames.map((item) => this.safeFilename(item)))]
+    if (!filenames.length || filenames.length !== input.filenames.length) {
+      throw new Error('Bulk mod selection must contain unique files')
+    }
+    if (input.action === 'update' && (!input.minecraftVersion || !input.loader)) {
+      throw new Error('Minecraft version and loader are required for bulk updates')
+    }
+    const results: Array<Record<string, unknown>> = []
+    for (const [index, filename] of filenames.entries()) {
+      if (context.signal.aborted) throw new Error('Bulk mod operation cancelled')
+      context.progress(
+        Math.round(5 + (index / filenames.length) * 90),
+        `${input.action} ${filename}`,
+      )
+      const scopedContext: JobTaskContext = {
+        ...context,
+        progress: (_value, message) => context.log(`${filename}: ${message}`),
+      }
+      if (input.action === 'enable' || input.action === 'disable') {
+        results.push(await this.toggle(
+          installation,
+          input.profile,
+          filename,
+          input.action === 'enable',
+          scopedContext,
+        ))
+      } else if (input.action === 'update') {
+        results.push(await this.update(
+          installation,
+          input.profile,
+          filename,
+          input.minecraftVersion!,
+          input.loader!,
+          scopedContext,
+        ))
+      } else {
+        results.push(await this.remove(
+          installation,
+          input.profile,
+          filename,
+          scopedContext,
+        ))
+      }
+    }
+    context.progress(98, `Bulk ${input.action} completed for ${results.length} mods`)
+    return {
+      installationId: installation.id,
+      profile: input.profile,
+      action: input.action,
+      count: results.length,
+      results,
+    }
   }
 
   async remove(
