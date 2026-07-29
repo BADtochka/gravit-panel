@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { GravitInstallation } from '@gravit-panel/shared'
 import {
+  ControlFileBusyError,
   ControlFileService,
   type ControlCommandRunner,
 } from './control-file.service'
@@ -145,5 +146,20 @@ describe('ControlFileService', () => {
     const token = await new ControlFileService(1_000, 1_000, runner)
       .createServerToken(installation, profileUuid, 'std')
     expect(token).toBe('header.payload.signature')
+  })
+
+  test('maps a stalled module inspection to a busy state quickly', async () => {
+    const timeouts: number[] = []
+    const runner: ControlCommandRunner = async (command, _cwd, _input, timeout) => {
+      timeouts.push(timeout)
+      if (isProbe(command)) return { exitCode: 0, stdout: '', stderr: '' }
+      throw new Error(`LaunchServer control socket stayed busy or the command stalled for ${timeout}ms`)
+    }
+    const service = new ControlFileService(30_000, 60_000, runner)
+
+    await expect(
+      service.executeModuleCommand(installation, 'modules list'),
+    ).rejects.toBeInstanceOf(ControlFileBusyError)
+    expect(timeouts.at(-1)).toBe(5_000)
   })
 })

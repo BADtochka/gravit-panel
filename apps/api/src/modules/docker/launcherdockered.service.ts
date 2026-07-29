@@ -135,6 +135,11 @@ const waitForControlSocket: InstallationReadinessWaiter = async (
 const safeTimestamp = () => new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
 const pendingInstallMarker = '.gravit-panel-pending-install.json'
 const fileAuthJvmOption = '--add-opens=java.base/java.time=com.google.gson'
+const launchServerHttpTimeoutJvmOption = '-Dlauncher.httpTimeout=30000'
+const requiredLaunchServerJvmOptions = [
+  fileAuthJvmOption,
+  launchServerHttpTimeoutJvmOption,
+] as const
 const launcherNginxConfig = 'nginx.conf'
 const launchServerConfig = join('launcher', 'LaunchServer.json')
 const forwardedProtoMap = `map $http_x_forwarded_proto $launcher_forwarded_proto {
@@ -644,7 +649,7 @@ export class LauncherDockeredService {
     const contents =
       `ADDRESS=${input.address}\n` +
       `PROJECTNAME=${input.projectName}\n` +
-      `JAVA_OPTS=${fileAuthJvmOption}\n`
+      `JAVA_OPTS=${requiredLaunchServerJvmOptions.join(' ')}\n`
     try {
       await writeFile(temporaryPath, contents, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
       await rename(temporaryPath, environmentPath)
@@ -812,17 +817,23 @@ export class LauncherDockeredService {
     const contents = await readFile(environmentPath, 'utf8')
     const lines = contents.replace(/\r\n/g, '\n').split('\n')
     const optionIndex = lines.findIndex((line) => line.startsWith('JAVA_OPTS='))
-    if (
-      optionIndex >= 0 &&
-      lines[optionIndex]!.slice('JAVA_OPTS='.length).split(/\s+/).includes(fileAuthJvmOption)
-    ) return
+    const currentOptions = optionIndex >= 0
+      ? lines[optionIndex]!.slice('JAVA_OPTS='.length).trim().split(/\s+/).filter(Boolean)
+      : []
+    const missingOptions = requiredLaunchServerJvmOptions.filter(
+      (option) => !currentOptions.includes(option),
+    )
+    if (!missingOptions.length) return
 
     if (optionIndex >= 0) {
-      const current = lines[optionIndex]!.slice('JAVA_OPTS='.length).trim()
-      lines[optionIndex] = `JAVA_OPTS=${current ? `${current} ` : ''}${fileAuthJvmOption}`
+      lines[optionIndex] = `JAVA_OPTS=${[...currentOptions, ...missingOptions].join(' ')}`
     } else {
       const insertionIndex = lines.at(-1) === '' ? lines.length - 1 : lines.length
-      lines.splice(insertionIndex, 0, `JAVA_OPTS=${fileAuthJvmOption}`)
+      lines.splice(
+        insertionIndex,
+        0,
+        `JAVA_OPTS=${requiredLaunchServerJvmOptions.join(' ')}`,
+      )
     }
 
     const backupPath = join(
@@ -846,7 +857,9 @@ export class LauncherDockeredService {
       throw error
     }
     context.log(`LaunchServer JVM compatibility snapshot created: ${backupPath}`)
-    context.log('Enabled the source-required FileAuthSystem java.time access')
+    context.log(
+      'Enabled source-required FileAuthSystem access and resilient LaunchServer HTTP timeouts',
+    )
   }
 
   private async runChecked(

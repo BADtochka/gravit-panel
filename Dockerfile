@@ -27,6 +27,9 @@ RUN git apply --check /tmp/oauth-controls.patch \
     && cd /out \
     && sha256sum JavaRuntime.jar > JavaRuntime.jar.sha256
 
+FROM scratch AS launcher-runtime-artifact
+COPY --from=launcher-runtime-build /out /
+
 # The API manages LauncherDockered installations, so it deliberately contains
 # the Docker CLI and Compose plugin. It must be given the host Docker socket at
 # runtime; see compose.yaml before exposing this service to the Internet.

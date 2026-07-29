@@ -139,7 +139,7 @@ describe('LauncherDockeredService', () => {
       ])
       expect(readinessPaths).toEqual([installationPath])
       expect(await readFile(join(installationPath, '.env'), 'utf8')).toContain(
-        'JAVA_OPTS=--add-opens=java.base/java.time=com.google.gson',
+        'JAVA_OPTS=--add-opens=java.base/java.time=com.google.gson -Dlauncher.httpTimeout=30000',
       )
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -469,7 +469,7 @@ describe('LauncherDockeredService', () => {
       expect(await readFile(join(projectPath, '.env'), 'utf8')).toBe(
         'ADDRESS=launcher.example.com\n' +
           'PROJECTNAME=EXAMPLE\n' +
-          'JAVA_OPTS=--add-opens=java.base/java.time=com.google.gson\n',
+          'JAVA_OPTS=--add-opens=java.base/java.time=com.google.gson -Dlauncher.httpTimeout=30000\n',
       )
       expect(await readFile(result.environmentBackupPath!, 'utf8')).toContain('old.example')
       expect(commands).toEqual([

@@ -13,7 +13,7 @@ export type ContainerCommandRunner = (
   input?: Uint8Array,
 ) => Promise<ContainerCommandResult>
 
-const maximumDiagnosticBytes = 64 * 1024
+const maximumDiagnosticBytes = 4 * 1024 * 1024
 
 const readDiagnostic = async (stream: ReadableStream<Uint8Array>) => {
   const reader = stream.getReader()
@@ -67,6 +67,10 @@ export interface VolumeFileOperations {
   readFile?(installation: GravitInstallation, relativePath: string): Promise<string>
   listFiles?(installation: GravitInstallation, relativeDirectory: string): Promise<string[]>
   ensureDirectory(installation: GravitInstallation, relativePath: string): Promise<void>
+  prepareHostWritableDirectory?(
+    installation: GravitInstallation,
+    relativePath: string,
+  ): Promise<void>
   writeFileAtomic(
     installation: GravitInstallation,
     relativePath: string,
@@ -132,7 +136,10 @@ export class ContainerVolumeService implements VolumeFileOperations {
   async sha256(installation: GravitInstallation, relativePath: string) {
     const path = this.absolute(relativePath)
     const result = await this.runner(installation.path, ['sha256sum', '--', path])
-    if (result.exitCode === 1 && !result.stderr.trim()) return null
+    if (
+      result.exitCode === 1 &&
+      (!result.stderr.trim() || /no such file or directory/i.test(result.stderr))
+    ) return null
     if (result.exitCode !== 0) throw this.commandError('hash volume file', result)
     const digest = result.stdout.trim().split(/\s+/, 1)[0]
     if (!digest || !/^[a-f0-9]{64}$/.test(digest)) {
@@ -143,6 +150,25 @@ export class ContainerVolumeService implements VolumeFileOperations {
 
   async ensureDirectory(installation: GravitInstallation, relativePath: string) {
     await this.checked(installation, ['mkdir', '-p', '--', this.absolute(relativePath)], 'create directory')
+  }
+
+  async prepareHostWritableDirectory(
+    installation: GravitInstallation,
+    relativePath: string,
+  ) {
+    const uid = typeof process.getuid === 'function' ? process.getuid() : 0
+    const gid = typeof process.getgid === 'function' ? process.getgid() : 0
+    const path = this.absolute(relativePath)
+    await this.checked(
+      installation,
+      ['mkdir', '-p', '--', path],
+      'create host-writable volume directory',
+    )
+    await this.checked(
+      installation,
+      ['chown', '-R', `${uid}:${gid}`, '--', path],
+      'prepare host-writable volume directory ownership',
+    )
   }
 
   async writeFileAtomic(
@@ -199,10 +225,41 @@ export class ContainerVolumeService implements VolumeFileOperations {
     )
   }
 
+  async prepareJavaRuntimePermissions(
+    installation: GravitInstallation,
+    relativePath: string,
+  ) {
+    const root = this.absolute(relativePath)
+    await this.checked(
+      installation,
+      [
+        'find',
+        root,
+        '-type',
+        'f',
+        '(',
+        '-path',
+        `${root}/bin/*`,
+        '-o',
+        '-name',
+        'jspawnhelper',
+        ')',
+        '-exec',
+        'chmod',
+        '0755',
+        '{}',
+        '+',
+      ],
+      'prepare Java runtime executable permissions',
+    )
+  }
+
   async extractZipToNewDirectory(
     installation: GravitInstallation,
     archiveRelativePath: string,
     targetRelativePath: string,
+    stripSingleRoot = false,
+    maximumExpandedBytes = 512 * 1024 * 1024,
   ) {
     const archive = this.absolute(archiveRelativePath)
     const target = this.absolute(targetRelativePath)
@@ -217,6 +274,7 @@ export class ContainerVolumeService implements VolumeFileOperations {
     if (listing.exitCode !== 0) throw this.commandError('inspect runtime archive', listing)
     const entries = listing.stdout.split(/\r?\n/).filter(Boolean)
     if (!entries.length) throw new Error('Runtime archive is empty')
+    if (entries.length > 100_000) throw new Error('Runtime archive contains too many entries')
     for (const entry of entries) {
       const normalized = posix.normalize(entry)
       if (
@@ -228,6 +286,34 @@ export class ContainerVolumeService implements VolumeFileOperations {
         throw new Error(`Runtime archive contains an unsafe path: ${entry}`)
       }
     }
+    const sizeListing = await this.runner(installation.path, ['unzip', '-l', archive])
+    if (sizeListing.exitCode !== 0) {
+      throw this.commandError('inspect runtime archive sizes', sizeListing)
+    }
+    let expandedBytes = 0
+    for (const line of sizeListing.stdout.split(/\r?\n/)) {
+      const match = line.match(/^\s*(\d+)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+/)
+      if (!match) continue
+      const size = Number(match[1])
+      if (!Number.isSafeInteger(size) || size < 0) {
+        throw new Error('Runtime archive contains an invalid expanded size')
+      }
+      expandedBytes += size
+      if (expandedBytes > maximumExpandedBytes) {
+        throw new Error('Runtime archive expands beyond the configured size limit')
+      }
+    }
+    const roots = new Set(
+      entries
+        .filter((entry) => entry && !entry.endsWith('/'))
+        .map((entry) => entry.split('/')[0]!),
+    )
+    const singleRoot =
+      stripSingleRoot &&
+      roots.size === 1 &&
+      entries.every((entry) => entry.includes('/'))
+        ? [...roots][0]!
+        : null
 
     const pendingRelativePath = `${this.relative(targetRelativePath)}.pending-${crypto.randomUUID()}`
     const pending = this.absolute(pendingRelativePath)
@@ -240,9 +326,72 @@ export class ContainerVolumeService implements VolumeFileOperations {
       )
       await this.checked(
         installation,
-        ['mv', '--', pending, target],
+        ['mv', '--', singleRoot ? posix.join(pending, singleRoot) : pending, target],
         'publish runtime directory',
       )
+      if (singleRoot) await this.remove(installation, pendingRelativePath, true)
+    } catch (error) {
+      await this.remove(installation, pendingRelativePath, true)
+      throw error
+    }
+  }
+
+  async extractTarGzToNewDirectory(
+    installation: GravitInstallation,
+    archiveRelativePath: string,
+    targetRelativePath: string,
+    stripSingleRoot = false,
+  ) {
+    const archive = this.absolute(archiveRelativePath)
+    const target = this.absolute(targetRelativePath)
+    if (
+      await this.exists(installation, targetRelativePath, 'directory') ||
+      await this.exists(installation, targetRelativePath, 'file')
+    ) {
+      throw new Error(`Refusing to replace existing volume path: ${targetRelativePath}`)
+    }
+    const listing = await this.runner(installation.path, ['tar', '-tzf', archive])
+    if (listing.exitCode !== 0) throw this.commandError('inspect Java runtime archive', listing)
+    const entries = listing.stdout.split(/\r?\n/).filter(Boolean)
+    if (!entries.length) throw new Error('Java runtime archive is empty')
+    if (entries.length > 100_000) throw new Error('Java runtime archive contains too many entries')
+    for (const entry of entries) {
+      const normalized = posix.normalize(entry)
+      if (
+        entry.includes('\0') ||
+        posix.isAbsolute(entry) ||
+        normalized === '..' ||
+        normalized.startsWith('../')
+      ) {
+        throw new Error(`Java runtime archive contains an unsafe path: ${entry}`)
+      }
+    }
+    const roots = new Set(
+      entries
+        .filter((entry) => entry && !entry.endsWith('/'))
+        .map((entry) => entry.split('/')[0]!),
+    )
+    const singleRoot =
+      stripSingleRoot &&
+      roots.size === 1 &&
+      entries.every((entry) => entry.includes('/'))
+        ? [...roots][0]!
+        : null
+    const pendingRelativePath = `${this.relative(targetRelativePath)}.pending-${crypto.randomUUID()}`
+    const pending = this.absolute(pendingRelativePath)
+    await this.ensureDirectory(installation, pendingRelativePath)
+    try {
+      await this.checked(
+        installation,
+        ['tar', '-xzf', archive, '--no-same-owner', '-C', pending],
+        'extract Java runtime archive',
+      )
+      await this.checked(
+        installation,
+        ['mv', '--', singleRoot ? posix.join(pending, singleRoot) : pending, target],
+        'publish Java runtime directory',
+      )
+      if (singleRoot) await this.remove(installation, pendingRelativePath, true)
     } catch (error) {
       await this.remove(installation, pendingRelativePath, true)
       throw error

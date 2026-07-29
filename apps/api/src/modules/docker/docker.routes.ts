@@ -129,18 +129,9 @@ export const createDockerRoutes = ({
             context.progress(98, 'LaunchServer setup completed')
             return { ...result, installationId: installation.id, setup }
           } catch (error) {
-            installations.delete(installation.id)
-            context.log('Incomplete LaunchServer registration removed')
-            if (input.mode === 'clone') {
-              try {
-                await installer.removeInstallation(installation, context)
-              } catch (cleanupError) {
-                const reason = cleanupError instanceof Error
-                  ? cleanupError.message
-                  : String(cleanupError)
-                context.log(`Automatic installation cleanup failed: ${reason}`)
-              }
-            }
+            context.log(
+              'Automatic panel integration setup failed; the running LaunchServer and its registration were retained for retry and diagnostics',
+            )
             throw error
           }
         },

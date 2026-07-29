@@ -1,5 +1,6 @@
 import type {
   ClientBuildInput,
+  ClientProfileJavaUpdateInput,
   ClientProfileRemoveInput,
   ClientProfileUpdateInput,
   JobRecord,
@@ -24,6 +25,7 @@ import {
   workspaceManifest,
 } from './client-sources'
 import { MinecraftVersionsService } from './minecraft-versions.service'
+import { JavaRuntimeManagerService } from './java-runtime-manager.service'
 
 const launcherLifecycle = new LauncherDockeredService(env.INSTALLATIONS_ROOT)
 const launcherRuntimeService = new LauncherRuntimeService(
@@ -41,6 +43,10 @@ export const clientBuildService = new ClientBuildService(
   launcherRuntimeService,
   undefined,
   launcherLifecycle,
+)
+const javaRuntimes = new JavaRuntimeManagerService(
+  launcherLifecycle,
+  clientBuildService,
 )
 const versions = new MinecraftVersionsService()
 const installationId = t.String({ format: 'uuid' })
@@ -74,6 +80,7 @@ type ClientOperations = Pick<
   | 'profileState'
   | 'listProfiles'
   | 'updateProfile'
+  | 'updateProfileJava'
   | 'removeProfile'
   | 'listLauncherArtifacts'
   | 'artifactPath'
@@ -97,6 +104,10 @@ export interface ClientsRoutesDependencies {
   installations: Pick<InstallationsStore, 'get'>
   jobs: Pick<JobsRunner, 'create'>
   activeJob: (installationId: string) => JobRecord | null | undefined
+  javaRuntimes: Pick<
+    JavaRuntimeManagerService,
+    'state' | 'install' | 'installTemurin' | 'remove' | 'updateSettings'
+  >
 }
 
 export const createClientsRoutes = ({
@@ -106,6 +117,7 @@ export const createClientsRoutes = ({
   installations,
   jobs,
   activeJob,
+  javaRuntimes,
 }: ClientsRoutesDependencies) => {
   const findInstallation = (id: string, set: { status?: number | string }) => {
     const installation = installations.get(id)
@@ -199,6 +211,225 @@ export const createClientsRoutes = ({
       body: t.Object({
         installationId,
         confirmRemove: t.Literal(true),
+      }),
+    },
+  )
+  .post(
+    '/profiles/:name/java',
+    ({ params, body, set }) => {
+      const input = { ...body, name: params.name } as ClientProfileJavaUpdateInput
+      const installation = findInstallation(input.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = activeJob(installation.id)
+      if (conflict) {
+        set.status = 409
+        return { message: 'Another client operation is active.', jobId: conflict.id }
+      }
+      const job = jobs.create(
+        'gravit.profile.java.update',
+        { ...input },
+        `${input.name} Java compatibility update queued`,
+        async (context) => ({
+          ...(await service.updateProfileJava(installation, input, context)),
+        }),
+      )
+      set.status = 202
+      return job
+    },
+    {
+      params: t.Object({ name: profile }),
+      body: t.Object({
+        installationId,
+        recommendJavaVersion: t.Integer({ minimum: 8, maximum: 99 }),
+        minJavaVersion: t.Integer({ minimum: 8, maximum: 99 }),
+        maxJavaVersion: t.Integer({ minimum: 8, maximum: 999 }),
+      }),
+    },
+  )
+  .get(
+    '/java',
+    ({ query, set }) => {
+      const installation = findInstallation(query.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      return javaRuntimes.state(installation)
+    },
+    { query: t.Object({ installationId }) },
+  )
+  .post(
+    '/java/install',
+    async ({ body, set }) => {
+      const installation = findInstallation(body.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = activeJob(installation.id)
+      if (conflict) {
+        set.status = 409
+        return { message: 'Another client operation is active.', jobId: conflict.id }
+      }
+      const archive = new Uint8Array(await body.archive.arrayBuffer())
+      const input = {
+        directory: body.directory,
+        version: body.version,
+        build: body.build,
+        os: body.os,
+        arch: body.arch,
+        javafx: body.javafx,
+      }
+      const job = jobs.create(
+        'gravit.java.install',
+        {
+          installationId: installation.id,
+          ...input,
+          filename: body.archive.name,
+          archiveSize: archive.length,
+        },
+        `Java ${body.version} ${body.os}/${body.arch} installation queued`,
+        async (context) => ({
+          ...(await javaRuntimes.install(installation, input, archive, context)),
+        }),
+      )
+      set.status = 202
+      return job
+    },
+    {
+      body: t.Object({
+        installationId,
+        directory: t.String({
+          minLength: 1,
+          maxLength: 64,
+          pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]*$',
+        }),
+        version: t.Numeric({ minimum: 8, maximum: 99 }),
+        build: t.Numeric({ minimum: 0, maximum: 999_999 }),
+        os: t.Union([
+          t.Literal('mustdie'),
+          t.Literal('linux'),
+          t.Literal('macosx'),
+        ]),
+        arch: t.Union([
+          t.Literal('X86'),
+          t.Literal('X86_64'),
+          t.Literal('ARM32'),
+          t.Literal('ARM64'),
+        ]),
+        javafx: t.BooleanString(),
+        archive: t.File({ maxSize: 300 * 1024 * 1024 }),
+      }),
+    },
+  )
+  .post(
+    '/java/temurin/install',
+    ({ body, set }) => {
+      const installation = findInstallation(body.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = activeJob(installation.id)
+      if (conflict) {
+        set.status = 409
+        return { message: 'Another client operation is active.', jobId: conflict.id }
+      }
+      const input = {
+        directory: body.directory,
+        version: body.version,
+        os: body.os,
+        arch: body.arch,
+        imageType: body.imageType,
+      }
+      const job = jobs.create(
+        'gravit.java.temurin.install',
+        { installationId: installation.id, ...input },
+        `Latest Temurin ${body.imageType.toUpperCase()} ${body.version} installation queued`,
+        async (context) => ({
+          ...(await javaRuntimes.installTemurin(installation, input, context)),
+        }),
+      )
+      set.status = 202
+      return job
+    },
+    {
+      body: t.Object({
+        installationId,
+        directory: t.String({
+          minLength: 1,
+          maxLength: 64,
+          pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]*$',
+        }),
+        version: t.Integer({ minimum: 8, maximum: 99 }),
+        os: t.Union([
+          t.Literal('mustdie'),
+          t.Literal('linux'),
+          t.Literal('macosx'),
+        ]),
+        arch: t.Union([
+          t.Literal('X86'),
+          t.Literal('X86_64'),
+          t.Literal('ARM32'),
+          t.Literal('ARM64'),
+        ]),
+        imageType: t.Union([t.Literal('jre'), t.Literal('jdk')]),
+      }),
+    },
+  )
+  .post(
+    '/java/remove',
+    ({ body, set }) => {
+      const installation = findInstallation(body.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = activeJob(installation.id)
+      if (conflict) {
+        set.status = 409
+        return { message: 'Another client operation is active.', jobId: conflict.id }
+      }
+      const job = jobs.create(
+        'gravit.java.remove',
+        { ...body },
+        `Java runtime ${body.directory} removal queued`,
+        async (context) => ({
+          ...(await javaRuntimes.remove(installation, body.directory, context)),
+        }),
+      )
+      set.status = 202
+      return job
+    },
+    {
+      body: t.Object({
+        installationId,
+        directory: t.String({
+          minLength: 1,
+          maxLength: 64,
+          pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]*$',
+        }),
+        confirmRemoval: t.Literal(true),
+      }),
+    },
+  )
+  .post(
+    '/java/settings',
+    ({ body, set }) => {
+      const installation = findInstallation(body.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = activeJob(installation.id)
+      if (conflict) {
+        set.status = 409
+        return { message: 'Another client operation is active.', jobId: conflict.id }
+      }
+      const job = jobs.create(
+        'gravit.java.settings',
+        { ...body },
+        'Custom Java launcher setting update queued',
+        async (context) => ({
+          ...(await javaRuntimes.updateSettings(
+            installation,
+            body.forceUseCustomJava,
+            context,
+          )),
+        }),
+      )
+      set.status = 202
+      return job
+    },
+    {
+      body: t.Object({
+        installationId,
+        forceUseCustomJava: t.Boolean(),
       }),
     },
   )
@@ -455,4 +686,5 @@ export const clientsRoutes = createClientsRoutes({
   installations: installationsStore,
   jobs: jobsRunner,
   activeJob: activeJobForInstallation,
+  javaRuntimes,
 })

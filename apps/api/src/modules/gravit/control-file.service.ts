@@ -190,7 +190,19 @@ export class ControlFileService {
   }
 
   executeModuleCommand(installation: GravitInstallation, command: ModuleControlCommand) {
-    return this.executeCommand(installation, command)
+    return this.executeCommand(
+      installation,
+      command,
+      Math.min(this.commandTimeoutMs, 5_000),
+    ).catch((error) => {
+      if (
+        error instanceof ControlFileBusyError ||
+        (error instanceof Error && /control socket stayed busy|command stalled/i.test(error.message))
+      ) {
+        throw new ControlFileBusyError('LaunchServer is busy with another command')
+      }
+      throw error
+    })
   }
 
   executeBuildCommand(installation: GravitInstallation, command: BuildControlCommand) {

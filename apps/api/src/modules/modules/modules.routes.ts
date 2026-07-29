@@ -52,15 +52,41 @@ export const createModulesRoutes = ({
         return { message: 'LauncherDockered installation not found.' }
       }
 
+      const conflictingJob = activeJob(installation.id)
+      if (conflictingJob) {
+        return {
+          installationId: installation.id,
+          checkedAt: new Date().toISOString(),
+          items: [],
+          busy: true,
+          activeJob: {
+            id: conflictingJob.id,
+            type: conflictingJob.type,
+            status: conflictingJob.status,
+          },
+        }
+      }
+
       try {
         const items = await management.getState(installation, activeModuleJobs())
         return {
           installationId: installation.id,
           checkedAt: new Date().toISOString(),
           items,
+          busy: false,
+          activeJob: null,
         }
       } catch (error) {
-        set.status = error instanceof ControlFileBusyError ? 409 : 503
+        if (error instanceof ControlFileBusyError) {
+          return {
+            installationId: installation.id,
+            checkedAt: new Date().toISOString(),
+            items: [],
+            busy: true,
+            activeJob: null,
+          }
+        }
+        set.status = 503
         return { message: error instanceof Error ? error.message : String(error) }
       }
     },
@@ -88,7 +114,7 @@ export const createModulesRoutes = ({
       if (conflictingJob) {
         set.status = 409
         return {
-          message: 'Another module operation is already active for this installation.',
+          message: 'Another LaunchServer operation is already active for this installation.',
           jobId: conflictingJob.id,
         }
       }
@@ -126,7 +152,7 @@ export const createModulesRoutes = ({
       if (conflictingJob) {
         set.status = 409
         return {
-          message: 'Another module operation is already active for this installation.',
+          message: 'Another LaunchServer operation is already active for this installation.',
           jobId: conflictingJob.id,
         }
       }
@@ -158,7 +184,7 @@ export const createModulesRoutes = ({
       if (conflictingJob) {
         set.status = 409
         return {
-          message: 'Another module operation is already active for this installation.',
+          message: 'Another LaunchServer operation is already active for this installation.',
           jobId: conflictingJob.id,
         }
       }

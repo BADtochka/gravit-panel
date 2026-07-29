@@ -63,6 +63,27 @@ describe('ContainerVolumeService', () => {
     expect(commands).toBe(0)
   })
 
+  test('prepares a bind-mounted directory for the local API user', async () => {
+    const calls: string[][] = []
+    const service = new ContainerVolumeService(async (_path, command) => {
+      calls.push(command)
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    await service.prepareHostWritableDirectory(installation, 'updates/assets')
+
+    expect(calls).toEqual([
+      ['mkdir', '-p', '--', '/app/data/updates/assets'],
+      [
+        'chown',
+        '-R',
+        `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
+        '--',
+        '/app/data/updates/assets',
+      ],
+    ])
+  })
+
   test('treats a clean test exit code 1 as an absent file', async () => {
     const service = new ContainerVolumeService(async () => ({
       exitCode: 1,
@@ -117,6 +138,16 @@ describe('ContainerVolumeService', () => {
     expect(await service.sha256(installation, 'Prestarter.exe')).toBe(digest)
   })
 
+  test('returns no digest when the requested volume file is absent', async () => {
+    const service = new ContainerVolumeService(async () => ({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'sha256sum: /app/data/Prestarter.exe: No such file or directory',
+    }))
+
+    expect(await service.sha256(installation, 'Prestarter.exe')).toBeNull()
+  })
+
   test('validates archive entries before publishing a new runtime directory', async () => {
     const calls: string[][] = []
     const service = new ContainerVolumeService(async (_path, command) => {
@@ -166,5 +197,79 @@ describe('ContainerVolumeService', () => {
     expect(calls.some((command) => command[0] === 'unzip' && command[1] === '-q')).toBe(
       false,
     )
+  })
+
+  test('strips one top-level directory for uploaded Java archives', async () => {
+    const calls: string[][] = []
+    const service = new ContainerVolumeService(async (_path, command) => {
+      calls.push(command)
+      if (command[0] === 'test') return { exitCode: 1, stdout: '', stderr: '' }
+      if (command[0] === 'unzip' && command[1] === '-Z1') {
+        return {
+          exitCode: 0,
+          stdout: 'jdk-21.0.4/bin/java\njdk-21.0.4/lib/modules\n',
+          stderr: '',
+        }
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    await service.extractZipToNewDirectory(
+      installation,
+      '.gravit-panel-java/runtime.zip',
+      'updates/java21-linux-x86-64',
+      true,
+    )
+
+    const publish = calls.find((command) => command[0] === 'mv')
+    expect(publish?.at(-2)).toEndWith('/jdk-21.0.4')
+    expect(publish?.at(-1)).toBe('/app/data/updates/java21-linux-x86-64')
+  })
+
+  test('scopes Java executable permission repair to the selected runtime', async () => {
+    const calls: string[][] = []
+    const service = new ContainerVolumeService(async (_path, command) => {
+      calls.push(command)
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    await service.prepareJavaRuntimePermissions(
+      installation,
+      'updates/java21-linux-x86-64',
+    )
+
+    expect(calls[0]?.slice(0, 3)).toEqual([
+      'find',
+      '/app/data/updates/java21-linux-x86-64',
+      '-type',
+    ])
+    expect(calls[0]).toContain('0755')
+  })
+
+  test('extracts a Temurin tar.gz and strips its top-level directory', async () => {
+    const calls: string[][] = []
+    const service = new ContainerVolumeService(async (_path, command) => {
+      calls.push(command)
+      if (command[0] === 'test') return { exitCode: 1, stdout: '', stderr: '' }
+      if (command[0] === 'tar' && command[1] === '-tzf') {
+        return {
+          exitCode: 0,
+          stdout: 'jdk-21.0.4-jre/bin/java\njdk-21.0.4-jre/lib/modules\n',
+          stderr: '',
+        }
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+
+    await service.extractTarGzToNewDirectory(
+      installation,
+      '.gravit-panel-java/runtime.tar.gz',
+      'updates/java21-linux-x86-64',
+      true,
+    )
+
+    expect(calls.some((command) => command[0] === 'tar' && command[1] === '-xzf')).toBe(true)
+    const publish = calls.find((command) => command[0] === 'mv')
+    expect(publish?.at(-2)).toEndWith('/jdk-21.0.4-jre')
   })
 })

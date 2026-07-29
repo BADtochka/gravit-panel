@@ -6,6 +6,7 @@ import { schema } from '../../db/schema'
 import { JobsEventHub } from '../jobs/jobs.events'
 import { JobsRunner } from '../jobs/jobs.runner'
 import { JobsStore } from '../jobs/jobs.store'
+import { ControlFileBusyError } from '../gravit/control-file.service'
 import type { ModuleManagementService } from './module-management.service'
 import { createModulesRoutes } from './modules.routes'
 
@@ -171,6 +172,18 @@ describe('module installation API', () => {
     })
 
     expect(first.status).toBe(202)
+    const busyState = await request(
+      `/api/modules/state?installationId=${installation.id}`,
+    )
+    expect(busyState.status).toBe(200)
+    expect(await busyState.json()).toMatchObject({
+      busy: true,
+      items: [],
+      activeJob: {
+        id: firstJob.id,
+        type: 'gravit.module.install',
+      },
+    })
     expect(duplicate.status).toBe(409)
     expect(unknownModule.status).toBe(404)
     expect(unknownInstallation.status).toBe(404)
@@ -207,5 +220,27 @@ describe('module installation API', () => {
       result: { moduleId: 'MirrorHelper_module', restarted: true },
     })
     expect(removed).toBe(1)
+  })
+
+  test('reports a busy state instead of failing module inspection', async () => {
+    const { request } = createHarness({
+      getState: async () => {
+        throw new ControlFileBusyError('LaunchServer is busy with another command')
+      },
+      install: async () => ({}) as never,
+      remove: async () => ({}) as never,
+    })
+
+    const response = await request(
+      `/api/modules/state?installationId=${installation.id}`,
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      installationId: installation.id,
+      items: [],
+      busy: true,
+      activeJob: null,
+    })
   })
 })

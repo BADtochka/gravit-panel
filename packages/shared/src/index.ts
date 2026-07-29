@@ -34,7 +34,12 @@ export type JobType =
   | 'gravit.launchserver.restart'
   | 'gravit.client.build'
   | 'gravit.profile.update'
+  | 'gravit.profile.java.update'
   | 'gravit.profile.remove'
+  | 'gravit.java.install'
+  | 'gravit.java.temurin.install'
+  | 'gravit.java.remove'
+  | 'gravit.java.settings'
   | 'gravit.server.binding.apply'
   | 'gravit.server.binding.remove'
   | 'gravit.server-pack.modify'
@@ -488,6 +493,8 @@ export interface GravitModuleState {
   installationId: string
   checkedAt: string
   items: GravitModuleRuntimeItem[]
+  busy: boolean
+  activeJob: Pick<JobRecord, 'id' | 'type' | 'status'> | null
 }
 
 export interface GravitModuleInstallInput {
@@ -633,7 +640,30 @@ export interface ClientProfileDescriptor {
   minecraftVersion: string | null
   loader: MinecraftLoader | null
   loaderVersion: string | null
+  recommendJavaVersion?: number
+  minJavaVersion?: number
+  maxJavaVersion?: number
   servers: ProfileServer[]
+}
+
+export type JavaRuntimeOs = 'mustdie' | 'linux' | 'macosx'
+export type JavaRuntimeArch = 'X86' | 'X86_64' | 'ARM32' | 'ARM64'
+
+export interface ManagedJavaRuntime {
+  directory: string
+  version: number
+  build: number
+  os: JavaRuntimeOs
+  arch: JavaRuntimeArch
+  javafx: boolean
+  descriptor: string
+  installed: boolean
+}
+
+export interface JavaRuntimeState {
+  installationId: string
+  forceUseCustomJava: boolean
+  items: ManagedJavaRuntime[]
 }
 
 export interface ProfileServer {
@@ -750,6 +780,14 @@ export interface ClientProfileUpdateResult {
   installationId: string
   profile: ClientProfileDescriptor
   backupPath: string
+}
+
+export interface ClientProfileJavaUpdateInput {
+  installationId: string
+  name: string
+  recommendJavaVersion: number
+  minJavaVersion: number
+  maxJavaVersion: number
 }
 
 export interface ClientProfileRemoveInput {

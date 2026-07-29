@@ -302,6 +302,21 @@ restart. `runtime.zip` must match SHA-256
 Archive paths are validated before extraction, and
 `modules launcher-load JavaRuntime.jar` is verified before `build`.
 
+Client Java management follows `GravitLauncher/Launcher@v5.7.9`
+`LaunchServerConfig.LauncherConf` and `LauncherBackendImpl`: the API can resolve
+and download the latest Eclipse Temurin JRE/JDK from Adoptium, verifies the
+published SHA-256 and size, and keeps local ZIP upload as a fallback. Archives
+are safely expanded under `updates/<directory>`, a single archive root
+is flattened, and `bin/java` or `bin/java.exe` is required before the runtime is
+added to `launcher.customJavaDownload`. The exact descriptor format is
+`Java <version> b<build> <mustdie|linux|macosx> <arch> javafx <boolean>`.
+`launcher.forceUseCustomJava` is used instead of the obsolete
+`forceDownloadJava` wiki name. Every catalog mutation snapshots
+`LaunchServer.json`, invalidates the updates cache, restarts LaunchServer, and
+rebuilds the launcher. Removed runtimes move to recoverable trash. Per-profile
+`recommendJavaVersion`, `minJavaVersion`, and `maxJavaVersion` remain the native
+runtime selection mechanism.
+
 ### Slice 9: Launcher Build
 
 Status: completed.

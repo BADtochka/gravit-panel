@@ -12,6 +12,7 @@ import { JobsRunner } from '../jobs/jobs.runner'
 import { JobsStore } from '../jobs/jobs.store'
 import type { ClientBuildService } from './client-build.service'
 import { createClientsRoutes } from './clients.routes'
+import type { JavaRuntimeManagerService } from './java-runtime-manager.service'
 
 const databases: Database[] = []
 
@@ -55,6 +56,7 @@ const createHarness = (
     checkLaunchServer?: () => Promise<LaunchServerRuntimeHealth>
     restartLaunchServer?: () => Promise<void>
   } = {},
+  javaOverrides: Partial<JavaRuntimeManagerService> = {},
 ) => {
   const database = new Database(':memory:')
   databases.push(database)
@@ -88,6 +90,7 @@ const createHarness = (
       ],
     }),
     updateProfile: async () => ({}),
+    updateProfileJava: async () => ({}),
     removeProfile: async () => ({}),
     listLauncherArtifacts: async () => [],
     artifactPath: async () => null,
@@ -135,6 +138,18 @@ const createHarness = (
         store
           .listByStatuses(['queued', 'running'])
           .find((job) => job.input.installationId === id),
+      javaRuntimes: {
+        state: async () => ({
+          installationId: installation.id,
+          forceUseCustomJava: false,
+          items: [],
+        }),
+        install: async () => ({} as never),
+        installTemurin: async () => ({} as never),
+        remove: async () => ({} as never),
+        updateSettings: async () => ({} as never),
+        ...javaOverrides,
+      },
     }),
   )
 
@@ -256,6 +271,18 @@ describe('clients workspace API', () => {
       method: 'updateProfile',
     },
     {
+      name: 'profile Java compatibility update',
+      path: `/api/clients/profiles/main/java`,
+      body: {
+        installationId: installation.id,
+        recommendJavaVersion: 21,
+        minJavaVersion: 17,
+        maxJavaVersion: 21,
+      },
+      type: 'gravit.profile.java.update',
+      method: 'updateProfileJava',
+    },
+    {
       name: 'profile removal',
       path: `/api/clients/profiles/main/remove`,
       body: {
@@ -286,6 +313,91 @@ describe('clients workspace API', () => {
     expect(queued.type).toBe(type)
     expect(receivedName).toBe('main')
     expect(completed.status).toBe('succeeded')
+  })
+
+  test('lists Java runtimes and queues an uploaded ZIP installation', async () => {
+    let archiveBytes: Uint8Array<ArrayBufferLike> = new Uint8Array()
+    const { request, store } = createHarness({}, {}, {
+      state: async () => ({
+        installationId: installation.id,
+        forceUseCustomJava: true,
+        items: [{
+          directory: 'java21-windows-x86-64',
+          version: 21,
+          build: 9,
+          os: 'mustdie',
+          arch: 'X86_64',
+          javafx: false,
+          descriptor: 'Java 21 b9 mustdie X86_64 javafx false',
+          installed: true,
+        }],
+      }),
+      install: async (_installation, _input, archive) => {
+        archiveBytes = archive
+        return { installationId: installation.id } as never
+      },
+    })
+    const stateResponse = await request(
+      `/api/clients/java?installationId=${installation.id}`,
+    )
+    const body = new FormData()
+    body.set('installationId', installation.id)
+    body.set('directory', 'java21-windows-x86-64')
+    body.set('version', '21')
+    body.set('build', '9')
+    body.set('os', 'mustdie')
+    body.set('arch', 'X86_64')
+    body.set('javafx', 'false')
+    body.set('archive', new File([new Uint8Array([1, 2, 3])], 'java.zip'))
+    const response = await request('/api/clients/java/install', {
+      method: 'POST',
+      body,
+    })
+    const queued = await response.json()
+    const completed = await waitForTerminalJob(store, queued.id)
+
+    expect(stateResponse.status).toBe(200)
+    expect((await stateResponse.json()).items[0].version).toBe(21)
+    expect(response.status).toBe(202)
+    expect(queued.type).toBe('gravit.java.install')
+    expect(completed.status).toBe('succeeded')
+    expect([...archiveBytes]).toEqual([1, 2, 3])
+  })
+
+  test('queues a server-side Temurin runtime download', async () => {
+    let received: unknown
+    const { request, store } = createHarness({}, {}, {
+      installTemurin: async (_installation, input) => {
+        received = input
+        return { installationId: installation.id } as never
+      },
+    })
+
+    const response = await request('/api/clients/java/temurin/install', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        installationId: installation.id,
+        directory: 'java21-linux-x86-64',
+        version: 21,
+        os: 'linux',
+        arch: 'X86_64',
+        imageType: 'jre',
+      }),
+    })
+    const queued = await response.json()
+    const completed = await waitForTerminalJob(store, queued.id)
+
+    expect(response.status).toBe(202)
+    expect(queued.type).toBe('gravit.java.temurin.install')
+    expect(completed.status).toBe('succeeded')
+    expect(received).toEqual({
+      directory: 'java21-linux-x86-64',
+      version: 21,
+      os: 'linux',
+      arch: 'X86_64',
+      imageType: 'jre',
+    })
   })
 
   test('returns customization state and queues a PNG customization rebuild', async () => {

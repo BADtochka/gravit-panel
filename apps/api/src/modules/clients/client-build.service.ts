@@ -3,6 +3,7 @@ import type {
   ClientBuildResult,
   ClientPreparationState,
   ClientProfileDescriptor,
+  ClientProfileJavaUpdateInput,
   ClientProfileRemoveInput,
   ClientProfileRemoveResult,
   ClientProfileState,
@@ -55,6 +56,10 @@ import {
   LoaderInstallerService,
   type LoaderInstallerProvider,
 } from './loader-installer.service'
+import {
+  MinecraftAssetsService,
+  type MinecraftAssetsProvider,
+} from './minecraft-assets.service'
 
 export interface LaunchServerLifecycle {
   restartLaunchServer(
@@ -129,6 +134,9 @@ interface LaunchProfileConfig {
   assetDir?: unknown
   assetIndex?: unknown
   updateOptional?: unknown
+  recommendJavaVersion?: unknown
+  minJavaVersion?: unknown
+  maxJavaVersion?: unknown
 }
 
 interface LaunchProfileServer {
@@ -197,6 +205,19 @@ const profileDescriptor = (
       : null,
   loader: inferProfileLoader(profile),
   loaderVersion: inferProfileLoaderVersion(profile),
+  recommendJavaVersion:
+    typeof profile.recommendJavaVersion === 'number' &&
+    Number.isSafeInteger(profile.recommendJavaVersion)
+      ? profile.recommendJavaVersion
+      : 8,
+  minJavaVersion:
+    typeof profile.minJavaVersion === 'number' && Number.isSafeInteger(profile.minJavaVersion)
+      ? profile.minJavaVersion
+      : 8,
+  maxJavaVersion:
+    typeof profile.maxJavaVersion === 'number' && Number.isSafeInteger(profile.maxJavaVersion)
+      ? profile.maxJavaVersion
+      : 999,
   servers: parseProfileServers(profile.servers),
 })
 
@@ -327,6 +348,8 @@ export class ClientBuildService {
     private readonly loaderInstallers: LoaderInstallerProvider =
       new LoaderInstallerService(),
     private readonly lifecycle?: LaunchServerLifecycle,
+    private readonly minecraftAssets: MinecraftAssetsProvider =
+      new MinecraftAssetsService(),
   ) {}
 
   compatibility(minecraftVersion: string) {
@@ -403,6 +426,9 @@ export class ClientBuildService {
           minecraftVersion: null,
           loader: null,
           loaderVersion: null,
+          recommendJavaVersion: 8,
+          minJavaVersion: 8,
+          maxJavaVersion: 999,
           servers: [],
         }
       }
@@ -800,6 +826,68 @@ export class ClientBuildService {
     }
   }
 
+  async updateProfileJava(
+    installation: GravitInstallation,
+    input: ClientProfileJavaUpdateInput,
+    context: JobTaskContext,
+  ): Promise<ClientProfileUpdateResult> {
+    this.validateProfile(input.name)
+    for (const [label, value, maximum] of [
+      ['recommended', input.recommendJavaVersion, 99],
+      ['minimum', input.minJavaVersion, 99],
+      ['maximum', input.maxJavaVersion, 999],
+    ] as const) {
+      if (!Number.isSafeInteger(value) || value < 8 || value > maximum) {
+        throw new Error(`Profile ${label} Java version must be between 8 and ${maximum}`)
+      }
+    }
+    if (
+      input.minJavaVersion > input.recommendJavaVersion ||
+      input.recommendJavaVersion > input.maxJavaVersion
+    ) {
+      throw new Error('Recommended Java version must be inside the allowed range')
+    }
+
+    const path = join('profiles', `${input.name}.json`)
+    const current = await this.readProfileConfig(installation, input.name)
+    const backupRelativePath = join(
+      '.gravit-panel-profile-backups',
+      `${input.name}.java-${safeTimestamp()}.json`,
+    )
+    context.progress(20, `Snapshotting profile ${input.name}`)
+    await this.volume.copy(installation, path, backupRelativePath)
+    const next = {
+      ...current.profile,
+      recommendJavaVersion: input.recommendJavaVersion,
+      minJavaVersion: input.minJavaVersion,
+      maxJavaVersion: input.maxJavaVersion,
+    }
+    await this.volume.writeFileAtomic(
+      installation,
+      path,
+      new TextEncoder().encode(`${JSON.stringify(next, null, 2)}\n`),
+      '0644',
+    )
+    try {
+      await this.reloadProfilesAndUpdates(installation, context, 65)
+    } catch (error) {
+      await this.volume.writeFileAtomic(
+        installation,
+        path,
+        new TextEncoder().encode(current.raw),
+        '0644',
+      )
+      await this.reloadProfilesAndUpdates(installation, context, 80).catch(() => {})
+      throw error
+    }
+    context.progress(95, `Java compatibility for ${input.name} updated`)
+    return {
+      installationId: installation.id,
+      profile: profileDescriptor(input.name, next),
+      backupPath: join(launcherRoot(installation), backupRelativePath),
+    }
+  }
+
   async removeProfile(
     installation: GravitInstallation,
     input: ClientProfileRemoveInput,
@@ -908,13 +996,33 @@ export class ClientBuildService {
     }
 
     try {
-      context.progress(55, 'Applying pinned MirrorHelper workspace')
       const command =
         'applyworkspace /app/data/config/MirrorHelper/workspace.panel.json' satisfies ClientControlCommand
-      const lines = await this.control.executeClientCommand(installation, command)
-      lines.forEach(context.log)
-      if (!(await this.volume.exists(installation, workspaceRelativePath, 'directory'))) {
-        throw new Error('MirrorHelper did not create its workspace directory')
+      const maximumAttempts = 3
+      for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+        context.progress(
+          55,
+          attempt === 1
+            ? 'Applying pinned MirrorHelper workspace'
+            : `Retrying MirrorHelper workspace (${attempt}/${maximumAttempts})`,
+        )
+        try {
+          const lines = await this.control.executeClientCommand(installation, command)
+          lines.forEach(context.log)
+          if (!(await this.volume.exists(installation, workspaceRelativePath, 'directory'))) {
+            throw new Error('MirrorHelper did not create its workspace directory')
+          }
+          break
+        } catch (error) {
+          await this.volume.remove(installation, workspaceRelativePath, true)
+          if (attempt === maximumAttempts) throw error
+          const reason = error instanceof Error ? error.message : String(error)
+          context.log(
+            `MirrorHelper workspace attempt ${attempt}/${maximumAttempts} failed: ${reason}`,
+          )
+          context.log('Removed the partial workspace before retrying upstream downloads')
+          context.signal.throwIfAborted()
+        }
       }
     } catch (error) {
       await this.volume.remove(installation, workspaceRelativePath, true)
@@ -1243,7 +1351,7 @@ export class ClientBuildService {
     context.progress(20, 'Configuring MirrorHelper client build')
     const configLines = await this.control.executeClientCommand(
       installation,
-      'mirrorhelper setDisableDownloadAssets false',
+      'mirrorhelper setDisableDownloadAssets true',
     )
     configLines.forEach(context.log)
     await this.ensureLoaderInstaller(installation, input.loader, input.minecraftVersion, context)
@@ -1270,9 +1378,22 @@ export class ClientBuildService {
       )
     }
     if (!(await this.volume.exists(installation, assetIndexRelativePath))) {
-      throw new Error(
-        `MirrorHelper did not download the required asset index ${assetIndexRelativePath}`,
+      const assetDirectory = generated.assetDir as string
+      const assetIndex = generated.assetIndex as string
+      await this.volume.prepareHostWritableDirectory?.(
+        installation,
+        join('updates', assetDirectory),
       )
+      await this.minecraftAssets.ensureAssets(
+        installation,
+        input.minecraftVersion,
+        assetDirectory,
+        assetIndex,
+        context,
+      )
+    }
+    if (!(await this.volume.exists(installation, assetIndexRelativePath))) {
+      throw new Error(`Minecraft asset sync did not produce ${assetIndexRelativePath}`)
     }
     context.log(`Verified Minecraft asset index ${assetIndexRelativePath}`)
 

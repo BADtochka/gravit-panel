@@ -15,6 +15,15 @@
       <AlertDescription>{{ pageError.message }}</AlertDescription>
     </Alert>
 
+    <Alert v-else-if="moduleState?.busy">
+      <LoaderCircle class="size-4 animate-spin" />
+      <AlertTitle>LaunchServer is busy</AlertTitle>
+      <AlertDescription>
+        Waiting for {{ moduleState.activeJob?.type ?? 'the current operation' }} to finish.
+        Module state will refresh automatically.
+      </AlertDescription>
+    </Alert>
+
     <Card v-if="catalog">
       <CardHeader class="border-b">
         <CardTitle class="text-base">Verified artifact manifest</CardTitle>
@@ -300,6 +309,7 @@ const {
     ),
   enabled: stateEnabled,
   retry: false,
+  refetchInterval: (query) => query.state.data?.busy ? 2_000 : false,
 })
 
 const runtimeFor = (moduleId: string) =>
@@ -322,6 +332,7 @@ const isPending = (moduleId: string) =>
 const canInstall = (moduleId: string) =>
   Boolean(
     stateEnabled.value &&
+      !moduleState.value?.busy &&
       runtimeFor(moduleId)?.available &&
       !runtimeFor(moduleId)?.loaded &&
       !isPending(moduleId) &&
@@ -330,11 +341,13 @@ const canInstall = (moduleId: string) =>
 const canRemove = (moduleId: string) =>
   Boolean(
     stateEnabled.value &&
+      !moduleState.value?.busy &&
       runtimeFor(moduleId)?.loaded &&
       !isPending(moduleId) &&
       !removePending.value,
   )
 const actionLabel = (moduleId: string) => {
+  if (moduleState.value?.busy) return 'LaunchServer busy'
   if (isPending(moduleId)) return 'Loading'
   const runtime = runtimeFor(moduleId)
   if (runtime?.loaded) return 'Loaded'

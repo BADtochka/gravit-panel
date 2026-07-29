@@ -92,6 +92,9 @@ describe('ClientBuildService', () => {
           minecraftVersion: '1.21.1',
           loader: 'NEOFORGE',
           loaderVersion: '21.1.244',
+          recommendJavaVersion: 8,
+          minJavaVersion: 8,
+          maxJavaVersion: 999,
           servers: [],
         },
         {
@@ -103,6 +106,9 @@ describe('ClientBuildService', () => {
           minecraftVersion: null,
           loader: null,
           loaderVersion: null,
+          recommendJavaVersion: 8,
+          minJavaVersion: 8,
+          maxJavaVersion: 999,
           servers: [],
         },
       ],
@@ -215,6 +221,24 @@ describe('ClientBuildService', () => {
     expect(updated.profile.title).toBe('Main server')
     expect(paths.get(updated.backupPath.split('/launcher/')[1]!)).toBe('file')
 
+    const javaUpdated = await service.updateProfileJava(
+      installation,
+      {
+        installationId: installation.id,
+        name: 'main',
+        minJavaVersion: 17,
+        recommendJavaVersion: 21,
+        maxJavaVersion: 21,
+      },
+      context(),
+    )
+    expect(JSON.parse(files.get('profiles/main.json')!)).toMatchObject({
+      minJavaVersion: 17,
+      recommendJavaVersion: 21,
+      maxJavaVersion: 21,
+    })
+    expect(javaUpdated.profile.recommendJavaVersion).toBe(21)
+
     const removed = await service.removeProfile(
       installation,
       {
@@ -233,8 +257,8 @@ describe('ClientBuildService', () => {
       ),
     ).toBe(true)
     expect(removed.trashPath).toContain('.gravit-panel-trash/profiles/main-')
-    expect(cacheInvalidations).toBe(2)
-    expect(restarts).toBe(2)
+    expect(cacheInvalidations).toBe(3)
+    expect(restarts).toBe(3)
   })
 
   test('lists, edits, and removes native optional mod metadata', async () => {
@@ -431,9 +455,15 @@ describe('ClientBuildService', () => {
         return {} as never
       },
     } as unknown as Pick<ModuleManagementService, 'install'>
+    let attempts = 0
     const control = {
       executeClientCommand: async () => {
         order.push('apply-workspace')
+        attempts += 1
+        if (attempts < 3) {
+          paths.set('config/MirrorHelper/workspace', 'directory')
+          throw new Error('upstream connect timed out')
+        }
         paths.set('config/MirrorHelper/workspace', 'directory')
         return ['Complete']
       },
@@ -459,7 +489,12 @@ describe('ClientBuildService', () => {
 
     const result = await service.applyWorkspace(installation, context())
 
-    expect(order).toEqual(['load-module', 'apply-workspace'])
+    expect(order).toEqual([
+      'load-module',
+      'apply-workspace',
+      'apply-workspace',
+      'apply-workspace',
+    ])
     expect(result.installationId).toBe(installation.id)
     expect(paths.get('config/MirrorHelper/workspace')).toBe('directory')
   })
@@ -562,7 +597,7 @@ describe('ClientBuildService', () => {
       )
 
       expect(commands).toEqual([
-        'mirrorhelper setDisableDownloadAssets false',
+        'mirrorhelper setDisableDownloadAssets true',
         'installClient fabric-1214 1.21.4 FABRIC fabric-api,sodium',
       ])
       expect(restarts).toBe(2)
@@ -588,7 +623,16 @@ describe('ClientBuildService', () => {
     const control = {
       executeClientCommand: async () => ['Completed'],
     } as unknown as ControlFileService
-    const service = new ClientBuildService(control, volume)
+    const service = new ClientBuildService(
+      control,
+      volume,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { ensureAssets: async () => {} },
+    )
     const now = new Date().toISOString()
     const installation: GravitInstallation = {
       id: crypto.randomUUID(),
@@ -615,7 +659,7 @@ describe('ClientBuildService', () => {
         context(),
       ),
     ).rejects.toThrow(
-      'MirrorHelper did not download the required asset index updates/assets/indexes/17.json',
+      'Minecraft asset sync did not produce updates/assets/indexes/17.json',
     )
   })
 
@@ -738,7 +782,7 @@ describe('ClientBuildService', () => {
       version: '1.21.4',
     })
     expect(commands).toEqual([
-      'mirrorhelper setDisableDownloadAssets false',
+      'mirrorhelper setDisableDownloadAssets true',
       'installClient main 1.21.4 FABRIC',
     ])
     expect(restarts).toBe(2)
@@ -839,7 +883,7 @@ describe('ClientBuildService', () => {
     )
 
     expect(commands).toEqual([
-      'mirrorhelper setDisableDownloadAssets false',
+      'mirrorhelper setDisableDownloadAssets true',
       'installClient main 1.21.1 NEOFORGE',
     ])
     expect(
@@ -919,7 +963,7 @@ describe('ClientBuildService', () => {
     )
 
     expect(commands).toEqual([
-      'mirrorhelper setDisableDownloadAssets false',
+      'mirrorhelper setDisableDownloadAssets true',
       'installClient forge-main 1.21.1 FORGE',
     ])
   })

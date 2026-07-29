@@ -245,7 +245,7 @@ describe('Docker installation API', () => {
     expect(completed.result).toHaveProperty('setup')
   })
 
-  test('rolls back a fresh clone when automatic profile provisioning fails', async () => {
+  test('retains a fresh LaunchServer when automatic profile provisioning fails', async () => {
     let cleanupCalls = 0
     const { request, installations, jobsStore } = createHarness(
       async (input) => installResult(input),
@@ -271,8 +271,8 @@ describe('Docker installation API', () => {
       status: 'failed',
       error: 'RemoteControl verification failed',
     })
-    expect(cleanupCalls).toBe(1)
-    expect(installations.list()).toEqual([])
+    expect(cleanupCalls).toBe(0)
+    expect(installations.list()).toHaveLength(1)
   })
 
   test('removes Compose resources, files, registration, and dependent credentials', async () => {

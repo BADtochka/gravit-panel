@@ -163,12 +163,21 @@
       </CardFooter>
     </Card>
 
+    <JavaManagerCard
+      :installation-id="installationId"
+      :profile="selectedProfile"
+      :disabled="operationPending"
+      @job="attachJob"
+      @error="childError = $event"
+    />
+
     <JobLogCard :job="activeJob" title="Profile operation" @finished="jobFinished" />
   </section>
 </template>
 
 <script setup lang="ts">
 import MinecraftVersionCombobox from '@/components/clients/MinecraftVersionCombobox.vue'
+import JavaManagerCard from '@/components/clients/JavaManagerCard.vue'
 import JobLogCard from '@/components/jobs/JobLogCard.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
@@ -228,7 +237,12 @@ const {
   [
     'gravit.client.build',
     'gravit.profile.update',
+    'gravit.profile.java.update',
     'gravit.profile.remove',
+    'gravit.java.install',
+    'gravit.java.temurin.install',
+    'gravit.java.remove',
+    'gravit.java.settings',
   ],
 )
 const clientName = ref('')
@@ -238,6 +252,7 @@ const mods = ref('')
 const profileTitle = ref('')
 const profileDescription = ref('')
 const profileSortIndex = ref(0)
+const childError = ref<Error | null>(null)
 const newProfileToken = computed(() =>
   typeof route.query.new === 'string' ? route.query.new : '',
 )
@@ -432,6 +447,7 @@ const pageError = computed(
     compatibilityError.value ||
     versionsError.value ||
     configurationError.value ||
+    childError.value ||
     activeJobError.value
   ) as Error | null,
 )
@@ -452,6 +468,9 @@ const jobFinished = async (job: JobRecord) => {
     }),
     queryClient.invalidateQueries({
       queryKey: ['installed-mods', installationId.value, affectedName],
+    }),
+    queryClient.invalidateQueries({
+      queryKey: ['client-java', installationId.value],
     }),
   ])
   if (

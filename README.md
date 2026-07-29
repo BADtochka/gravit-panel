@@ -45,11 +45,14 @@ service does not mount the legacy `PANEL_DATA_DIR/launchserver` directory.
 
 ```bash
 bun install
+bun run build:launcher-runtime:local
 bun run dev
 ```
 
 API runs on `http://127.0.0.1:3000` by default.
 Web runs on `http://127.0.0.1:5173` by default.
+The one-time Docker build writes the patched `JavaRuntime.jar` to the ignored
+local API data directory. Production API images already contain this artifact.
 
 Both services bind to the loopback interface by default. Set `HOST`, `WEB_HOST`,
 and `CORS_ORIGINS` explicitly if remote access is required.
@@ -191,6 +194,9 @@ not mounted and remains untouched for recovery.
 - Source-verified LaunchServer and launcher module catalog.
 - Checksum-pinned MirrorHelper workspace and LauncherPrestarter installation.
 - Launcher and Minecraft client builds with live job logs.
+- Automatic Eclipse Temurin JRE/JDK downloads with checksum verification, local
+  ZIP fallback, profile compatibility ranges, recoverable removal, and
+  automatic launcher rebuilds.
 - Launcher artifact hashing and server-scoped downloads.
 - Modrinth search, compatible mod installation, hash detection, verified
   updates, local or catalog `.mrpack` import, disable/enable, and recoverable

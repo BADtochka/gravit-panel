@@ -3,6 +3,7 @@ import type {
   LauncherRuntimeInstallResult,
 } from '@gravit-panel/shared'
 import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import {
   ContainerVolumeService,
   type VolumeFileOperations,
@@ -56,9 +57,13 @@ interface RuntimeModuleArtifact {
 export type RuntimeModuleArtifactProvider = () => Promise<RuntimeModuleArtifact>
 
 const runtimeModuleLine = '[launcher module] javaruntime.jar'
-const bundledRuntimeModulePath =
-  process.env.PANEL_LAUNCHER_RUNTIME_JAR?.trim() ||
-  '/opt/gravit-panel/launcher-runtime/JavaRuntime.jar'
+const configuredRuntimeModulePath = process.env.PANEL_LAUNCHER_RUNTIME_JAR?.trim()
+const bundledRuntimeModulePaths = configuredRuntimeModulePath
+  ? [configuredRuntimeModulePath]
+  : [
+      '/opt/gravit-panel/launcher-runtime/JavaRuntime.jar',
+      resolve(import.meta.dir, '../../../data/launcher-runtime/JavaRuntime.jar'),
+    ]
 const runtimeSentinels = [
   'runtime/runtime_en.properties',
   'runtime/scenes/login/login.fxml',
@@ -91,17 +96,26 @@ const isRuntimeLoaded = (lines: string[]) =>
 const safeTimestamp = () => new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
 
 const loadBundledRuntimeModule: RuntimeModuleArtifactProvider = async () => {
-  let bytes: Uint8Array
-  let checksum: string
-  try {
-    ;[bytes, checksum] = await Promise.all([
-      readFile(bundledRuntimeModulePath),
-      readFile(`${bundledRuntimeModulePath}.sha256`, 'utf8'),
-    ])
-  } catch (error) {
+  let selectedPath: string | null = null
+  let bytes: Uint8Array | null = null
+  let checksum: string | null = null
+  let lastError: unknown
+  for (const candidate of bundledRuntimeModulePaths) {
+    try {
+      ;[bytes, checksum] = await Promise.all([
+        readFile(candidate),
+        readFile(`${candidate}.sha256`, 'utf8'),
+      ])
+      selectedPath = candidate
+      break
+    } catch (error) {
+      lastError = error
+    }
+  }
+  if (!selectedPath || !bytes || checksum === null) {
     throw new Error(
-      `Patched LauncherRuntime artifact is unavailable at ${bundledRuntimeModulePath}; build the API image or set PANEL_LAUNCHER_RUNTIME_JAR`,
-      { cause: error },
+      `Patched LauncherRuntime artifact is unavailable at ${bundledRuntimeModulePaths.join(' or ')}; run "bun run build:launcher-runtime:local", build the API image, or set PANEL_LAUNCHER_RUNTIME_JAR`,
+      { cause: lastError },
     )
   }
   const expectedSha256 = checksum.trim().split(/\s+/, 1)[0]
