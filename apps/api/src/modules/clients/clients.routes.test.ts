@@ -130,6 +130,9 @@ const createHarness = (
           },
         }),
       },
+      loaderInstallers: {
+        versions: async () => ['21.1.244', '21.1.243'],
+      },
       installations: {
         get: (id) => id === installation.id ? installation : null,
       },
@@ -254,6 +257,22 @@ describe('clients workspace API', () => {
           loader: 'NEOFORGE',
         },
       ],
+    })
+  })
+
+  test('returns selectable loader versions for the requested Minecraft release', async () => {
+    const { request } = createHarness()
+
+    const response = await request(
+      '/api/clients/loader-versions?minecraftVersion=1.21.1&loader=NEOFORGE',
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      minecraftVersion: '1.21.1',
+      loader: 'NEOFORGE',
+      latest: '21.1.244',
+      items: ['21.1.244', '21.1.243'],
     })
   })
 

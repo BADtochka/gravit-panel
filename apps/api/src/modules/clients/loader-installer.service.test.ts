@@ -40,6 +40,31 @@ describe('LoaderInstallerService', () => {
     ])
   })
 
+  test('downloads the exact selected NeoForge version instead of the latest one', async () => {
+    const installer = new TextEncoder().encode('neoforge-21.1.243-installer')
+    const digest = sha256Bytes(installer)
+    const requests: string[] = []
+    const service = new LoaderInstallerService(async (input) => {
+      const url = String(input)
+      requests.push(url)
+      if (url.includes('/api/maven/versions/')) {
+        return response(JSON.stringify({
+          versions: ['21.1.244', '21.1.243', '21.2.1'],
+        }))
+      }
+      if (url.endsWith('.sha256')) return response(digest)
+      return response(new TextDecoder().decode(installer))
+    })
+
+    const artifact = await service.download('NEOFORGE', '1.21.1', '21.1.243')
+
+    expect(artifact.loaderVersion).toBe('21.1.243')
+    expect(requests.slice(-2)).toEqual([
+      'https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.243/neoforge-21.1.243-installer.jar.sha256',
+      'https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.243/neoforge-21.1.243-installer.jar',
+    ])
+  })
+
   test('uses the source-defined legacy Forge artifact path', async () => {
     const installer = new TextEncoder().encode('forge-installer')
     const digest = sha256Bytes(installer)

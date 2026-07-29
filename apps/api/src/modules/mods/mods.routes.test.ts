@@ -200,6 +200,7 @@ describe('mod management API', () => {
         projectId: 'pack-id',
         minecraftVersion: '1.21.4',
         loader: 'FABRIC',
+        loaderVersion: '0.16.10',
         serverBindingIds: [],
         files: [{
           path: 'mods/sodium.jar',
@@ -313,6 +314,7 @@ describe('mod management API', () => {
       projectId: 'local-0123456789abcdef',
       minecraftVersion: '1.21.4',
       loader: 'FABRIC',
+      loaderVersion: '0.16.10',
       serverBindingIds: [],
       files: [{
         path: 'mods/sodium.jar',

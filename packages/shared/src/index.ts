@@ -603,6 +603,7 @@ export interface ClientBuildInput {
   name: string
   minecraftVersion: string
   loader: MinecraftLoader
+  loaderVersion?: string | null
   mods: string[]
 }
 
@@ -611,6 +612,7 @@ export interface ClientBuildResult {
   name: string
   minecraftVersion: string
   loader: MinecraftLoader
+  loaderVersion: string | null
   mods: string[]
   profilePath: string
   updatesPath: string
@@ -942,6 +944,7 @@ export interface ModrinthModpackImportInput {
   projectId: string
   minecraftVersion: string
   loader: Exclude<MinecraftLoader, 'VANILLA'>
+  loaderVersion: string
   serverBindingIds: string[]
   files: ModrinthModpackFileSelection[]
 }

@@ -142,6 +142,26 @@
             </SelectContent>
           </Select>
         </div>
+        <div v-if="versionedLoader">
+          <label class="text-xs font-medium" for="client-loader-version">Loader version</label>
+          <Select v-model="loaderVersion">
+            <SelectTrigger id="client-loader-version" class="mt-1 w-full">
+              <SelectValue :placeholder="loaderVersionsLoading ? 'Loading versions…' : 'Select version'" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem
+                v-for="item in loaderVersionCatalog?.items ?? []"
+                :key="item"
+                :value="item"
+              >
+                {{ item }}<template v-if="item === loaderVersionCatalog?.latest"> (latest)</template>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <p class="mt-1 text-xs text-muted-foreground">
+            Modpack imports preserve their exact Forge/NeoForge version.
+          </p>
+        </div>
         <div>
           <label class="text-xs font-medium" for="client-mods">Modrinth slugs</label>
           <Input id="client-mods" v-model="mods" class="mt-1" placeholder="fabric-api,sodium" />
@@ -220,6 +240,12 @@ interface Configuration {
   loaders: MinecraftLoader[]
   sources: { mirrorHelper: SourcePin }
 }
+interface LoaderVersionCatalog {
+  minecraftVersion: string
+  loader: 'FORGE' | 'NEOFORGE'
+  latest: string | null
+  items: string[]
+}
 
 const queryClient = useQueryClient()
 const route = useRoute()
@@ -248,6 +274,7 @@ const {
 const clientName = ref('')
 const version = ref('')
 const loader = ref<MinecraftLoader>('FABRIC')
+const loaderVersion = ref('')
 const mods = ref('')
 const profileTitle = ref('')
 const profileDescription = ref('')
@@ -265,6 +292,9 @@ watch(activeJob, (job) => {
     typeof job.input.loader === 'string' &&
     ['VANILLA', 'FABRIC', 'FORGE', 'NEOFORGE', 'QUILT'].includes(job.input.loader)
   ) loader.value = job.input.loader as MinecraftLoader
+  if (typeof job.input.loaderVersion === 'string') {
+    loaderVersion.value = job.input.loaderVersion
+  }
   if (Array.isArray(job.input.mods)) {
     mods.value = job.input.mods.filter((item): item is string => typeof item === 'string').join(',')
   }
@@ -298,6 +328,24 @@ watch(versionCatalog, (catalog) => {
 const selectedProfile = computed(
   () => profiles.value?.items.find((item) => item.name === selectedProfileName.value) ?? null,
 )
+const versionedLoader = computed(
+  () => loader.value === 'FORGE' || loader.value === 'NEOFORGE',
+)
+const {
+  data: loaderVersionCatalog,
+  error: loaderVersionsError,
+  isPending: loaderVersionsLoading,
+} = useQuery({
+  queryKey: computed(() => ['loader-versions', version.value, loader.value]),
+  queryFn: () => getJson<LoaderVersionCatalog>(
+    `/api/clients/loader-versions?minecraftVersion=${encodeURIComponent(version.value)}` +
+    `&loader=${loader.value}`,
+  ),
+  enabled: computed(
+    () => versionedLoader.value && /^[0-9]+(?:\.[0-9]+){1,3}$/.test(version.value),
+  ),
+  staleTime: 30 * 60 * 1000,
+})
 watch(
   selectedProfile,
   (profile) => {
@@ -313,7 +361,7 @@ watch(
   ([name, selected, createToken]) => {
     const draftKey = createToken
       ? `new:${createToken}`
-      : `profile:${name}:${selected?.minecraftVersion ?? ''}:${selected?.loader ?? ''}`
+      : `profile:${name}:${selected?.minecraftVersion ?? ''}:${selected?.loader ?? ''}:${selected?.loaderVersion ?? ''}`
     if (draftKey === appliedDraftKey) return
     appliedDraftKey = draftKey
 
@@ -321,6 +369,7 @@ watch(
       clientName.value = ''
       version.value = versionCatalog.value?.latestRelease ?? ''
       loader.value = 'FABRIC'
+      loaderVersion.value = ''
       mods.value = ''
       return
     }
@@ -328,7 +377,24 @@ watch(
     clientName.value = name
     version.value = selected?.minecraftVersion ?? versionCatalog.value?.latestRelease ?? ''
     loader.value = selected?.loader ?? 'FABRIC'
+    loaderVersion.value = selected?.loaderVersion ?? ''
     mods.value = ''
+  },
+  { immediate: true },
+)
+watch(
+  [loaderVersionCatalog, versionedLoader],
+  ([catalog, exact]) => {
+    if (!exact) {
+      loaderVersion.value = ''
+      return
+    }
+    if (
+      catalog &&
+      (!loaderVersion.value || !catalog.items.includes(loaderVersion.value))
+    ) {
+      loaderVersion.value = catalog.latest ?? ''
+    }
   },
   { immediate: true },
 )
@@ -403,6 +469,7 @@ const startClientBuild = () => buildClient({
   name: clientName.value,
   minecraftVersion: version.value,
   loader: loader.value,
+  loaderVersion: versionedLoader.value ? loaderVersion.value : null,
   mods: mods.value.split(',').map((item) => item.trim()).filter(Boolean),
 })
 const saveProfile = () => updateProfile({
@@ -416,7 +483,13 @@ const deleteProfile = () => removeProfile({
   confirmRemove: true,
 })
 const canBuildClient = computed(
-  () => Boolean(installationId.value && validClientName.value && version.value && loader.value),
+  () => Boolean(
+    installationId.value &&
+    validClientName.value &&
+    version.value &&
+    loader.value &&
+    (!versionedLoader.value || loaderVersion.value),
+  ),
 )
 const canSaveProfile = computed(
   () =>
@@ -445,6 +518,7 @@ const pageError = computed(
     updateError.value ||
     removeError.value ||
     compatibilityError.value ||
+    loaderVersionsError.value ||
     versionsError.value ||
     configurationError.value ||
     childError.value ||

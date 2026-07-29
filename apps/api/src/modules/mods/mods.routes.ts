@@ -61,6 +61,11 @@ const modpackImportInput = t.Object({
   projectId,
   minecraftVersion,
   loader,
+  loaderVersion: t.String({
+    minLength: 1,
+    maxLength: 128,
+    pattern: '^[a-zA-Z0-9][a-zA-Z0-9.+_-]*$',
+  }),
   serverBindingIds: t.Array(t.String({ format: 'uuid' }), { maxItems: 32 }),
   files: t.Array(t.Object({
     path: packPath,

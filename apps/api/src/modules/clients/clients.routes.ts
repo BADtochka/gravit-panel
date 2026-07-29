@@ -26,8 +26,10 @@ import {
 } from './client-sources'
 import { MinecraftVersionsService } from './minecraft-versions.service'
 import { JavaRuntimeManagerService } from './java-runtime-manager.service'
+import { LoaderInstallerService } from './loader-installer.service'
 
 const launcherLifecycle = new LauncherDockeredService(env.INSTALLATIONS_ROOT)
+const loaderInstallers = new LoaderInstallerService()
 const launcherRuntimeService = new LauncherRuntimeService(
   controlFileService,
   undefined,
@@ -41,7 +43,7 @@ export const clientBuildService = new ClientBuildService(
   undefined,
   undefined,
   launcherRuntimeService,
-  undefined,
+  loaderInstallers,
   launcherLifecycle,
 )
 export const javaRuntimes = new JavaRuntimeManagerService(
@@ -101,6 +103,7 @@ export interface ClientsRoutesDependencies {
   service: ClientOperations
   lifecycle: LaunchServerLifecycle
   versions: Pick<MinecraftVersionsService, 'list'>
+  loaderInstallers: Pick<LoaderInstallerService, 'versions'>
   installations: Pick<InstallationsStore, 'get'>
   jobs: Pick<JobsRunner, 'create'>
   activeJob: (installationId: string) => JobRecord | null | undefined
@@ -114,6 +117,7 @@ export const createClientsRoutes = ({
   service,
   lifecycle,
   versions,
+  loaderInstallers,
   installations,
   jobs,
   activeJob,
@@ -137,6 +141,24 @@ export const createClientsRoutes = ({
     },
   }))
   .get('/minecraft-versions', () => versions.list())
+  .get(
+    '/loader-versions',
+    ({ query, set }) => {
+      if (query.loader !== 'FORGE' && query.loader !== 'NEOFORGE') {
+        set.status = 400
+        return { message: 'Exact loader versions are available for Forge and NeoForge.' }
+      }
+      return loaderInstallers
+        .versions(query.loader, query.minecraftVersion)
+        .then((items) => ({
+          minecraftVersion: query.minecraftVersion,
+          loader: query.loader,
+          latest: items[0] ?? null,
+          items,
+        }))
+    },
+    { query: t.Object({ minecraftVersion, loader }) },
+  )
   .get(
     '/profiles',
     ({ query, set }) => {
@@ -673,6 +695,11 @@ export const createClientsRoutes = ({
         name: profile,
         minecraftVersion,
         loader,
+        loaderVersion: t.Optional(t.Nullable(t.String({
+          minLength: 1,
+          maxLength: 128,
+          pattern: '^[a-zA-Z0-9][a-zA-Z0-9.+_-]*$',
+        }))),
         mods: t.Array(modSlug, { maxItems: 64 }),
       }),
     },
@@ -683,6 +710,7 @@ export const clientsRoutes = createClientsRoutes({
   service: clientBuildService,
   lifecycle: launcherLifecycle,
   versions,
+  loaderInstallers,
   installations: installationsStore,
   jobs: jobsRunner,
   activeJob: activeJobForInstallation,

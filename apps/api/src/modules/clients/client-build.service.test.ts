@@ -791,16 +791,23 @@ describe('ClientBuildService', () => {
   test('downloads a missing NeoForge installer before building the client', async () => {
     const paths = new Map<string, 'file' | 'directory'>([
       ['config/MirrorHelper/workspace/authlib/LauncherAuthlib6.jar', 'file'],
+      ['config/MirrorHelper/workspace/installers/neoforge-1.21.1-installer-nogui.jar', 'file'],
+      ['config/MirrorHelper/workspace/clients/neoforge/1.21.1', 'directory'],
+      ['config/MirrorHelper/workspace/.gravit-panel-loader-versions/neoforge-1.21.1.txt', 'file'],
     ])
-    const files = new Map<string, string>()
+    const files = new Map<string, string>([
+      ['config/MirrorHelper/workspace/.gravit-panel-loader-versions/neoforge-1.21.1.txt', '21.1.244\n'],
+    ])
     const commands: string[] = []
+    const downloads: Array<[string, string, string | undefined]> = []
     const volume: VolumeFileOperations = {
       exists: async (_installation, path, kind = 'file') => paths.get(path) === kind,
       ensureDirectory: async (_installation, path) => {
         paths.set(path, 'directory')
       },
-      writeFileAtomic: async (_installation, path) => {
+      writeFileAtomic: async (_installation, path, bytes) => {
         paths.set(path, 'file')
+        files.set(path, new TextDecoder().decode(bytes))
       },
       readFile: async (_installation, path) => {
         const value = files.get(path)
@@ -829,22 +836,32 @@ describe('ClientBuildService', () => {
           paths.set('updates/assets/indexes/17.json', 'file')
           files.set(
             'profiles/main.json',
-            JSON.stringify({ assetDir: 'assets', assetIndex: '17' }),
+            JSON.stringify({
+              assetDir: 'assets',
+              assetIndex: '17',
+              classPath: [
+                'libraries/net/neoforged/neoforge/21.1.243/neoforge-21.1.243-universal.jar',
+              ],
+            }),
           )
         }
         return ['Completed']
       },
     } as unknown as ControlFileService
     const loaderInstallers: LoaderInstallerProvider = {
-      download: async () => ({
+      versions: async () => ['21.1.244', '21.1.243'],
+      download: async (loader, minecraftVersion, loaderVersion) => {
+        downloads.push([loader, minecraftVersion, loaderVersion])
+        return {
         bytes: new TextEncoder().encode('verified-neoforge-installer'),
         filename: 'neoforge-1.21.1-installer-nogui.jar',
-        loaderVersion: '21.1.244',
+        loaderVersion: '21.1.243',
         sha256: 'a'.repeat(64),
         url:
           'https://maven.neoforged.net/releases/net/neoforged/neoforge/' +
-          '21.1.244/neoforge-21.1.244-installer.jar',
-      }),
+          '21.1.243/neoforge-21.1.243-installer.jar',
+        }
+      },
     }
     const service = new ClientBuildService(
       control,
@@ -877,6 +894,7 @@ describe('ClientBuildService', () => {
         name: 'main',
         minecraftVersion: '1.21.1',
         loader: 'NEOFORGE',
+        loaderVersion: '21.1.243',
         mods: [],
       },
       context(),
@@ -891,7 +909,12 @@ describe('ClientBuildService', () => {
         'config/MirrorHelper/workspace/installers/neoforge-1.21.1-installer-nogui.jar',
       ),
     ).toBe('file')
+    expect(downloads).toEqual([['NEOFORGE', '1.21.1', '21.1.243']])
+    expect(files.get(
+      'config/MirrorHelper/workspace/.gravit-panel-loader-versions/neoforge-1.21.1.txt',
+    )).toBe('21.1.243\n')
     expect(result.loader).toBe('NEOFORGE')
+    expect(result.loaderVersion).toBe('21.1.243')
   })
 
   test('reuses cached Forge installer data without downloading it again', async () => {
@@ -987,6 +1010,7 @@ describe('ClientBuildService', () => {
       executeClientCommand: async () => [],
     } as unknown as ControlFileService
     const loaderInstallers: LoaderInstallerProvider = {
+      versions: async () => ['21.1.244'],
       download: async () => {
         paths.set(installer, 'file')
         throw new Error('upstream download interrupted')

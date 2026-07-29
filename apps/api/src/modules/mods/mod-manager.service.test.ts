@@ -283,6 +283,7 @@ describe('ModManagerService', () => {
     const bindingId = crypto.randomUUID()
     const serverFiles: string[] = []
     let optionalInputs: unknown[] = []
+    let clientBuildInput: unknown = null
     const service = new ModManagerService(
       {} as ControlFileService,
       {
@@ -295,8 +296,8 @@ describe('ModManagerService', () => {
             versionId: 'version-id',
             versionName: '1.0.0',
             minecraftVersion: '1.21.1',
-            loader: 'FABRIC',
-            loaderVersion: '0.16.10',
+            loader: 'NEOFORGE',
+            loaderVersion: '21.1.243',
             clientOverrideCount: 1,
             serverOverrideCount: 1,
             files: [{
@@ -334,6 +335,21 @@ describe('ModManagerService', () => {
       } as unknown as ModrinthService,
       localVolume,
       {
+        listProfiles: async () => ({
+          items: [{
+            name: 'fabric',
+            minecraftVersion: '1.21.1',
+            loader: 'NEOFORGE',
+            loaderVersion: '21.1.244',
+          }],
+        }),
+        buildClient: async (
+          _installation: GravitInstallation,
+          input: unknown,
+        ) => {
+          clientBuildInput = input
+          return {}
+        },
         upsertOptionalMods: async (
           _installation: GravitInstallation,
           _profile: string,
@@ -373,7 +389,8 @@ describe('ModManagerService', () => {
           profile: 'fabric',
           projectId: 'pack-id',
           minecraftVersion: '1.21.1',
-          loader: 'FABRIC',
+          loader: 'NEOFORGE',
+          loaderVersion: '21.1.243',
           serverBindingIds: [bindingId],
           files: [{
             path: 'mods/example.jar',
@@ -397,6 +414,14 @@ describe('ModManagerService', () => {
         destinationPath: 'mods/example.jar',
         enabledByDefault: true,
       }])
+      expect(clientBuildInput).toEqual({
+        installationId: installation.id,
+        name: 'fabric',
+        minecraftVersion: '1.21.1',
+        loader: 'NEOFORGE',
+        loaderVersion: '21.1.243',
+        mods: [],
+      })
       expect(serverFiles).toEqual(['mods/example.jar', 'config/server.json'])
       expect(await readFile(
         join(root, 'launcher', 'updates', 'fabric', 'config', 'client.json'),

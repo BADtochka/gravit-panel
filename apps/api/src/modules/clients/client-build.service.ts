@@ -1303,6 +1303,13 @@ export class ClientBuildService {
     this.validateVersion(input.minecraftVersion)
     input.mods.forEach((mod) => this.validateMod(mod))
     const compatibility = resolveClientCompatibility(input.minecraftVersion)
+    if (
+      input.loaderVersion &&
+      input.loader !== 'FORGE' &&
+      input.loader !== 'NEOFORGE'
+    ) {
+      throw new Error('Exact loader versions are supported for Forge and NeoForge builds')
+    }
     const authlibRelativePath = join(
       'config',
       'MirrorHelper',
@@ -1354,7 +1361,13 @@ export class ClientBuildService {
       'mirrorhelper setDisableDownloadAssets true',
     )
     configLines.forEach(context.log)
-    await this.ensureLoaderInstaller(installation, input.loader, input.minecraftVersion, context)
+    await this.ensureLoaderInstaller(
+      installation,
+      input.loader,
+      input.minecraftVersion,
+      input.loaderVersion ?? null,
+      context,
+    )
     context.progress(40, `Building ${input.name} with MirrorHelper`)
     const lines = await this.control.executeClientCommand(installation, command)
     lines.forEach(context.log)
@@ -1371,6 +1384,12 @@ export class ClientBuildService {
       installation,
       input.name,
     )
+    const generatedLoaderVersion = inferProfileLoaderVersion(generated)
+    if (input.loaderVersion && generatedLoaderVersion !== input.loaderVersion) {
+      throw new Error(
+        `MirrorHelper built ${input.loader} ${generatedLoaderVersion ?? 'without a detectable version'} instead of requested ${input.loaderVersion}`,
+      )
+    }
     const assetIndexRelativePath = profileAssetIndexPath(generated)
     if (!assetIndexRelativePath) {
       throw new Error(
@@ -1444,6 +1463,7 @@ export class ClientBuildService {
       name: input.name,
       minecraftVersion: input.minecraftVersion,
       loader: input.loader,
+      loaderVersion: generatedLoaderVersion,
       mods: input.mods,
       profilePath,
       updatesPath,
@@ -1456,6 +1476,7 @@ export class ClientBuildService {
     installation: GravitInstallation,
     loader: ClientBuildInput['loader'],
     minecraftVersion: string,
+    loaderVersion: string | null,
     context: JobTaskContext,
   ) {
     if (loader !== 'FORGE' && loader !== 'NEOFORGE') return
@@ -1467,24 +1488,59 @@ export class ClientBuildService {
       join(workspace, 'installers', `${prefix}-${minecraftVersion}-installer.jar`),
     ]
     const cachePath = join(workspace, 'clients', prefix, minecraftVersion)
+    const versionMarkerPath = join(
+      workspace,
+      '.gravit-panel-loader-versions',
+      `${prefix}-${minecraftVersion}.txt`,
+    )
     const [hasNoGuiInstaller, hasGuiInstaller, hasCache] = await Promise.all([
       this.volume.exists(installation, installerPaths[0]!),
       this.volume.exists(installation, installerPaths[1]!),
       this.volume.exists(installation, cachePath, 'directory'),
     ])
-    if (hasNoGuiInstaller || hasGuiInstaller || hasCache) {
-      context.log(`Reusing cached ${loader} installer data for Minecraft ${minecraftVersion}`)
+    const cachedVersion =
+      loaderVersion && this.volume.readFile &&
+      (await this.volume.exists(installation, versionMarkerPath))
+        ? (await this.volume.readFile(installation, versionMarkerPath)).trim()
+        : null
+    if (
+      (hasNoGuiInstaller || hasGuiInstaller || hasCache) &&
+      (!loaderVersion || cachedVersion === loaderVersion)
+    ) {
+      context.log(
+        `Reusing cached ${loader}${cachedVersion ? ` ${cachedVersion}` : ''} installer data for Minecraft ${minecraftVersion}`,
+      )
       return
+    }
+
+    if (loaderVersion && (hasNoGuiInstaller || hasGuiInstaller || hasCache)) {
+      context.log(
+        `Replacing cached ${loader} ${cachedVersion ?? 'with unknown version'} with ${loaderVersion}`,
+      )
+      await Promise.all([
+        ...installerPaths.map((path) => this.volume.remove(installation, path)),
+        this.volume.remove(installation, cachePath, true),
+      ])
     }
 
     context.progress(30, `Downloading ${loader} installer for Minecraft ${minecraftVersion}`)
     try {
-      const artifact = await this.loaderInstallers.download(loader, minecraftVersion)
+      const artifact = await this.loaderInstallers.download(
+        loader,
+        minecraftVersion,
+        loaderVersion ?? undefined,
+      )
       const installerPath = join(workspace, 'installers', artifact.filename)
       if (!installerPaths.includes(installerPath)) {
         throw new Error(`Resolved an unexpected installer filename: ${artifact.filename}`)
       }
       await this.volume.writeFileAtomic(installation, installerPath, artifact.bytes)
+      await this.volume.writeFileAtomic(
+        installation,
+        versionMarkerPath,
+        new TextEncoder().encode(`${artifact.loaderVersion}\n`),
+        '0644',
+      )
       context.log(
         `Resolved ${loader} ${artifact.loaderVersion} for Minecraft ${minecraftVersion}`,
       )

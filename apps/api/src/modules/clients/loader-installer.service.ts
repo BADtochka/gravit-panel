@@ -11,9 +11,14 @@ export interface LoaderInstallerArtifact {
 }
 
 export interface LoaderInstallerProvider {
+  versions(
+    loader: LoaderInstallerType,
+    minecraftVersion: string,
+  ): Promise<string[]>
   download(
     loader: LoaderInstallerType,
     minecraftVersion: string,
+    loaderVersion?: string,
   ): Promise<LoaderInstallerArtifact>
 }
 
@@ -31,6 +36,8 @@ const neoForgeVersionsUrl =
   'https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge'
 const forgePromotionsUrl =
   'https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json'
+const forgeMetadataUrl =
+  'https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml'
 const maximumMetadataBytes = 2 * 1024 * 1024
 const maximumInstallerBytes = 128 * 1024 * 1024
 const requestHeaders = {
@@ -55,13 +62,62 @@ const isMinecraftAtMost = (version: string, expected: string) => {
 export class LoaderInstallerService implements LoaderInstallerProvider {
   constructor(private readonly fetcher: Fetcher = fetch) {}
 
+  async versions(loader: LoaderInstallerType, minecraftVersion: string) {
+    if (!/^[0-9]+(?:\.[0-9]+){1,3}$/.test(minecraftVersion)) {
+      throw new Error('Minecraft version has an invalid format')
+    }
+    if (loader === 'NEOFORGE') {
+      const metadata = await this.fetchJson<NeoForgeVersions>(
+        neoForgeVersionsUrl,
+        'NeoForge version metadata',
+      )
+      if (!Array.isArray(metadata.versions)) {
+        throw new Error('NeoForge version metadata does not contain a versions array')
+      }
+      const prefix = minecraftVersion.startsWith('1.')
+        ? `${minecraftVersion.slice(2)}.`
+        : `${minecraftVersion}.`
+      return metadata.versions
+        .filter((version): version is string =>
+          typeof version === 'string' &&
+          version.startsWith(prefix) &&
+          loaderVersionPattern.test(version),
+        )
+        .sort(versionCollator.compare)
+        .reverse()
+    }
+
+    const metadata = await this.fetchText(
+      forgeMetadataUrl,
+      'Forge version metadata',
+      maximumMetadataBytes,
+    )
+    const prefix = `${minecraftVersion}-`
+    return [...metadata.matchAll(/<version>([^<]+)<\/version>/g)]
+      .map((match) => match[1]!)
+      .filter((version) => version.startsWith(prefix))
+      .map((version) => {
+        const withoutMinecraft = version.slice(prefix.length)
+        const legacySuffix = `-${minecraftVersion}`
+        return withoutMinecraft.endsWith(legacySuffix)
+          ? withoutMinecraft.slice(0, -legacySuffix.length)
+          : withoutMinecraft
+      })
+      .filter((version, index, values) =>
+        loaderVersionPattern.test(version) && values.indexOf(version) === index,
+      )
+      .sort(versionCollator.compare)
+      .reverse()
+  }
+
   async download(
     loader: LoaderInstallerType,
     minecraftVersion: string,
+    loaderVersion?: string,
   ): Promise<LoaderInstallerArtifact> {
     const resolved = loader === 'NEOFORGE'
-      ? await this.resolveNeoForge(minecraftVersion)
-      : await this.resolveForge(minecraftVersion)
+      ? await this.resolveNeoForge(minecraftVersion, loaderVersion)
+      : await this.resolveForge(minecraftVersion, loaderVersion)
     const expectedSha256 = await this.fetchText(
       `${resolved.url}.sha256`,
       'installer checksum',
@@ -91,28 +147,15 @@ export class LoaderInstallerService implements LoaderInstallerProvider {
     }
   }
 
-  private async resolveNeoForge(minecraftVersion: string) {
-    const metadata = await this.fetchJson<NeoForgeVersions>(
-      neoForgeVersionsUrl,
-      'NeoForge version metadata',
-    )
-    if (!Array.isArray(metadata.versions)) {
-      throw new Error('NeoForge version metadata does not contain a versions array')
-    }
-    const prefix = minecraftVersion.startsWith('1.')
-      ? `${minecraftVersion.slice(2)}.`
-      : `${minecraftVersion}.`
-    const versions = metadata.versions
-      .filter((version): version is string =>
-        typeof version === 'string' &&
-        version.startsWith(prefix) &&
-        loaderVersionPattern.test(version),
-      )
-      .sort(versionCollator.compare)
-    const loaderVersion = versions.at(-1)
+  private async resolveNeoForge(minecraftVersion: string, requestedVersion?: string) {
+    const versions = await this.versions('NEOFORGE', minecraftVersion)
+    const loaderVersion = requestedVersion ?? versions[0]
     if (!loaderVersion) {
+      throw new Error(`NeoForge has no installer for Minecraft ${minecraftVersion}`)
+    }
+    if (!versions.includes(loaderVersion)) {
       throw new Error(
-        `NeoForge has no installer for Minecraft ${minecraftVersion} (prefix ${prefix})`,
+        `NeoForge ${loaderVersion} is not available for Minecraft ${minecraftVersion}`,
       )
     }
     const filename = `neoforge-${minecraftVersion}-installer-nogui.jar`
@@ -125,19 +168,30 @@ export class LoaderInstallerService implements LoaderInstallerProvider {
     }
   }
 
-  private async resolveForge(minecraftVersion: string) {
-    const metadata = await this.fetchJson<ForgePromotions>(
-      forgePromotionsUrl,
-      'Forge promotions metadata',
-    )
-    if (!metadata.promos || typeof metadata.promos !== 'object') {
-      throw new Error('Forge promotions metadata does not contain a promos object')
+  private async resolveForge(minecraftVersion: string, requestedVersion?: string) {
+    let loaderVersion = requestedVersion
+    if (loaderVersion) {
+      const versions = await this.versions('FORGE', minecraftVersion)
+      if (!versions.includes(loaderVersion)) {
+        throw new Error(
+          `Forge ${loaderVersion} is not available for Minecraft ${minecraftVersion}`,
+        )
+      }
+    } else {
+      const metadata = await this.fetchJson<ForgePromotions>(
+        forgePromotionsUrl,
+        'Forge promotions metadata',
+      )
+      if (!metadata.promos || typeof metadata.promos !== 'object') {
+        throw new Error('Forge promotions metadata does not contain a promos object')
+      }
+      const promoted = (metadata.promos as Record<string, unknown>)[
+        `${minecraftVersion}-latest`
+      ]
+      if (typeof promoted === 'string') loaderVersion = promoted
     }
-    const loaderVersion = (metadata.promos as Record<string, unknown>)[
-      `${minecraftVersion}-latest`
-    ]
-    if (typeof loaderVersion !== 'string' || !loaderVersionPattern.test(loaderVersion)) {
-      throw new Error(`Forge has no latest installer for Minecraft ${minecraftVersion}`)
+    if (!loaderVersion || !loaderVersionPattern.test(loaderVersion)) {
+      throw new Error(`Forge has no installer for Minecraft ${minecraftVersion}`)
     }
     const legacy = isMinecraftAtMost(minecraftVersion, '1.10')
     const filename = `forge-${minecraftVersion}-installer${legacy ? '' : '-nogui'}.jar`

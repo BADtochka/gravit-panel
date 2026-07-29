@@ -359,6 +359,7 @@ const importPack = async () => {
       projectId: inspection.value.projectId,
       minecraftVersion: props.minecraftVersion,
       loader: props.loader,
+      loaderVersion: inspection.value.loaderVersion,
       serverBindingIds: selectedServerIds.value,
       files: inspection.value.files.map((file) => drafts[file.path]),
     }

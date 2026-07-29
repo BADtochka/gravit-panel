@@ -42,6 +42,8 @@ export class ModManagerService {
       | 'listOptionalMods'
       | 'updateOptionalMod'
       | 'removeOptionalMod'
+      | 'listProfiles'
+      | 'buildClient'
     >,
     private readonly serverPacks?: Pick<
       ServerPackService,
@@ -324,6 +326,41 @@ export class ModManagerService {
     this.validateProfile(input.profile)
     if (!this.clients || !this.serverPacks || !this.serverBindings) {
       throw new Error('Modpack destinations are unavailable')
+    }
+    if (input.loaderVersion !== pack.inspection.loaderVersion) {
+      throw new Error('Modpack loader version changed after inspection')
+    }
+    const profiles = await this.clients.listProfiles(installation)
+    const currentProfile = profiles.items.find((item) => item.name === input.profile)
+    if (!currentProfile) {
+      throw new Error(`Profile ${input.profile} must be created before importing a modpack`)
+    }
+    if (
+      currentProfile.minecraftVersion !== pack.inspection.minecraftVersion ||
+      currentProfile.loader !== pack.inspection.loader ||
+      currentProfile.loaderVersion !== pack.inspection.loaderVersion
+    ) {
+      if (input.loader !== 'FORGE' && input.loader !== 'NEOFORGE') {
+        throw new Error(
+          `Profile loader ${currentProfile.loaderVersion ?? 'unknown'} does not match modpack loader ${input.loaderVersion}`,
+        )
+      }
+      context.progress(
+        10,
+        `Rebuilding ${input.profile} with ${input.loader} ${input.loaderVersion}`,
+      )
+      await this.clients.buildClient(
+        installation,
+        {
+          installationId: installation.id,
+          name: input.profile,
+          minecraftVersion: input.minecraftVersion,
+          loader: input.loader,
+          loaderVersion: input.loaderVersion,
+          mods: [],
+        },
+        context,
+      )
     }
     const selections = new Map(input.files.map((item) => [item.path, item]))
     if (
