@@ -236,6 +236,43 @@ export class ContainerVolumeService implements VolumeFileOperations {
         'find',
         root,
         '-type',
+        'l',
+        '-exec',
+        'sh',
+        '-c',
+        [
+          'root="$1"; shift',
+          'for link do',
+          'target="$(readlink -f -- "$link")" || exit 1',
+          'case "$target" in "$root"/*) ;; *) echo "Java runtime symlink escapes its root: $link" >&2; exit 1;; esac',
+          '[ -f "$target" ] || { echo "Java runtime symlink does not target a file: $link" >&2; exit 1; }',
+          'pending="${link}.gravit-panel-file"',
+          'cp -L -- "$target" "$pending" && mv -f -- "$pending" "$link" || exit 1',
+          'done',
+        ].join('\n'),
+        'gravit-panel',
+        root,
+        '{}',
+        '+',
+      ],
+      'materialize Java runtime symlinks',
+    )
+    await this.checked(
+      installation,
+      ['find', root, '-type', 'd', '-exec', 'chmod', 'a+rx', '{}', '+'],
+      'prepare Java runtime directory permissions',
+    )
+    await this.checked(
+      installation,
+      ['find', root, '-type', 'f', '-exec', 'chmod', 'a+r', '{}', '+'],
+      'prepare Java runtime file permissions',
+    )
+    await this.checked(
+      installation,
+      [
+        'find',
+        root,
+        '-type',
         'f',
         '(',
         '-path',
@@ -243,6 +280,9 @@ export class ContainerVolumeService implements VolumeFileOperations {
         '-o',
         '-name',
         'jspawnhelper',
+        '-o',
+        '-name',
+        'jexec',
         ')',
         '-exec',
         'chmod',

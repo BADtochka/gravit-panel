@@ -43,6 +43,125 @@ index 8152e91..cf7a91b 100644
  
          if (savePassword) {
              application.runtimeSettings.login = successAuth.recentLogin();
+diff --git a/src/main/java/pro/gravit/launcher/gui/scenes/login/methods/WebAuthMethod.java b/src/main/java/pro/gravit/launcher/gui/scenes/login/methods/WebAuthMethod.java
+index 73d86ac..535679d 100644
+--- a/src/main/java/pro/gravit/launcher/gui/scenes/login/methods/WebAuthMethod.java
++++ b/src/main/java/pro/gravit/launcher/gui/scenes/login/methods/WebAuthMethod.java
+@@ -12,2 +12,3 @@
+ import java.awt.Desktop;
++import java.io.IOException;
+ import java.net.URI;
+@@ -22,4 +23,5 @@
+ import pro.gravit.launcher.gui.scenes.login.AuthFlow;
+ import pro.gravit.launcher.gui.scenes.login.LoginScene;
+-
++import pro.gravit.utils.helper.JVMHelper;
++
+ import java.util.concurrent.CompletableFuture;
+@@ -98,3 +100,4 @@ public class WebAuthMethod extends AbstractAuthMethod<AuthWebDetails> {
+         private WebView webView;
+         private Button submitBtn;
++        private Button copyLinkBtn;
+         private Label codeLabel;
+@@ -118,3 +121,4 @@ public class WebAuthMethod extends AbstractAuthMethod<AuthWebDetails> {
+         protected void doInit() {
+             submitBtn = LookupHelper.lookup(layout, "#submit");
++            copyLinkBtn = LookupHelper.<Button>lookupIfPossible(layout, "#copyLink").orElse(null);
+             codeLabel = LookupHelper.lookup(layout, "#link");
+@@ -133,3 +137,8 @@ public class WebAuthMethod extends AbstractAuthMethod<AuthWebDetails> {
+         public void follow(String url, String redirectUrl, Consumer<String> redirectCallback) {
+             logger.info("Open external browser with URL {}", url);
++            if (copyLinkBtn != null) {
++                copyLinkBtn.setVisible(false);
++                copyLinkBtn.setManaged(false);
++                copyLinkBtn.setOnAction((e) -> copyToClipboard(url));
++            }
+             // detect device flow marker in redirectUrl
+@@ -140,14 +149,4 @@ public class WebAuthMethod extends AbstractAuthMethod<AuthWebDetails> {
+                     codeLabel.setText("Code: " + userCode);
+                     codeLabel.setUserData("device:" + (deviceCode != null ? deviceCode : ""));
+-                    codeLabel.setOnMouseClicked(evt -> {
+-                        try {
+-                            Clipboard clipboard = Clipboard.getSystemClipboard();
+-                            ClipboardContent content = new ClipboardContent();
+-                            content.putString(userCode);
+-                            clipboard.setContent(content);
+-                            codeLabel.setText("Code: " + userCode + " (copied)");
+-                        } catch (Exception ex) {
+-                            accessor.errorHandle(ex);
+-                        }
+-                    });
++                    codeLabel.setOnMouseClicked(evt -> copyToClipboard(userCode));
+                 }
+@@ -154,4 +153,12 @@ public class WebAuthMethod extends AbstractAuthMethod<AuthWebDetails> {
+             } else {
+-                codeLabel.setText("");
++                if (copyLinkBtn != null) {
++                    copyLinkBtn.setVisible(true);
++                    copyLinkBtn.setManaged(true);
++                    codeLabel.setText("");
++                    codeLabel.setOnMouseClicked(null);
++                } else {
++                    codeLabel.setText(url);
++                    codeLabel.setOnMouseClicked(evt -> copyToClipboard(url));
++                }
+                 codeLabel.setUserData(null);
+             }
+@@ -158,7 +165,3 @@ public class WebAuthMethod extends AbstractAuthMethod<AuthWebDetails> {
+             // try to open immediately
+-            try {
+-                if (Desktop.isDesktopSupported()) Desktop.getDesktop().browse(new URI(url));
+-            } catch (Exception ex) {
+-                accessor.errorHandle(ex);
+-            }
++            openExternalBrowser(url);
+             // when user clicks submit, prefer pasted URL; if empty and device marker present, use marker
+@@ -171,3 +174,45 @@ public class WebAuthMethod extends AbstractAuthMethod<AuthWebDetails> {
++        private void copyToClipboard(String value) {
++            try {
++                Clipboard clipboard = Clipboard.getSystemClipboard();
++                ClipboardContent content = new ClipboardContent();
++                content.putString(value);
++                clipboard.setContent(content);
++            } catch (Exception ex) {
++                accessor.errorHandle(ex);
++            }
++        }
++
++        private void openExternalBrowser(String url) {
++            if ("LINUX".equals(JVMHelper.OS_TYPE.name())) {
++                if (startBrowserCommand("xdg-open", url)
++                        || startBrowserCommand("gio", "open", url)) {
++                    return;
++                }
++            }
++            try {
++                if (Desktop.isDesktopSupported()
++                        && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
++                    Desktop.getDesktop().browse(new URI(url));
++                    return;
++                }
++            } catch (Exception ex) {
++                logger.warn("Desktop API failed to open the authorization URL", ex);
++            }
++            if (!application.openURL(url)) {
++                logger.warn("Unable to open the authorization URL automatically; use the copy link button");
++            }
++        }
++
++        private boolean startBrowserCommand(String... command) {
++            try {
++                new ProcessBuilder(command).start();
++                return true;
++            } catch (IOException ex) {
++                logger.debug("Browser command {} is unavailable", command[0], ex);
++                return false;
++            }
++        }
++
+         public WebView getWebView() {
+             return webView;
+         }
 diff --git a/build.gradle.kts b/build.gradle.kts
 --- a/build.gradle.kts
 +++ b/build.gradle.kts

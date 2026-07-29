@@ -66,7 +66,7 @@ const volumeHarness = () => {
       files.set(`${target}/scenes/login/login.fxml`, '<AnchorPane />')
       files.set(
         `${target}/overlay/webauth/webauth.fxml`,
-        '<Label id="link" styleClass="tooltip" />',
+        '<HBox><Label id="link" styleClass="tooltip" /><Button id="submit" /></HBox>',
       )
     },
     move: async (_installation, source, target) => {
@@ -134,13 +134,19 @@ describe('LauncherRuntimeService', () => {
     expect(paths.get('runtime')).toBe('directory')
     expect(paths.has('.gravit-panel-runtime.zip')).toBe(false)
     expect(files.get('runtime/runtime_en.properties')).toContain(
-      'Complete authorization in the opened browser window',
+      'If the browser did not open, copy the link manually.',
+    )
+    expect(files.get('runtime/runtime_en.properties')).toContain(
+      'runtime.overlay.webauth.webauth.copyLink=COPY AUTHORIZATION LINK',
     )
     expect(files.get('runtime/runtime_en.properties')).toContain(
       'runtime.scenes.login.savePassword=REMEMBER LOGIN',
     )
     expect(files.get('runtime/overlay/webauth/webauth.fxml')).not.toContain(
       'styleClass="tooltip"',
+    )
+    expect(files.get('runtime/overlay/webauth/webauth.fxml')).toContain(
+      'id="copyLink"',
     )
     expect(commands).toEqual([
       'modules list',
@@ -174,7 +180,7 @@ describe('LauncherRuntimeService', () => {
     files.set('runtime/scenes/login/login.fxml', '<AnchorPane />')
     files.set(
       'runtime/overlay/webauth/webauth.fxml',
-      '<Label id="link" styleClass="tooltip" />',
+      '<HBox><Label id="link" styleClass="tooltip" /><Button id="submit" /></HBox>',
     )
     let downloads = 0
     const service = new LauncherRuntimeService(
@@ -197,13 +203,19 @@ describe('LauncherRuntimeService', () => {
     expect(result.alreadyInstalled).toBe(true)
     expect(result.alreadyLoaded).toBe(true)
     expect(files.get('runtime/runtime_en.properties')).toContain(
-      'Complete authorization in the opened browser window',
+      'If the browser did not open, copy the link manually.',
+    )
+    expect(files.get('runtime/runtime_en.properties')).toContain(
+      'runtime.overlay.webauth.webauth.copyLink=COPY AUTHORIZATION LINK',
     )
     expect(files.get('runtime/runtime_en.properties')).toContain(
       'runtime.scenes.login.savePassword=REMEMBER LOGIN',
     )
     expect(files.get('runtime/overlay/webauth/webauth.fxml')).not.toContain(
       'styleClass="tooltip"',
+    )
+    expect(files.get('runtime/overlay/webauth/webauth.fxml')).toContain(
+      'id="copyLink"',
     )
   })
 
@@ -252,7 +264,7 @@ describe('LauncherRuntimeService', () => {
     files.set('runtime/scenes/login/login.fxml', '<AnchorPane />')
     files.set(
       'runtime/overlay/webauth/webauth.fxml',
-      '<Label id="link" styleClass="tooltip" />',
+      '<HBox><Label id="link" styleClass="tooltip" /><Button id="submit" /></HBox>',
     )
     const commands: ModuleControlCommand[] = []
     let restarts = 0

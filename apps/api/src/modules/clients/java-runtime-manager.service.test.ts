@@ -26,6 +26,7 @@ const context: JobTaskContext = {
 const createHarness = () => {
   const files = new Map<string, Uint8Array>()
   const directories = new Set<string>()
+  const preparedRuntimes: string[] = []
   files.set(
     'LaunchServer.json',
     new TextEncoder().encode(JSON.stringify({
@@ -80,7 +81,9 @@ const createHarness = () => {
       directories.add(target)
       files.set(`${target}/bin/java`, new Uint8Array([1]))
     },
-    prepareJavaRuntimePermissions: async () => {},
+    prepareJavaRuntimePermissions: async (_installation: GravitInstallation, path: string) => {
+      preparedRuntimes.push(path)
+    },
   }
   let restarts = 0
   let builds = 0
@@ -102,6 +105,7 @@ const createHarness = () => {
     service,
     files,
     directories,
+    preparedRuntimes,
     restarts: () => restarts,
     builds: () => builds,
   }
@@ -139,6 +143,9 @@ describe('JavaRuntimeManagerService', () => {
     })
     expect(harness.restarts()).toBe(1)
     expect(harness.builds()).toBe(1)
+    expect(harness.preparedRuntimes).toEqual([
+      'updates/java21-windows-x86-64',
+    ])
   })
 
   test('moves a removed runtime to trash and removes its catalog entry', async () => {

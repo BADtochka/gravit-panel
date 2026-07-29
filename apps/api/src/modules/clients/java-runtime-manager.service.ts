@@ -159,9 +159,7 @@ export class JavaRuntimeManagerService {
           `Java archive must contain ${executable} at its root or inside one top-level directory`,
         )
       }
-      if (input.os !== 'mustdie') {
-        await this.volume.prepareJavaRuntimePermissions(installation, target)
-      }
+      await this.volume.prepareJavaRuntimePermissions(installation, target)
 
       await this.volume.copy(installation, configPath, backupPath)
       const next = this.withLauncher(config)

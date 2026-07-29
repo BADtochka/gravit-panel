@@ -71,18 +71,26 @@ const runtimeSentinels = [
 ] as const
 const webAuthFxmlPath = 'runtime/overlay/webauth/webauth.fxml'
 const webAuthDescriptionKey = 'runtime.overlay.webauth.webauth.description'
+const webAuthCopyLinkKey = 'runtime.overlay.webauth.webauth.copyLink'
 const rememberLoginKey = 'runtime.scenes.login.savePassword'
 const webAuthDescriptions = {
   'runtime/runtime_en.properties':
-    'Complete authorization in the opened browser window, then return here and confirm the login.',
+    'Complete authorization in your browser, then return here and confirm the login. If the browser did not open, copy the link manually.',
   'runtime/runtime_ru.properties':
-    'Завершите авторизацию в открывшемся окне браузера, затем вернитесь сюда и подтвердите вход.',
+    'Завершите авторизацию в браузере, затем вернитесь сюда и подтвердите вход. Если браузер не открылся, скопируйте ссылку вручную.',
   'runtime/runtime_pl.properties':
-    'Dokończ autoryzację w otwartym oknie przeglądarki, następnie wróć tutaj i potwierdź logowanie.',
+    'Dokończ autoryzację w przeglądarce, następnie wróć tutaj i potwierdź logowanie. Jeśli przeglądarka się nie otworzyła, skopiuj link ręcznie.',
   'runtime/runtime_uk.properties':
-    'Завершіть авторизацію у відкритому вікні браузера, потім поверніться сюди та підтвердьте вхід.',
+    'Завершіть авторизацію у браузері, потім поверніться сюди та підтвердьте вхід. Якщо браузер не відкрився, скопіюйте посилання вручну.',
   'runtime/runtime_be.properties':
-    'Завяршыце аўтарызацыю ў адкрытым акне браўзера, затым вярніцеся сюды і пацвердзіце ўваход.',
+    'Завяршыце аўтарызацыю ў браўзеры, затым вярніцеся сюды і пацвердзіце ўваход. Калі браўзер не адкрыўся, скапіруйце спасылку ўручную.',
+} as const
+const webAuthCopyLinkLabels = {
+  'runtime/runtime_en.properties': 'COPY AUTHORIZATION LINK',
+  'runtime/runtime_ru.properties': 'СКОПИРОВАТЬ ССЫЛКУ',
+  'runtime/runtime_pl.properties': 'KOPIUJ LINK AUTORYZACYJNY',
+  'runtime/runtime_uk.properties': 'СКОПІЮВАТИ ПОСИЛАННЯ',
+  'runtime/runtime_be.properties': 'СКАПІЯВАЦЬ СПАСЫЛКУ',
 } as const
 const rememberLoginLabels = {
   'runtime/runtime_en.properties': 'REMEMBER LOGIN',
@@ -139,6 +147,32 @@ const replaceProperty = (source: string, key: string, value: string) => {
   }
   lines[index] = `${key}=${value}`
   return lines.join('\n')
+}
+
+const upsertProperty = (source: string, key: string, value: string) => {
+  const lines = source.split(/\r?\n/)
+  const index = lines.findIndex((line) => line.startsWith(`${key}=`))
+  if (index === -1) {
+    const insertionIndex = lines.at(-1) === '' ? lines.length - 1 : lines.length
+    lines.splice(insertionIndex, 0, `${key}=${value}`)
+  } else {
+    lines[index] = `${key}=${value}`
+  }
+  return lines.join('\n')
+}
+
+const applyWebAuthFxmlFix = (source: string) => {
+  let next = source.replace(' styleClass="tooltip"', '')
+  if (next.includes('id="copyLink"')) return next
+  const submitMarker = '<Button id="submit"'
+  if (!next.includes(submitMarker)) {
+    throw new Error('LauncherRuntime web auth resource is missing the submit button')
+  }
+  next = next.replace(
+    submitMarker,
+    '<Button id="copyLink" alignment="CENTER" contentDisplay="CENTER" graphicTextGap="0.0" styleClass="dialog-button" text="%runtime.overlay.webauth.webauth.copyLink" />\n                           <Button id="submit"',
+  )
+  return next
 }
 
 export class LauncherRuntimeService {
@@ -327,7 +361,7 @@ export class LauncherRuntimeService {
   ) {
     let updated = 0
     const fxml = await this.volume.readFile(installation, webAuthFxmlPath)
-    const nextFxml = fxml.replace(' styleClass="tooltip"', '')
+    const nextFxml = applyWebAuthFxmlFix(fxml)
     if (nextFxml !== fxml) {
       await this.volume.writeFileAtomic(
         installation,
@@ -341,10 +375,14 @@ export class LauncherRuntimeService {
     for (const [path, description] of Object.entries(webAuthDescriptions)) {
       if (!(await this.volume.exists(installation, path))) continue
       const current = await this.volume.readFile(installation, path)
-      const next = replaceProperty(
-        replaceProperty(current, webAuthDescriptionKey, description),
-        rememberLoginKey,
-        rememberLoginLabels[path as keyof typeof rememberLoginLabels],
+      const next = upsertProperty(
+        replaceProperty(
+          replaceProperty(current, webAuthDescriptionKey, description),
+          rememberLoginKey,
+          rememberLoginLabels[path as keyof typeof rememberLoginLabels],
+        ),
+        webAuthCopyLinkKey,
+        webAuthCopyLinkLabels[path as keyof typeof webAuthCopyLinkLabels],
       )
       if (next === current) continue
       await this.volume.writeFileAtomic(

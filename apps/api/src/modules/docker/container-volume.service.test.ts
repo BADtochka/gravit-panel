@@ -226,7 +226,7 @@ describe('ContainerVolumeService', () => {
     expect(publish?.at(-1)).toBe('/app/data/updates/java21-linux-x86-64')
   })
 
-  test('scopes Java executable permission repair to the selected runtime', async () => {
+  test('materializes Java symlinks and makes the selected runtime downloadable', async () => {
     const calls: string[][] = []
     const service = new ContainerVolumeService(async (_path, command) => {
       calls.push(command)
@@ -238,12 +238,19 @@ describe('ContainerVolumeService', () => {
       'updates/java21-linux-x86-64',
     )
 
-    expect(calls[0]?.slice(0, 3)).toEqual([
+    expect(calls[0]?.slice(0, 5)).toEqual([
       'find',
       '/app/data/updates/java21-linux-x86-64',
       '-type',
+      'l',
+      '-exec',
     ])
-    expect(calls[0]).toContain('0755')
+    expect(calls[0]?.join('\n')).toContain('readlink -f -- "$link"')
+    expect(calls[0]?.join('\n')).toContain('cp -L -- "$target" "$pending"')
+    expect(calls[1]).toContain('a+rx')
+    expect(calls[2]).toContain('a+r')
+    expect(calls[3]).toContain('0755')
+    expect(calls[3]).toContain('jexec')
   })
 
   test('extracts a Temurin tar.gz and strips its top-level directory', async () => {
