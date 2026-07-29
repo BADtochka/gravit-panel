@@ -31,7 +31,7 @@ RUN git apply --check /tmp/oauth-controls.patch \
 # the Docker CLI and Compose plugin. It must be given the host Docker socket at
 # runtime; see compose.yaml before exposing this service to the Internet.
 FROM build AS api-runtime
-RUN apk add --no-cache docker-cli docker-cli-compose git tar
+RUN apk add --no-cache docker-cli docker-cli-compose git tar unzip
 COPY --from=launcher-runtime-build /out /opt/gravit-panel/launcher-runtime
 ENV NODE_ENV=production
 WORKDIR /app

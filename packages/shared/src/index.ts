@@ -44,6 +44,9 @@ export type JobType =
   | 'gravit.mods.update'
   | 'gravit.mods.toggle'
   | 'gravit.mods.remove'
+  | 'gravit.mods.optional.update'
+  | 'gravit.mods.optional.remove'
+  | 'gravit.mods.modpack.import'
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 export type JobEventType =
   | 'queued'
@@ -813,7 +816,31 @@ export type ClientModMode = 'required' | 'optional' | 'none'
 export interface ModInstallSelection {
   slug: string
   clientMode: ClientModMode
+  optionalEnabledByDefault?: boolean
+  optionalName?: string
+  optionalDescription?: string
   serverBindingIds: string[]
+}
+
+export interface OptionalMod {
+  projectId: string
+  name: string
+  description: string
+  category: string
+  enabledByDefault: boolean
+  filename: string
+  sourcePath: string
+  destinationPath: string
+}
+
+export interface OptionalModUpdateInput {
+  installationId: string
+  profile: string
+  projectId: string
+  name: string
+  description: string
+  category: string
+  enabledByDefault: boolean
 }
 
 export interface InstalledMod {
@@ -833,6 +860,51 @@ export interface ModInstallInput {
   loader: Exclude<MinecraftLoader, 'VANILLA'>
   slugs: string[]
   selections?: ModInstallSelection[]
+}
+
+export interface ModrinthModpackFile {
+  path: string
+  size: number
+  sha1: string
+  client: 'required' | 'optional' | 'unsupported'
+  server: 'required' | 'optional' | 'unsupported'
+  projectId: string | null
+  name: string
+  description: string
+}
+
+export interface ModrinthModpackInspection {
+  projectId: string
+  slug: string
+  name: string
+  summary: string
+  versionId: string
+  versionName: string
+  minecraftVersion: string
+  loader: Exclude<MinecraftLoader, 'VANILLA'>
+  loaderVersion: string
+  files: ModrinthModpackFile[]
+  clientOverrideCount: number
+  serverOverrideCount: number
+}
+
+export interface ModrinthModpackFileSelection {
+  path: string
+  clientMode: ClientModMode
+  enabledByDefault: boolean
+  installOnServer: boolean
+  name: string
+  description: string
+}
+
+export interface ModrinthModpackImportInput {
+  installationId: string
+  profile: string
+  projectId: string
+  minecraftVersion: string
+  loader: Exclude<MinecraftLoader, 'VANILLA'>
+  serverBindingIds: string[]
+  files: ModrinthModpackFileSelection[]
 }
 
 export const workspaceApps: WorkspaceApp[] = [

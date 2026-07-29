@@ -237,6 +237,98 @@ describe('ClientBuildService', () => {
     expect(restarts).toBe(2)
   })
 
+  test('lists, edits, and removes native optional mod metadata', async () => {
+    const installation = {
+      id: crypto.randomUUID(),
+      name: 'default',
+      path: '/srv/gravit/default',
+      address: 'localhost:17549',
+      projectName: 'TEST',
+      sourceRepository: 'https://github.com/GravitLauncher/LauncherDockered',
+      sourceRevision: '723203b56f8d58f2447edd20ac8a5b84a31ef816',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } satisfies GravitInstallation
+    const sourcePath = 'updates/main/.gravit-panel-optional/mods/sodium/sodium.jar'
+    const files = new Map<string, string>([
+      ['profiles/main.json', JSON.stringify({
+        title: 'Main',
+        info: 'Profile',
+        updateOptional: [{
+          name: 'Sodium',
+          info: 'Fast renderer',
+          category: 'Mods',
+          mark: false,
+          visible: true,
+          actions: [{
+            type: 'file',
+            files: {
+              '.gravit-panel-optional/mods/sodium/sodium.jar': 'mods/sodium.jar',
+            },
+          }],
+        }],
+      })],
+      [sourcePath, 'jar'],
+    ])
+    const volume = {
+      exists: async (_installation: GravitInstallation, path: string) => files.has(path),
+      readFile: async (_installation: GravitInstallation, path: string) => files.get(path)!,
+      copy: async (_installation: GravitInstallation, source: string, target: string) => {
+        files.set(target, files.get(source)!)
+      },
+      writeFileAtomic: async (
+        _installation: GravitInstallation,
+        path: string,
+        bytes: Uint8Array,
+      ) => {
+        files.set(path, new TextDecoder().decode(bytes))
+      },
+      remove: async (_installation: GravitInstallation, path: string) => {
+        files.delete(path)
+      },
+    } as unknown as VolumeFileOperations
+    const service = new ClientBuildService(
+      {} as ControlFileService,
+      volume,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { restartLaunchServer: async () => {} },
+    )
+
+    expect((await service.listOptionalMods(installation, 'main')).items[0]).toMatchObject({
+      projectId: 'sodium',
+      name: 'Sodium',
+      description: 'Fast renderer',
+      enabledByDefault: false,
+      destinationPath: 'mods/sodium.jar',
+    })
+
+    await service.updateOptionalMod(
+      installation,
+      'main',
+      {
+        projectId: 'sodium',
+        title: 'Sodium renderer',
+        description: 'Recommended rendering optimization',
+        category: 'Performance',
+        enabledByDefault: true,
+      },
+      context(),
+    )
+    expect((await service.listOptionalMods(installation, 'main')).items[0]).toMatchObject({
+      name: 'Sodium renderer',
+      description: 'Recommended rendering optimization',
+      category: 'Performance',
+      enabledByDefault: true,
+    })
+
+    await service.removeOptionalMod(installation, 'main', 'sodium', context())
+    expect((await service.listOptionalMods(installation, 'main')).items).toEqual([])
+    expect(files.has(sourcePath)).toBe(false)
+  })
+
   test('keeps an already loaded Prestarter module and installs the verified executable', async () => {
     const paths = new Map<string, 'file' | 'directory'>()
     const commands: string[] = []

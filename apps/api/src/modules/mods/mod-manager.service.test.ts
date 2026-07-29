@@ -132,6 +132,7 @@ describe('ModManagerService', () => {
     const installation = installationFor(root)
     const bindingId = crypto.randomUUID()
     const installedOnServer: string[] = []
+    let optionalInputs: unknown[] = []
     let published = 0
     let reloaded = 0
     const service = new ModManagerService(
@@ -152,7 +153,14 @@ describe('ModManagerService', () => {
       } as unknown as ModrinthService,
       localVolume,
       {
-        upsertOptionalMods: async () => ({ profile: {} }),
+        upsertOptionalMods: async (
+          _installation: GravitInstallation,
+          _profile: string,
+          inputs: unknown[],
+        ) => {
+          optionalInputs = inputs
+          return { profile: {} }
+        },
         reloadProfileUpdates: async () => {
           reloaded += 1
         },
@@ -192,7 +200,14 @@ describe('ModManagerService', () => {
           slugs: ['sodium', 'lithium'],
           selections: [
             { slug: 'sodium', clientMode: 'required', serverBindingIds: [bindingId] },
-            { slug: 'lithium', clientMode: 'required', serverBindingIds: [bindingId] },
+            {
+              slug: 'lithium',
+              clientMode: 'optional',
+              optionalEnabledByDefault: true,
+              optionalName: 'Fast server ticks',
+              optionalDescription: 'Optional Lithium optimization',
+              serverBindingIds: [bindingId],
+            },
           ],
         },
         context,
@@ -203,12 +218,160 @@ describe('ModManagerService', () => {
         'utf8',
       )).toBe('mod')
       expect(await readFile(
-        join(root, 'launcher', 'updates', 'fabric', 'mods', 'lithium.jar'),
+        join(
+          root,
+          'launcher',
+          'updates',
+          'fabric',
+          '.gravit-panel-optional',
+          'mods',
+          'lithium',
+          'lithium.jar',
+        ),
         'utf8',
       )).toBe('mod')
-      expect(reloaded).toBe(1)
+      expect(optionalInputs).toEqual([{
+        projectId: 'lithium',
+        title: 'Fast server ticks',
+        description: 'Optional Lithium optimization',
+        filename: 'lithium.jar',
+        sourcePath: '.gravit-panel-optional/mods/lithium/lithium.jar',
+        enabledByDefault: true,
+      }])
+      expect(reloaded).toBe(0)
       expect(installedOnServer).toEqual(['sodium', 'lithium'])
       expect(published).toBe(1)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('imports Modrinth packs with optional client files and server overrides', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gravit-modpack-import-'))
+    const installation = installationFor(root)
+    const bindingId = crypto.randomUUID()
+    const serverFiles: string[] = []
+    let optionalInputs: unknown[] = []
+    const service = new ModManagerService(
+      {} as ControlFileService,
+      {
+        resolveModpack: async () => ({
+          inspection: {
+            projectId: 'pack-id',
+            slug: 'pack',
+            name: 'Test pack',
+            summary: '',
+            versionId: 'version-id',
+            versionName: '1.0.0',
+            minecraftVersion: '1.21.1',
+            loader: 'FABRIC',
+            loaderVersion: '0.16.10',
+            clientOverrideCount: 1,
+            serverOverrideCount: 1,
+            files: [{
+              path: 'mods/example.jar',
+              size: 3,
+              sha1: 'hash',
+              client: 'optional',
+              server: 'required',
+              projectId: 'example-project',
+              name: 'Example',
+              description: 'Example description',
+            }],
+          },
+          files: [{
+            path: 'mods/example.jar',
+            fileSize: 3,
+            hashes: { sha1: 'hash', sha512: 'hash512' },
+            env: { client: 'optional', server: 'required' },
+            downloads: ['https://cdn.modrinth.com/example.jar'],
+          }],
+          overrides: [
+            {
+              side: 'client',
+              path: 'config/client.json',
+              bytes: new TextEncoder().encode('client'),
+            },
+            {
+              side: 'server',
+              path: 'config/server.json',
+              bytes: new TextEncoder().encode('server'),
+            },
+          ],
+        }),
+        downloadPackFile: async () => new TextEncoder().encode('mod'),
+      } as unknown as ModrinthService,
+      localVolume,
+      {
+        upsertOptionalMods: async (
+          _installation: GravitInstallation,
+          _profile: string,
+          inputs: unknown[],
+        ) => {
+          optionalInputs = inputs
+          return { profile: {} }
+        },
+        reloadProfileUpdates: async () => {},
+      } as never,
+      {
+        putFile: async (
+          _installation: GravitInstallation,
+          _bindingId: string,
+          path: string,
+        ) => {
+          serverFiles.push(path)
+          return {}
+        },
+        publish: async () => ({ version: { id: 'pack-version' } }),
+      } as never,
+      {
+        get: () => ({
+          id: bindingId,
+          installationId: installation.id,
+          profileName: 'fabric',
+        }),
+        setDesiredPack: () => null,
+      } as never,
+    )
+
+    try {
+      const result = await service.importModpack(
+        installation,
+        {
+          installationId: installation.id,
+          profile: 'fabric',
+          projectId: 'pack-id',
+          minecraftVersion: '1.21.1',
+          loader: 'FABRIC',
+          serverBindingIds: [bindingId],
+          files: [{
+            path: 'mods/example.jar',
+            clientMode: 'optional',
+            enabledByDefault: true,
+            installOnServer: true,
+            name: 'Custom example',
+            description: 'Shown in the launcher',
+          }],
+        },
+        context,
+      )
+
+      expect(optionalInputs).toEqual([{
+        projectId: 'mrpack-pack-id-f31770ab0b06',
+        title: 'Custom example',
+        description: 'Shown in the launcher',
+        filename: 'example.jar',
+        sourcePath:
+          '.gravit-panel-optional/mods/mrpack-pack-id-f31770ab0b06/example.jar',
+        destinationPath: 'mods/example.jar',
+        enabledByDefault: true,
+      }])
+      expect(serverFiles).toEqual(['mods/example.jar', 'config/server.json'])
+      expect(await readFile(
+        join(root, 'launcher', 'updates', 'fabric', 'config', 'client.json'),
+        'utf8',
+      )).toBe('client')
+      expect(result.serverPackVersionIds).toEqual(['pack-version'])
     } finally {
       await rm(root, { recursive: true, force: true })
     }

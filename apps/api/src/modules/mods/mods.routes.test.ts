@@ -46,6 +46,10 @@ const createHarness = (
     toggle: async () => ({}),
     remove: async () => ({}),
     update: async () => ({}),
+    listOptional: async () => ({ items: [] }),
+    updateOptional: async () => ({}),
+    removeOptional: async () => ({}),
+    importModpack: async () => ({}),
     ...overrides,
   } as unknown as ModManagerService
   const app = new Elysia({ prefix: '/api' }).use(
@@ -59,7 +63,11 @@ const createHarness = (
           .listByStatuses(['queued', 'running'])
           .find((job) => job.input.installationId === id),
       manager,
-      modrinth: { search },
+      modrinth: {
+        search,
+        searchModpacks: search,
+        inspectModpack: async () => ({} as never),
+      },
     }),
   )
 
@@ -135,6 +143,55 @@ describe('mod management API', () => {
         filename: 'sodium.jar',
         minecraftVersion: '1.21.4',
         loader: 'FABRIC',
+      },
+    },
+    {
+      name: 'optional metadata update',
+      path: '/api/mods/optional/update',
+      method: 'updateOptional',
+      type: 'gravit.mods.optional.update',
+      body: {
+        installationId: installation.id,
+        profile: 'fabric',
+        projectId: 'sodium',
+        name: 'Sodium',
+        description: 'Fast renderer',
+        category: 'Performance',
+        enabledByDefault: true,
+      },
+    },
+    {
+      name: 'optional removal',
+      path: '/api/mods/optional/remove',
+      method: 'removeOptional',
+      type: 'gravit.mods.optional.remove',
+      body: {
+        installationId: installation.id,
+        profile: 'fabric',
+        projectId: 'sodium',
+        confirmRemoval: true,
+      },
+    },
+    {
+      name: 'Modrinth modpack import',
+      path: '/api/mods/modpacks/import',
+      method: 'importModpack',
+      type: 'gravit.mods.modpack.import',
+      body: {
+        installationId: installation.id,
+        profile: 'fabric',
+        projectId: 'pack-id',
+        minecraftVersion: '1.21.4',
+        loader: 'FABRIC',
+        serverBindingIds: [],
+        files: [{
+          path: 'mods/sodium.jar',
+          clientMode: 'required',
+          enabledByDefault: false,
+          installOnServer: false,
+          name: 'Sodium',
+          description: 'Renderer',
+        }],
       },
     },
   ])('queues and completes $name exactly once', async ({ path, method, type, body }) => {

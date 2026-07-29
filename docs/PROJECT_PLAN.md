@@ -395,6 +395,19 @@ Modrinth CDN and verified with the API-provided SHA-512. Disable/enable uses
 renames, and removal or replacement moves the old file into recoverable
 profile-local trash.
 
+Modpack import follows the official Modrinth `.mrpack` format version 1:
+the panel resolves the latest compatible modpack version, validates archive and
+manifest paths, limits expanded archive sizes, verifies every downloaded file
+against its declared SHA-512, and applies `overrides`, `client-overrides`, and
+`server-overrides` to their respective managed destinations. Manifest
+`required`, `optional`, and `unsupported` environments prefill the destination
+UI but remain operator-reviewable before the import job starts.
+
+Client optionals are native GravitLauncher `updateOptional` entries verified
+against `GravitLauncher/Launcher@81132768a711a0eab0e8b3b8b6c480b90f48795c`.
+The panel manages their launcher name, description, category, visibility, file
+action, and `mark` default state without introducing a second runtime config.
+
 ### Slice 12: File Auth Recipe
 
 Status: completed.
@@ -541,7 +554,6 @@ Status: completed.
 - Should the panel manage nginx directly or only generate configs?
 - Should the first public version support existing Gravit installs, or only fresh Dockered installs?
 - Should Discord OAuth or community HTTP modules be added next?
-- Should Modrinth operations modify MirrorHelper workspace config or perform direct file operations first?
 
 ## Source Links
 
@@ -557,4 +569,5 @@ Status: completed.
 - Tailwind Vite guide: https://tailwindcss.com/docs
 - shadcn-vue Vite guide: https://www.shadcn-vue.com/docs/installation/vite
 - Modrinth API: https://docs.modrinth.com/api/
+- Modrinth pack format: https://support.modrinth.com/en/articles/8802351-modrinth-modpack-format-mrpack
 - ServerWrapper: https://gravitlauncher.com/serverwrapper/

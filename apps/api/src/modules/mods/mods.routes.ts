@@ -1,4 +1,9 @@
-import type { JobRecord, ModInstallInput } from '@gravit-panel/shared'
+import type {
+  JobRecord,
+  ModInstallInput,
+  ModrinthModpackImportInput,
+  OptionalModUpdateInput,
+} from '@gravit-panel/shared'
 import { Elysia, t } from 'elysia'
 import { installationsStore, controlFileService } from '../gravit/gravit.runtime'
 import type { InstallationsStore } from '../gravit/installations.store'
@@ -44,13 +49,30 @@ const slug = t.String({
   pattern: '^[a-z0-9][a-z0-9_-]*$',
 })
 const filename = t.String({ minLength: 5, maxLength: 255 })
+const projectId = t.String({
+  minLength: 1,
+  maxLength: 64,
+  pattern: '^[A-Za-z0-9_-]+$',
+})
+const packPath = t.String({ minLength: 1, maxLength: 512 })
 
 export interface ModsRoutesDependencies {
   installations: Pick<InstallationsStore, 'get'>
   jobs: Pick<JobsRunner, 'create'>
   activeJob: (installationId: string) => JobRecord | null | undefined
-  manager: Pick<ModManagerService, 'list' | 'install' | 'toggle' | 'remove' | 'update'>
-  modrinth: Pick<ModrinthService, 'search'>
+  manager: Pick<
+    ModManagerService,
+    | 'list'
+    | 'install'
+    | 'toggle'
+    | 'remove'
+    | 'update'
+    | 'listOptional'
+    | 'updateOptional'
+    | 'removeOptional'
+    | 'importModpack'
+  >
+  modrinth: Pick<ModrinthService, 'search' | 'searchModpacks' | 'inspectModpack'>
 }
 
 export const createModsRoutes = ({
@@ -92,6 +114,39 @@ export const createModsRoutes = ({
     },
     { query: t.Object({ installationId, profile }) },
   )
+  .get(
+    '/optional',
+    ({ query, set }) => {
+      const installation = findInstallation(query.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      return manager.listOptional(installation, query.profile)
+    },
+    { query: t.Object({ installationId, profile }) },
+  )
+  .get(
+    '/modpacks/search',
+    ({ query }) =>
+      modrinth.searchModpacks(query.query, query.minecraftVersion, query.loader),
+    {
+      query: t.Object({
+        query: t.String({ minLength: 1, maxLength: 100 }),
+        minecraftVersion,
+        loader,
+      }),
+    },
+  )
+  .get(
+    '/modpacks/inspect',
+    ({ query }) =>
+      modrinth.inspectModpack(
+        query.projectId,
+        query.minecraftVersion,
+        query.loader,
+      ),
+    {
+      query: t.Object({ projectId, minecraftVersion, loader }),
+    },
+  )
   .post(
     '/install',
     ({ body, set }) => {
@@ -126,8 +181,123 @@ export const createModsRoutes = ({
             t.Literal('optional'),
             t.Literal('none'),
           ]),
+          optionalEnabledByDefault: t.Optional(t.Boolean()),
+          optionalName: t.Optional(t.String({ minLength: 1, maxLength: 80 })),
+          optionalDescription: t.Optional(t.String({ maxLength: 500 })),
           serverBindingIds: t.Array(t.String({ format: 'uuid' }), { maxItems: 32 }),
         }), { minItems: 1, maxItems: 64 })),
+      }),
+    },
+  )
+  .post(
+    '/optional/update',
+    ({ body, set }) => {
+      const input = body as OptionalModUpdateInput
+      const installation = findInstallation(input.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = activeJob(installation.id)
+      if (conflict) {
+        set.status = 409
+        return { message: 'Another mod operation is active.', jobId: conflict.id }
+      }
+      const job = jobs.create(
+        'gravit.mods.optional.update',
+        { ...input },
+        `Optional mod ${input.name} update queued`,
+        async (context) => ({ ...(await manager.updateOptional(installation, input, context)) }),
+      )
+      set.status = 202
+      return job
+    },
+    {
+      body: t.Object({
+        installationId,
+        profile,
+        projectId,
+        name: t.String({ minLength: 1, maxLength: 80 }),
+        description: t.String({ maxLength: 500 }),
+        category: t.String({ minLength: 1, maxLength: 40 }),
+        enabledByDefault: t.Boolean(),
+      }),
+    },
+  )
+  .post(
+    '/optional/remove',
+    ({ body, set }) => {
+      const installation = findInstallation(body.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = activeJob(installation.id)
+      if (conflict) {
+        set.status = 409
+        return { message: 'Another mod operation is active.', jobId: conflict.id }
+      }
+      const job = jobs.create(
+        'gravit.mods.optional.remove',
+        { ...body },
+        'Optional mod removal queued',
+        async (context) => ({
+          ...(await manager.removeOptional(
+            installation,
+            body.profile,
+            body.projectId,
+            context,
+          )),
+        }),
+      )
+      set.status = 202
+      return job
+    },
+    {
+      body: t.Object({
+        installationId,
+        profile,
+        projectId,
+        confirmRemoval: t.Literal(true),
+      }),
+    },
+  )
+  .post(
+    '/modpacks/import',
+    ({ body, set }) => {
+      const input = body as ModrinthModpackImportInput
+      const installation = findInstallation(input.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = activeJob(installation.id)
+      if (conflict) {
+        set.status = 409
+        return { message: 'Another mod operation is active.', jobId: conflict.id }
+      }
+      const job = jobs.create(
+        'gravit.mods.modpack.import',
+        { ...input },
+        'Modrinth modpack import queued',
+        async (context) => ({
+          ...(await manager.importModpack(installation, input, context)),
+        }),
+      )
+      set.status = 202
+      return job
+    },
+    {
+      body: t.Object({
+        installationId,
+        profile,
+        projectId,
+        minecraftVersion,
+        loader,
+        serverBindingIds: t.Array(t.String({ format: 'uuid' }), { maxItems: 32 }),
+        files: t.Array(t.Object({
+          path: packPath,
+          clientMode: t.Union([
+            t.Literal('required'),
+            t.Literal('optional'),
+            t.Literal('none'),
+          ]),
+          enabledByDefault: t.Boolean(),
+          installOnServer: t.Boolean(),
+          name: t.String({ minLength: 1, maxLength: 80 }),
+          description: t.String({ maxLength: 500 }),
+        }), { minItems: 1, maxItems: 2_000 }),
       }),
     },
   )

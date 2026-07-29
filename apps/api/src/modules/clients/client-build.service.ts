@@ -15,6 +15,7 @@ import type {
   LauncherCustomizationResult,
   LauncherCustomizationState,
   LauncherRuntimeInstallResult,
+  OptionalMod,
   PrestarterInstallResult,
   ProfileServer,
   WorkspaceApplyResult,
@@ -137,6 +138,36 @@ interface LaunchProfileServer {
   isDefault?: unknown
   protocol?: unknown
   socketPing?: unknown
+}
+
+const optionalFileAction = (item: Record<string, unknown>) => {
+  if (!Array.isArray(item.actions)) return null
+  for (const action of item.actions) {
+    if (!action || typeof action !== 'object' || Array.isArray(action)) continue
+    const files = (action as Record<string, unknown>).files
+    if (!files || typeof files !== 'object' || Array.isArray(files)) continue
+    for (const [sourcePath, destination] of Object.entries(files)) {
+      if (
+        sourcePath.startsWith('.gravit-panel-optional/') &&
+        typeof destination === 'string'
+      ) {
+        return {
+          sourcePath,
+          filename: basename(destination),
+          destinationPath: destination,
+        }
+      }
+    }
+  }
+  return null
+}
+
+const optionalProjectId = (item: Record<string, unknown>) => {
+  const file = optionalFileAction(item)
+  if (!file) return null
+  const parts = file.sourcePath.split('/')
+  const marker = parts.indexOf('mods')
+  return marker >= 0 && parts[marker + 1] ? parts[marker + 1] : null
 }
 
 const profileUuidPattern =
@@ -442,7 +473,10 @@ export class ClientBuildService {
       title: string
       filename: string
       sourcePath: string
+      destinationPath?: string
       enabledByDefault?: boolean
+      description?: string
+      category?: string
     }>,
     context: JobTaskContext,
   ) {
@@ -455,21 +489,34 @@ export class ClientBuildService {
             Boolean(item && typeof item === 'object' && !Array.isArray(item)),
         )
       : []
-    const optionalNames = new Set(inputs.map((input) => `modrinth:${input.projectId}`))
+    const projectIds = new Set(inputs.map((input) => input.projectId))
     const nextOptional = existing.filter(
-      (item) => typeof item.name !== 'string' || !optionalNames.has(item.name),
+      (item) => {
+        const projectId = optionalProjectId(item)
+        return !projectId || !projectIds.has(projectId)
+      },
+    )
+    const usedNames = new Set(
+      nextOptional.flatMap((item) =>
+        typeof item.name === 'string' ? [item.name.toLowerCase()] : []),
     )
     for (const input of inputs) {
+      const requestedTitle = input.title.trim() || input.projectId
+      let title = requestedTitle
+      if (usedNames.has(title.toLowerCase())) {
+        title = `${requestedTitle} (${input.projectId.slice(0, 8)})`
+      }
+      usedNames.add(title.toLowerCase())
       nextOptional.push({
-        name: `modrinth:${input.projectId}`,
-        info: input.title,
-        category: 'Mods',
+        name: title,
+        info: input.description ?? '',
+        category: input.category ?? 'Mods',
         visible: true,
         mark: input.enabledByDefault ?? false,
         actions: [{
           type: 'file',
           files: {
-            [input.sourcePath]: `mods/${input.filename}`,
+            [input.sourcePath]: input.destinationPath ?? `mods/${input.filename}`,
           },
         }],
       })
@@ -509,11 +556,178 @@ export class ClientBuildService {
       title: string
       filename: string
       sourcePath: string
+      destinationPath?: string
       enabledByDefault?: boolean
+      description?: string
+      category?: string
     },
     context: JobTaskContext,
   ) {
     return this.upsertOptionalMods(installation, name, [input], context)
+  }
+
+  async listOptionalMods(
+    installation: GravitInstallation,
+    name: string,
+  ): Promise<{ items: OptionalMod[] }> {
+    this.validateProfile(name)
+    const current = await this.readProfileConfig(installation, name)
+    const optional = Array.isArray(current.profile.updateOptional)
+      ? current.profile.updateOptional
+      : []
+    return {
+      items: optional.flatMap((value): OptionalMod[] => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+        const item = value as Record<string, unknown>
+        const projectId = optionalProjectId(item)
+        const file = optionalFileAction(item)
+        if (!projectId || !file) return []
+        return [{
+          projectId,
+          name: typeof item.name === 'string' ? item.name : file.filename,
+          description: typeof item.info === 'string' ? item.info : '',
+          category: typeof item.category === 'string' ? item.category : 'Mods',
+          enabledByDefault: item.mark === true,
+          filename: file.filename,
+          sourcePath: file.sourcePath,
+          destinationPath: file.destinationPath,
+        }]
+      }),
+    }
+  }
+
+  async updateOptionalMod(
+    installation: GravitInstallation,
+    name: string,
+    input: {
+      projectId: string
+      title: string
+      description: string
+      category: string
+      enabledByDefault: boolean
+    },
+    context: JobTaskContext,
+  ) {
+    const current = await this.readProfileConfig(installation, name)
+    const title = input.title.trim()
+    const description = input.description.trim()
+    const category = input.category.trim()
+    if (!title || title.length > 80) throw new Error('Optional mod name must be 1-80 characters')
+    if (description.length > 500) throw new Error('Optional mod description is too long')
+    if (!category || category.length > 40) {
+      throw new Error('Optional mod category must be 1-40 characters')
+    }
+    const optional = Array.isArray(current.profile.updateOptional)
+      ? current.profile.updateOptional
+      : []
+    if (optional.some((value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+      const item = value as Record<string, unknown>
+      return optionalProjectId(item) !== input.projectId &&
+        typeof item.name === 'string' &&
+        item.name.toLowerCase() === title.toLowerCase()
+    })) throw new Error('Another optional mod already uses this name')
+    let found = false
+    const nextOptional = optional.map((value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+      const item = value as Record<string, unknown>
+      if (optionalProjectId(item) !== input.projectId) return item
+      found = true
+      return {
+        ...item,
+        name: title,
+        info: description,
+        category,
+        mark: input.enabledByDefault,
+      }
+    })
+    if (!found) throw new Error('Optional mod was not found in this profile')
+    await this.writeOptionalProfile(
+      installation,
+      name,
+      current,
+      nextOptional,
+      context,
+    )
+    return this.listOptionalMods(installation, name)
+  }
+
+  async removeOptionalMod(
+    installation: GravitInstallation,
+    name: string,
+    projectId: string,
+    context: JobTaskContext,
+  ) {
+    const current = await this.readProfileConfig(installation, name)
+    const optional = Array.isArray(current.profile.updateOptional)
+      ? current.profile.updateOptional
+      : []
+    const removed = optional.find(
+      (value) =>
+        Boolean(value && typeof value === 'object' && optionalProjectId(
+          value as Record<string, unknown>,
+        ) === projectId),
+    )
+    if (!removed || typeof removed !== 'object') {
+      throw new Error('Optional mod was not found in this profile')
+    }
+    const file = optionalFileAction(removed as Record<string, unknown>)
+    const nextOptional = optional.filter(
+      (value) =>
+        !value ||
+        typeof value !== 'object' ||
+        optionalProjectId(value as Record<string, unknown>) !== projectId,
+    )
+    await this.writeOptionalProfile(
+      installation,
+      name,
+      current,
+      nextOptional,
+      context,
+    )
+    if (file) {
+      await this.volume.remove(
+        installation,
+        join('updates', name, file.sourcePath),
+      )
+    }
+    return { projectId }
+  }
+
+  private async writeOptionalProfile(
+    installation: GravitInstallation,
+    name: string,
+    current: { profile: LaunchProfileConfig; raw: string },
+    updateOptional: unknown[],
+    context: JobTaskContext,
+  ) {
+    const path = join('profiles', `${name}.json`)
+    const backupRelativePath = join(
+      '.gravit-panel-profile-backups',
+      `${name}.optional-${safeTimestamp()}.json`,
+    )
+    await this.volume.copy(installation, path, backupRelativePath)
+    await this.volume.writeFileAtomic(
+      installation,
+      path,
+      new TextEncoder().encode(`${JSON.stringify({
+        ...current.profile,
+        updateOptional,
+      }, null, 2)}\n`),
+      '0644',
+    )
+    try {
+      await this.reloadProfilesAndUpdates(installation, context, 80)
+    } catch (error) {
+      await this.volume.writeFileAtomic(
+        installation,
+        path,
+        new TextEncoder().encode(current.raw),
+        '0644',
+      )
+      await this.reloadProfilesAndUpdates(installation, context, 90).catch(() => {})
+      throw error
+    }
   }
 
   async reloadProfileUpdates(

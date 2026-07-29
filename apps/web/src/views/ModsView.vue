@@ -98,6 +98,17 @@
       </CardContent>
     </Card>
 
+    <ModpackImportCard
+      :installation-id="installationId"
+      :profile="profile"
+      :minecraft-version="version"
+      :loader="loader"
+      :servers="managedServers"
+      :disabled="operationPending || !targetReady"
+      @job="attachJob"
+      @error="childError = $event"
+    />
+
     <div class="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(22rem,0.8fr)]">
       <Card>
         <CardHeader>
@@ -136,50 +147,72 @@
                 v-if="selectedSlugs.includes(item.slug)"
                 class="mt-3 space-y-3 border-t pt-3 text-xs"
               >
-                <div class="flex flex-wrap gap-4">
-                  <label class="flex items-center gap-2">
-                    <Checkbox
-                      :model-value="targetFor(item).clientMode === 'required'"
-                      :disabled="item.clientSide === 'unsupported'"
-                      @update:model-value="setClientMode(item, $event ? 'required' : 'none')"
-                    />
-                    Client
-                  </label>
-                  <label class="flex items-center gap-2">
-                    <Checkbox
-                      :model-value="targetFor(item).clientMode === 'optional'"
-                      :disabled="item.clientSide === 'unsupported'"
-                      @update:model-value="setClientMode(item, $event ? 'optional' : 'none')"
-                    />
-                    Optional client
-                  </label>
-                  <Badge variant="outline">
-                    client {{ item.clientSide ?? 'unknown' }} · server
-                    {{ item.serverSide ?? 'unknown' }}
-                  </Badge>
-                </div>
-                <div>
-                  <p class="mb-2 font-medium">Install on servers</p>
-                  <p
-                    v-if="!managedServers.length"
-                    class="text-muted-foreground"
-                  >
-                    No managed servers for this profile.
-                  </p>
-                  <div class="flex flex-wrap gap-3">
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <div class="space-y-3 rounded-lg border bg-background p-3">
+                    <div class="flex items-center justify-between gap-3">
+                      <div>
+                        <p class="font-medium">Client files</p>
+                        <p class="text-[11px] text-muted-foreground">
+                          Modrinth: {{ item.clientSide ?? 'unknown' }}
+                        </p>
+                      </div>
+                      <Switch
+                        :model-value="targetFor(item).clientMode !== 'none'"
+                        :disabled="item.clientSide === 'unsupported'"
+                        @update:model-value="setClientMode(item, $event ? 'required' : 'none')"
+                      />
+                    </div>
+                    <div
+                      v-if="targetFor(item).clientMode !== 'none'"
+                      class="flex items-center justify-between gap-3"
+                    >
+                      <span>Optional in launcher</span>
+                      <Switch
+                        :model-value="targetFor(item).clientMode === 'optional'"
+                        @update:model-value="setClientMode(item, $event ? 'optional' : 'required')"
+                      />
+                    </div>
+                    <div
+                      v-if="targetFor(item).clientMode === 'optional'"
+                      class="flex items-center justify-between gap-3"
+                    >
+                      <span>Enabled by default</span>
+                      <Switch v-model="targetFor(item).optionalEnabledByDefault" />
+                    </div>
+                  </div>
+                  <div class="space-y-2 rounded-lg border bg-background p-3">
+                    <div>
+                      <p class="font-medium">Server files</p>
+                      <p class="text-[11px] text-muted-foreground">
+                        Modrinth: {{ item.serverSide ?? 'unknown' }}
+                      </p>
+                    </div>
+                    <p v-if="!managedServers.length" class="text-muted-foreground">
+                      No managed servers for this profile.
+                    </p>
                     <label
                       v-for="server in managedServers"
                       :key="server.id!"
-                      class="flex items-center gap-2"
+                      class="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
                     >
-                      <Checkbox
+                      <span>{{ server.name }}</span>
+                      <Switch
                         :model-value="targetFor(item).serverBindingIds.includes(server.id!)"
                         :disabled="item.serverSide === 'unsupported'"
                         @update:model-value="toggleServerTarget(item, server.id!)"
                       />
-                      {{ server.name }}
                     </label>
                   </div>
+                </div>
+                <div
+                  v-if="targetFor(item).clientMode === 'optional'"
+                  class="grid gap-2 sm:grid-cols-2"
+                >
+                  <Input v-model="targetFor(item).optionalName" placeholder="Launcher display name" />
+                  <Input
+                    v-model="targetFor(item).optionalDescription"
+                    placeholder="Optional mod description"
+                  />
                 </div>
               </div>
             </div>
@@ -253,6 +286,14 @@
       </Card>
     </div>
 
+    <OptionalModsCard
+      :installation-id="installationId"
+      :profile="profile"
+      :disabled="operationPending || !stateReady"
+      @job="attachJob"
+      @error="childError = $event"
+    />
+
     <JobLogCard :job="activeJob" title="Mod operation" @finished="jobFinished" />
   </section>
 </template>
@@ -260,6 +301,8 @@
 <script setup lang="ts">
 import MinecraftVersionCombobox from '@/components/clients/MinecraftVersionCombobox.vue'
 import JobLogCard from '@/components/jobs/JobLogCard.vue'
+import ModpackImportCard from '@/components/mods/ModpackImportCard.vue'
+import OptionalModsCard from '@/components/mods/OptionalModsCard.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -272,6 +315,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { useInstallationJob } from '@/composables/useInstallationJob'
 import { useClientProfiles } from '@/composables/useClientProfiles'
 import { useLaunchServerStore } from '@/stores/launchserver'
@@ -297,6 +341,7 @@ const loader = ref<MinecraftLoader>('FABRIC')
 const constraintsLocked = ref(true)
 const searchText = ref('')
 const selectedSlugs = ref<string[]>([])
+const childError = ref<Error | null>(null)
 const selectionTargets = reactive<Record<string, ModInstallSelection>>({})
 const {
   activeJob,
@@ -310,6 +355,9 @@ const {
     'gravit.mods.update',
     'gravit.mods.toggle',
     'gravit.mods.remove',
+    'gravit.mods.optional.update',
+    'gravit.mods.optional.remove',
+    'gravit.mods.modpack.import',
   ],
 )
 watch(installationId, () => {
@@ -424,6 +472,9 @@ const defaultTargets = (item: ModrinthProject): ModInstallSelection => ({
     item.serverSide === 'required'
       ? managedServers.value.flatMap((server) => server.id ? [server.id] : [])
       : [],
+  optionalEnabledByDefault: false,
+  optionalName: item.title,
+  optionalDescription: item.description,
 })
 const targetFor = (item: ModrinthProject) =>
   selectionTargets[item.slug] ?? (selectionTargets[item.slug] = defaultTargets(item))
@@ -502,6 +553,9 @@ const jobFinished = async (job: JobRecord) => {
   })
   await queryClient.invalidateQueries({ queryKey: ['server-pack'] })
   await queryClient.invalidateQueries({ queryKey: ['server-bindings'] })
+  await queryClient.invalidateQueries({
+    queryKey: ['optional-mods', installationId.value, profile.value],
+  })
 }
 const pageError = computed(
   () => (
@@ -511,6 +565,7 @@ const pageError = computed(
     versionsError.value ||
     profilesError.value ||
     activeJobError.value
+    || childError.value
   ) as Error | null,
 )
 const formatBytes = (value: number) =>

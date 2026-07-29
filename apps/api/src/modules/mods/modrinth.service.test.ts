@@ -37,6 +37,21 @@ describe('ModrinthService', () => {
     expect(result.items[0]?.serverSide).toBe('optional')
   })
 
+  test('searches compatible Modrinth modpack projects separately from mods', async () => {
+    let requestedUrl = ''
+    const service = new ModrinthService((async (input: RequestInfo | URL) => {
+      requestedUrl = input.toString()
+      return Response.json({ hits: [] })
+    }) as typeof fetch)
+
+    await service.searchModpacks('adventure', '1.21.1', 'NEOFORGE')
+
+    const facets = new URL(requestedUrl).searchParams.get('facets') ?? ''
+    expect(facets).toContain('project_type:modpack')
+    expect(facets).toContain('categories:neoforge')
+    expect(facets).toContain('versions:1.21.1')
+  })
+
   test('verifies sha512 before returning a downloaded mod', async () => {
     const bytes = new TextEncoder().encode('verified-mod')
     const hash = new Bun.CryptoHasher('sha512').update(bytes).digest('hex')

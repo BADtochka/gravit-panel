@@ -2,6 +2,8 @@ import type {
   GravitInstallation,
   InstalledMod,
   ModInstallInput,
+  ModrinthModpackImportInput,
+  OptionalModUpdateInput,
 } from '@gravit-panel/shared'
 import { createHash } from 'node:crypto'
 import { lstat, readFile, readdir } from 'node:fs/promises'
@@ -31,9 +33,16 @@ export class ModManagerService {
     private readonly volume: VolumeFileOperations = new ContainerVolumeService(),
     private readonly clients?: Pick<
       ClientBuildService,
-      'upsertOptionalMods' | 'reloadProfileUpdates'
+      | 'upsertOptionalMods'
+      | 'reloadProfileUpdates'
+      | 'listOptionalMods'
+      | 'updateOptionalMod'
+      | 'removeOptionalMod'
     >,
-    private readonly serverPacks?: Pick<ServerPackService, 'installMod' | 'publish'>,
+    private readonly serverPacks?: Pick<
+      ServerPackService,
+      'installMod' | 'putFile' | 'publish'
+    >,
     private readonly serverBindings?: Pick<ServerBindingsStore, 'get' | 'setDesiredPack'>,
   ) {}
 
@@ -114,8 +123,10 @@ export class ModManagerService {
       const optionalClientMods = new Map<string, {
         projectId: string
         title: string
+        description: string
         filename: string
         sourcePath: string
+        enabledByDefault: boolean
       }>()
       for (const selection of clientSelections) {
         const resolved = await this.modrinth.resolveInstall(
@@ -152,9 +163,11 @@ export class ModManagerService {
             )
             optionalClientMods.set(item.projectId, {
               projectId: item.projectId,
-              title: item.title,
+              title: selection.optionalName?.trim() || item.title,
+              description: selection.optionalDescription?.trim() || '',
               filename: item.file.filename,
               sourcePath,
+              enabledByDefault: selection.optionalEnabledByDefault ?? false,
             })
           }
         }
@@ -166,8 +179,7 @@ export class ModManagerService {
           [...optionalClientMods.values()],
           context,
         )
-      }
-      if (requiredClientChanged) {
+      } else if (requiredClientChanged) {
         await this.clients.reloadProfileUpdates(installation, context, 85)
       }
       const serverSelections = new Map<string, Set<string>>()
@@ -229,6 +241,190 @@ export class ModManagerService {
       installed: state.items,
       requestedSlugs: input.slugs,
       source: modrinthSource,
+    }
+  }
+
+  async listOptional(installation: GravitInstallation, profile: string) {
+    if (!this.clients) throw new Error('Optional mod management is unavailable')
+    return this.clients.listOptionalMods(installation, profile)
+  }
+
+  async updateOptional(
+    installation: GravitInstallation,
+    input: OptionalModUpdateInput,
+    context: JobTaskContext,
+  ) {
+    if (!this.clients) throw new Error('Optional mod management is unavailable')
+    return this.clients.updateOptionalMod(
+      installation,
+      input.profile,
+      {
+        projectId: input.projectId,
+        title: input.name,
+        description: input.description,
+        category: input.category,
+        enabledByDefault: input.enabledByDefault,
+      },
+      context,
+    )
+  }
+
+  async removeOptional(
+    installation: GravitInstallation,
+    profile: string,
+    projectId: string,
+    context: JobTaskContext,
+  ) {
+    if (!this.clients) throw new Error('Optional mod management is unavailable')
+    return this.clients.removeOptionalMod(installation, profile, projectId, context)
+  }
+
+  async importModpack(
+    installation: GravitInstallation,
+    input: ModrinthModpackImportInput,
+    context: JobTaskContext,
+  ) {
+    this.validateProfile(input.profile)
+    if (!this.clients || !this.serverPacks || !this.serverBindings) {
+      throw new Error('Modpack destinations are unavailable')
+    }
+    context.progress(5, 'Resolving and validating Modrinth modpack')
+    const pack = await this.modrinth.resolveModpack(
+      input.projectId,
+      input.minecraftVersion,
+      input.loader,
+    )
+    const selections = new Map(input.files.map((item) => [item.path, item]))
+    if (
+      selections.size !== input.files.length ||
+      pack.files.length !== selections.size ||
+      pack.files.some((file) => !selections.has(file.path))
+    ) {
+      throw new Error('Modpack file selections do not match the resolved version')
+    }
+    const bindings = [...new Set(input.serverBindingIds)].map((bindingId) => {
+      const binding = this.serverBindings!.get(bindingId)
+      if (
+        !binding ||
+        binding.installationId !== installation.id ||
+        binding.profileName !== input.profile
+      ) throw new Error('Selected server does not belong to the target profile')
+      return binding
+    })
+    let clientChanged = false
+    let serverChanged = false
+    const optionals = new Map<string, {
+      projectId: string
+      title: string
+      description: string
+      filename: string
+      sourcePath: string
+      destinationPath?: string
+      enabledByDefault: boolean
+    }>()
+    context.progress(15, `Installing ${pack.files.length} modpack files`)
+    for (const file of pack.files) {
+      const selection = selections.get(file.path)!
+      const clientSide = file.env?.client ?? 'required'
+      const serverSide = file.env?.server ?? 'required'
+      if (selection.clientMode !== 'none' && clientSide === 'unsupported') {
+        throw new Error(`Client-unsupported file selected for client: ${file.path}`)
+      }
+      if (selection.installOnServer && serverSide === 'unsupported') {
+        throw new Error(`Server-unsupported file selected for server: ${file.path}`)
+      }
+      if (selection.clientMode === 'none' && !selection.installOnServer) continue
+      const bytes = await this.modrinth.downloadPackFile(file)
+      if (selection.clientMode === 'required') {
+        await this.volume.writeFileAtomic(
+          installation,
+          posix.join('updates', input.profile, file.path),
+          bytes,
+          '0644',
+        )
+        clientChanged = true
+      } else if (selection.clientMode === 'optional') {
+        const identity = pack.inspection.files.find((item) => item.path === file.path)
+        const projectId = `mrpack-${pack.inspection.projectId}-${
+          createHash('sha1').update(file.path).digest('hex').slice(0, 12)
+        }`
+        const sourcePath = posix.join(
+          '.gravit-panel-optional',
+          'mods',
+          projectId,
+          basename(file.path),
+        )
+        await this.volume.writeFileAtomic(
+          installation,
+          posix.join('updates', input.profile, sourcePath),
+          bytes,
+          '0644',
+        )
+        optionals.set(projectId, {
+          projectId,
+          title: selection.name.trim() || identity?.name || basename(file.path),
+          description: selection.description.trim() || identity?.description || '',
+          filename: basename(file.path),
+          sourcePath,
+          destinationPath: file.path,
+          enabledByDefault: selection.enabledByDefault,
+        })
+      }
+      if (selection.installOnServer) {
+        for (const binding of bindings) {
+          await this.serverPacks.putFile(installation, binding.id!, file.path, bytes)
+          serverChanged = true
+        }
+      }
+    }
+    context.progress(65, 'Applying Modrinth modpack overrides')
+    for (const override of pack.overrides) {
+      if (override.side !== 'server') {
+        await this.volume.writeFileAtomic(
+          installation,
+          posix.join('updates', input.profile, override.path),
+          override.bytes,
+          '0644',
+        )
+        clientChanged = true
+      }
+      if (override.side !== 'client') {
+        for (const binding of bindings) {
+          await this.serverPacks.putFile(
+            installation,
+            binding.id!,
+            override.path,
+            override.bytes,
+          )
+          serverChanged = true
+        }
+      }
+    }
+    if (optionals.size) {
+      await this.clients.upsertOptionalMods(
+        installation,
+        input.profile,
+        [...optionals.values()],
+        context,
+      )
+    } else if (clientChanged) {
+      await this.clients.reloadProfileUpdates(installation, context, 82)
+    }
+    const packVersions = []
+    if (serverChanged) {
+      for (const binding of bindings) {
+        const published = await this.serverPacks.publish(installation, binding.id!, context)
+        this.serverBindings.setDesiredPack(binding.id!, published.version.id)
+        packVersions.push(published.version.id)
+      }
+    }
+    context.progress(98, `Imported ${pack.inspection.name}`)
+    return {
+      installationId: installation.id,
+      profile: input.profile,
+      modpack: pack.inspection,
+      optionalCount: optionals.size,
+      serverPackVersionIds: packVersions,
     }
   }
 
