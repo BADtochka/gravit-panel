@@ -343,7 +343,7 @@ export class ModrinthService {
       file: ModrinthVersion['files'][number]
     }> = []
     const visited = new Set<string>()
-    const visit = async (projectRef: string) => {
+    const visit = async (projectRef: string, root = false) => {
       if (visited.has(projectRef)) return
       if (visited.size >= 64) throw new Error('Modrinth dependency graph exceeds 64 projects')
       visited.add(projectRef)
@@ -357,6 +357,7 @@ export class ModrinthService {
       const project = (await projectResponse.json()) as ModrinthProjectDetail
       const side = target === 'server' ? project.server_side : project.client_side
       if (side === 'unsupported') {
+        if (!root) return
         throw new Error(`${project.slug} is marked as unsupported on the ${target}`)
       }
       const versionsUrl = new URL(
@@ -366,7 +367,7 @@ export class ModrinthService {
       versionsUrl.searchParams.set('game_versions', JSON.stringify([minecraftVersion]))
       const versionsResponse = await this.fetcher(versionsUrl, { headers: requestHeaders })
       if (!versionsResponse.ok) {
-        throw new Error(`Failed to resolve a server version for ${project.slug}`)
+        throw new Error(`Failed to resolve a ${target} version for ${project.slug}`)
       }
       const versions = (await versionsResponse.json()) as ModrinthVersion[]
       const version = versions[0]
@@ -376,7 +377,7 @@ export class ModrinthService {
       for (const dependency of version.dependencies ?? []) {
         if (dependency.dependency_type !== 'required') continue
         if (dependency.project_id) {
-          await visit(dependency.project_id)
+          await visit(dependency.project_id, false)
           continue
         }
         if (!dependency.version_id) continue
@@ -388,7 +389,7 @@ export class ModrinthService {
           throw new Error(`Failed to resolve required Modrinth dependency ${dependency.version_id}`)
         }
         const dependencyVersion = (await dependencyResponse.json()) as ModrinthVersion
-        await visit(dependencyVersion.project_id)
+        await visit(dependencyVersion.project_id, false)
       }
       const file = version.files.find((item) => item.primary) ?? version.files[0]
       if (!file) throw new Error(`${project.slug} version does not contain a downloadable file`)
@@ -400,7 +401,7 @@ export class ModrinthService {
         file,
       })
     }
-    await visit(slug)
+    await visit(slug, true)
     return resolved
   }
 
