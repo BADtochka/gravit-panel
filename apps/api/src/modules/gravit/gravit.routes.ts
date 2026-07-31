@@ -1,5 +1,7 @@
 import type {
+  GravitInstallation,
   JobRecord,
+  JobType,
   LaunchServerInspectionCommand,
   RemoteControlSetupInput,
 } from '@gravit-panel/shared'
@@ -8,9 +10,9 @@ import { env } from '../../core/env'
 import type { CredentialCipher } from '../../core/credential-cipher'
 import type { CredentialKeyService } from '../../core/credential-key.service'
 import type { JobsRunner } from '../jobs/jobs.runner'
+import type { JobTaskContext } from '../jobs/jobs.runner'
 import { activeJobForInstallation, jobsRunner } from '../jobs/jobs.runtime'
 import { launchServerCommands } from './commands'
-import { ControlFileBusyError } from './control-file.service'
 import {
   controlFileService,
   credentialCipher,
@@ -21,7 +23,7 @@ import {
   remoteControlStore,
 } from './gravit.runtime'
 import type { InstallationsStore } from './installations.store'
-import type { LaunchServerTransportService } from './launchserver-transport.service'
+import { LaunchServerOperationsService } from './launchserver-operations.service'
 import { remoteControlSource } from './remote-control-http.service'
 import type { RemoteControlSetupService } from './remote-control-setup.service'
 import type { RemoteControlStore } from './remote-control.store'
@@ -34,7 +36,10 @@ export interface GravitRoutesDependencies {
   cipher: Pick<CredentialCipher, 'configured'>
   keyService: Pick<CredentialKeyService, 'status' | 'generate'>
   installations: Pick<InstallationsStore, 'get'>
-  transport: Pick<LaunchServerTransportService, 'execute'>
+  operations: Pick<
+    LaunchServerOperationsService,
+    'inspect' | 'syncProfiles'
+  >
   remoteSetup: Pick<RemoteControlSetupService, 'setup'>
   remoteStore: Pick<
     RemoteControlStore,
@@ -49,33 +54,59 @@ export const createGravitRoutes = ({
   cipher,
   keyService,
   installations,
-  transport,
+  operations,
   remoteSetup,
   remoteStore,
   jobs,
   activeJob,
   remoteControlDefaultEndpoint = env.REMOTE_CONTROL_ENDPOINT,
 }: GravitRoutesDependencies) => {
-  const executeInspection = async (
+  const createOperation = (
+    type: JobType,
     installationId: string,
-    command: LaunchServerInspectionCommand,
     set: { status?: number | string },
+    queuedMessage: string,
+    task: (
+      installation: GravitInstallation,
+      context: JobTaskContext,
+    ) => Promise<Record<string, unknown>>,
   ) => {
     const installation = installations.get(installationId)
     if (!installation) {
       set.status = 404
       return { message: 'LauncherDockered installation not found.' }
     }
-
-    try {
-      return await transport.execute(installation, command)
-    } catch (error) {
-      set.status = error instanceof ControlFileBusyError ? 409 : 503
+    const conflictingJob = activeJob(installation.id)
+    if (conflictingJob) {
+      set.status = 409
       return {
-        message: error instanceof Error ? error.message : String(error),
+        message: 'Another machine operation is already active for this installation.',
+        jobId: conflictingJob.id,
       }
     }
+    const job = jobs.create(
+      type,
+      { installationId: installation.id },
+      queuedMessage,
+      (context) => task(installation, context),
+    )
+    set.status = 202
+    return job
   }
+
+  const createInspection = (
+    installationId: string,
+    command: LaunchServerInspectionCommand,
+    set: { status?: number | string },
+  ) => createOperation(
+    command === 'serverStatus'
+      ? 'gravit.launchserver.status'
+      : 'gravit.launchserver.securitycheck',
+    installationId,
+    set,
+    `${command} queued`,
+    async (installation, context) => operations.inspect(installation, command, context),
+  )
 
   return new Elysia({ prefix: '/gravit' })
   .get('/commands', () => launchServerCommands)
@@ -165,57 +196,37 @@ export const createGravitRoutes = ({
   )
   .post(
     '/status',
-    ({ body, set }) => executeInspection(body.installationId, 'serverStatus', set),
+    ({ body, set }) => createInspection(body.installationId, 'serverStatus', set),
     { body: installationBody },
   )
   .post(
     '/securitycheck',
-    ({ body, set }) => executeInspection(body.installationId, 'securitycheck', set),
+    ({ body, set }) => createInspection(body.installationId, 'securitycheck', set),
     { body: installationBody },
   )
   .post(
     '/sync-profiles',
-    async ({ body, set }) => {
-      const installation = installations.get(body.installationId)
-      if (!installation) {
-        set.status = 404
-        return { message: 'LauncherDockered installation not found.' }
-      }
-      try {
-        const lines = await controlFileService.syncProfileProvider(installation)
-        return { installationId: installation.id, lines }
-      } catch (error) {
-        set.status = error instanceof ControlFileBusyError ? 409 : 503
-        return { message: error instanceof Error ? error.message : String(error) }
-      }
-    },
-    { body: installationBody },
-  )
-  .post(
-    '/reload-config',
-    async ({ body, set }) => {
-      const installation = installations.get(body.installationId)
-      if (!installation) {
-        set.status = 404
-        return { message: 'LauncherDockered installation not found.' }
-      }
-      try {
-        const lines = await controlFileService.reloadLaunchServerConfig(installation)
-        return { installationId: installation.id, lines }
-      } catch (error) {
-        set.status = error instanceof ControlFileBusyError ? 409 : 503
-        return { message: error instanceof Error ? error.message : String(error) }
-      }
-    },
+    ({ body, set }) => createOperation(
+      'gravit.launchserver.profiles.sync',
+      body.installationId,
+      set,
+      'LaunchServer profile synchronization queued',
+      (installation, context) => operations.syncProfiles(installation, context),
+    ),
     { body: installationBody },
   )
 }
+
+const launchServerOperations = new LaunchServerOperationsService(
+  launchServerTransport,
+  controlFileService,
+)
 
 export const gravitRoutes = createGravitRoutes({
   cipher: credentialCipher,
   keyService: credentialKeyService,
   installations: installationsStore,
-  transport: launchServerTransport,
+  operations: launchServerOperations,
   remoteSetup: remoteControlSetup,
   remoteStore: remoteControlStore,
   jobs: jobsRunner,

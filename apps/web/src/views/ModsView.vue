@@ -13,7 +13,7 @@
         </Button>
         <Dialog v-model:open="installDialogOpen">
           <DialogTrigger as-child>
-            <Button :disabled="!targetReady || modActionsPending">
+            <Button :disabled="!targetReady">
               <Download /> Install mods
             </Button>
           </DialogTrigger>
@@ -137,7 +137,7 @@
             </div>
             <DialogFooter>
               <Button
-                :disabled="!selectedSlugs.length || !selectedTargetsReady || modActionsPending"
+                :disabled="!selectedSlugs.length || !selectedTargetsReady"
                 @click="installSelected"
               >
                 <Download /> Install selected ({{ selectedSlugs.length }})
@@ -240,7 +240,7 @@
       :minecraft-version="version"
       :loader="loader"
       :servers="managedServers"
-      :disabled="modActionsPending || !targetReady"
+      :disabled="!targetReady"
       @job="attachJob"
       @error="childError = $event"
     />
@@ -264,7 +264,6 @@
               v-if="installed?.items.length"
               size="sm"
               variant="ghost"
-              :disabled="modActionsPending"
               @click="toggleAllInstalled"
             >
               {{ allInstalledSelected ? 'Clear' : 'Select all' }}
@@ -278,23 +277,23 @@
           class="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur"
         >
           <Badge variant="secondary">{{ selectedInstalledItems.length }} selected</Badge>
-          <Button size="sm" variant="outline" :disabled="modActionsPending" @click="runBulk('enable')">
+          <Button size="sm" variant="outline" @click="runBulk('enable')">
             <Power /> Enable
           </Button>
-          <Button size="sm" variant="outline" :disabled="modActionsPending" @click="runBulk('disable')">
+          <Button size="sm" variant="outline" @click="runBulk('disable')">
             <Power /> Disable
           </Button>
           <Button
             size="sm"
             variant="outline"
-            :disabled="modActionsPending || !bulkUpdateReady"
+            :disabled="!bulkUpdateReady"
             @click="runBulk('update')"
           >
             <RefreshCw /> Update
           </Button>
           <AlertDialog>
             <AlertDialogTrigger as-child>
-              <Button size="sm" variant="destructive" :disabled="modActionsPending">
+              <Button size="sm" variant="destructive">
                 <Trash2 /> Remove
               </Button>
             </AlertDialogTrigger>
@@ -355,15 +354,15 @@
                 {{ item.disabled ? 'Disabled' : 'Enabled' }}
               </Badge>
             </div>
-            <div class="mt-3 flex flex-wrap gap-2" @click.stop>
-              <Button size="sm" variant="outline" :disabled="modActionsPending" @click="toggleMod(item)">
+            <div class="mt-3 inline-flex max-w-full flex-wrap gap-2">
+              <Button size="sm" variant="outline" @click.stop="toggleMod(item)">
                 <Power /> {{ item.disabled ? 'Enable' : 'Disable' }}
               </Button>
               <Button
                 size="sm"
                 variant="outline"
-                :disabled="modActionsPending || !item.projectId || !targetReady"
-                @click="updateMod(item)"
+                :disabled="!item.projectId || !targetReady"
+                @click.stop="updateMod(item)"
               >
                 <RefreshCw /> Update
               </Button>
@@ -371,14 +370,13 @@
                 v-if="item.projectId"
                 size="sm"
                 variant="outline"
-                :disabled="modActionsPending"
-                @click="openOptionalDialog(item)"
+                @click.stop="openOptionalDialog(item)"
               >
-                <Settings /> Optional
+                <Settings /> Make optional
               </Button>
               <AlertDialog>
                 <AlertDialogTrigger as-child>
-                  <Button size="sm" variant="destructive" :disabled="modActionsPending"><Trash2 /> Remove</Button>
+                  <Button size="sm" variant="destructive" @click.stop><Trash2 /> Remove</Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
@@ -408,7 +406,7 @@
     <OptionalModsCard
       :installation-id="installationId"
       :profile="profile"
-      :disabled="modActionsPending || !stateReady"
+      :disabled="!stateReady"
       @job="attachJob"
       @error="childError = $event"
     />
@@ -716,14 +714,11 @@ const selectedTargetsReady = computed(
 )
 
 const {
-  mutate: runOperation, isPending: operationPending, error: operationError,
+  mutate: runOperation, error: operationError,
 } = useMutation({
   mutationFn: ({ url, body }: { url: string; body: Record<string, unknown> }) => postJob(url, body),
   onSuccess: attachJob,
 })
-const modActionsPending = computed(
-  () => operationPending.value || Boolean(activeJob.value),
-)
 const commonBody = () => ({
   installationId: installationId.value,
   profile: profile.value,
@@ -765,8 +760,8 @@ const removeMod = (item: InstalledMod & { _removeFromServer?: boolean }) => runO
 })
 const openOptionalDialog = (item: InstalledMod) => {
   optionalDialogMod.value = item
-  optionalForm.name = item.filename.replace(/\.jar(?:\.disabled)?$/, '')
-  optionalForm.description = ''
+  optionalForm.name = item.name ?? item.filename.replace(/\.jar(?:\.disabled)?$/, '')
+  optionalForm.description = item.description ?? ''
   optionalForm.category = 'Mods'
   optionalForm.enabledByDefault = false
   optionalDialogOpen.value = true

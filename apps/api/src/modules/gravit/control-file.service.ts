@@ -40,9 +40,7 @@ export type ClientControlCommand =
   | `installMods ${string} ${string} ${string} ${string}`
 export type ServerTokenControlCommand =
   `token server ${string} ${string} false`
-export type ConfigControlCommand =
-  | 'config profileprovider sync'
-  | 'config launchserver reload'
+export type ConfigControlCommand = 'config profileprovider sync'
 
 const stripAnsi = (value: string) =>
   value.replace(
@@ -226,10 +224,6 @@ export class ControlFileService {
 
   syncProfileProvider(installation: GravitInstallation) {
     return this.executeConfigCommand(installation, 'config profileprovider sync')
-  }
-
-  reloadLaunchServerConfig(installation: GravitInstallation) {
-    return this.executeConfigCommand(installation, 'config launchserver reload')
   }
 
   async createServerToken(

@@ -1,4 +1,5 @@
 import {
+  finishJobNotification,
   registerJobNotification,
   useJobNotifications,
 } from '../src/stores/job-notifications'
@@ -28,5 +29,50 @@ describe('global job notifications', () => {
     expect(trackedJob.value?.id).toBe(job.id)
     expect(trackedJob.value?.progress).toBe(40)
     expect(trackedTitle.value).toBe('Profile operation')
+  })
+
+  test('keeps the running job tracked until its terminal event before showing queued work', () => {
+    const now = new Date().toISOString()
+    const running = {
+      id: crypto.randomUUID(),
+      type: 'gravit.mods.install',
+      status: 'running',
+      progress: 85,
+      input: {},
+      result: null,
+      error: null,
+      createdAt: now,
+      startedAt: now,
+      finishedAt: null,
+    } as JobRecord
+    const queued = {
+      ...running,
+      id: crypto.randomUUID(),
+      status: 'queued',
+      progress: 0,
+      startedAt: null,
+    } as JobRecord
+    const { trackedJob } = useJobNotifications()
+    if (trackedJob.value) {
+      finishJobNotification({
+        ...trackedJob.value,
+        status: 'succeeded',
+        progress: 100,
+        finishedAt: now,
+      })
+    }
+
+    registerJobNotification(running, 'Running mod operation', () => {})
+    registerJobNotification(queued, 'Queued mod operation', () => {})
+    expect(trackedJob.value?.id).toBe(running.id)
+
+    finishJobNotification({
+      ...running,
+      status: 'succeeded',
+      progress: 100,
+      finishedAt: now,
+    })
+    registerJobNotification(queued, 'Queued mod operation', () => {})
+    expect(trackedJob.value?.id).toBe(queued.id)
   })
 })

@@ -169,6 +169,7 @@ describe('ModrinthService', () => {
       'terrablender',
       'dynamic-trees',
     ])
+    expect(resolved.map((item) => item.root)).toEqual([false, true])
   })
 
   test('still rejects a directly selected project unsupported on the target', async () => {

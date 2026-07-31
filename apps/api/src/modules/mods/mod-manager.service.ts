@@ -82,14 +82,25 @@ export class ModManagerService {
     )
     const valid = local.filter((item): item is NonNullable<typeof item> => Boolean(item))
     const versions = await this.modrinth.versionsFromHashes(valid.map((item) => item.sha1))
+    const projects = await this.modrinth.projectsByIds([
+      ...new Set(
+        Object.values(versions).map((version) => version.project_id),
+      ),
+    ])
     return {
       items: valid.map(
-        (item): InstalledMod => ({
-          ...item,
-          projectId: versions[item.sha1]?.project_id ?? null,
-          versionId: versions[item.sha1]?.id ?? null,
-          versionName: versions[item.sha1]?.version_number ?? null,
-        }),
+        (item): InstalledMod => {
+          const version = versions[item.sha1]
+          const project = version ? projects[version.project_id] : null
+          return {
+            ...item,
+            projectId: version?.project_id ?? null,
+            versionId: version?.id ?? null,
+            versionName: version?.version_number ?? null,
+            name: project?.title ?? null,
+            description: project?.description ?? null,
+          }
+        },
       ),
       source: modrinthSource,
     }
@@ -126,6 +137,7 @@ export class ModManagerService {
         throw new Error('Every selected mod must have at least one install destination')
       }
       let requiredClientChanged = false
+      const optionalDependencyProjectIds = new Set<string>()
       const optionalClientMods = new Map<string, {
         projectId: string
         title: string
@@ -143,7 +155,7 @@ export class ModManagerService {
         )
         for (const item of resolved) {
           const bytes = await this.modrinth.download(item.file)
-          if (selection.clientMode === 'required') {
+          if (selection.clientMode === 'required' || !item.root) {
             await this.volume.writeFileAtomic(
               installation,
               posix.join(
@@ -154,6 +166,9 @@ export class ModManagerService {
               '0644',
             )
             requiredClientChanged = true
+            if (selection.clientMode === 'optional' && !item.root) {
+              optionalDependencyProjectIds.add(item.projectId)
+            }
           } else {
             const sourcePath = posix.join(
               '.gravit-panel-optional',
@@ -184,6 +199,7 @@ export class ModManagerService {
           input.profile,
           [...optionalClientMods.values()],
           context,
+          [...optionalDependencyProjectIds],
         )
       } else if (requiredClientChanged) {
         await this.clients.reloadProfileUpdates(installation, context, 85)

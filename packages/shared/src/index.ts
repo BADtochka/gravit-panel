@@ -32,6 +32,9 @@ export type JobType =
   | 'gravit.launcher.build'
   | 'gravit.launcher.customize'
   | 'gravit.launchserver.restart'
+  | 'gravit.launchserver.status'
+  | 'gravit.launchserver.securitycheck'
+  | 'gravit.launchserver.profiles.sync'
   | 'gravit.client.build'
   | 'gravit.profile.update'
   | 'gravit.profile.java.update'
@@ -892,6 +895,8 @@ export interface InstalledMod {
   projectId: string | null
   versionId: string | null
   versionName: string | null
+  name: string | null
+  description: string | null
 }
 
 export interface ModInstallInput {

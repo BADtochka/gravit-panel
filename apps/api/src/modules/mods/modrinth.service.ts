@@ -339,6 +339,7 @@ export class ModrinthService {
       projectId: string
       slug: string
       title: string
+      root: boolean
       version: ModrinthVersion
       file: ModrinthVersion['files'][number]
     }> = []
@@ -397,6 +398,7 @@ export class ModrinthService {
         projectId: project.id,
         slug: project.slug,
         title: project.title ?? project.slug,
+        root,
         version,
         file,
       })
@@ -479,7 +481,7 @@ export class ModrinthService {
     return bytes
   }
 
-  private async projectsByIds(ids: string[]) {
+  async projectsByIds(ids: string[]) {
     if (!ids.length) return {} as Record<string, ModrinthProjectDetail>
     const projects: Record<string, ModrinthProjectDetail> = {}
     for (let index = 0; index < ids.length; index += 100) {

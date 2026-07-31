@@ -12,6 +12,7 @@ const demoSteps = [
 export class JobsRunner {
   private readonly running = new Map<string, AbortController>()
   private readonly cancelled = new Set<string>()
+  private readonly queues = new Map<string, Array<{ jobId: string; task: JobTask }>>()
 
   constructor(
     private readonly store: JobsStore,
@@ -41,6 +42,22 @@ export class JobsRunner {
     const job = this.store.create(type, input)
     this.emit(job.id, 'queued', queuedMessage, 0)
     queueMicrotask(() => void this.runJob(job.id, task))
+    return job
+  }
+
+  createQueued(
+    queueKey: string,
+    type: JobType,
+    input: Record<string, unknown>,
+    queuedMessage: string,
+    task: JobTask,
+  ): JobRecord {
+    const job = this.store.create(type, input)
+    this.emit(job.id, 'queued', queuedMessage, 0)
+    const queue = this.queues.get(queueKey) ?? []
+    queue.push({ jobId: job.id, task })
+    this.queues.set(queueKey, queue)
+    if (queue.length === 1) queueMicrotask(() => void this.drainQueue(queueKey))
     return job
   }
 
@@ -143,6 +160,17 @@ export class JobsRunner {
       this.running.delete(jobId)
       this.cancelled.delete(jobId)
     }
+  }
+
+  private async drainQueue(queueKey: string) {
+    const queue = this.queues.get(queueKey)
+    if (!queue) return
+    while (queue.length) {
+      const entry = queue[0]!
+      await this.runJob(entry.jobId, entry.task)
+      queue.shift()
+    }
+    this.queues.delete(queueKey)
   }
 
   private recoverInterruptedJobs() {

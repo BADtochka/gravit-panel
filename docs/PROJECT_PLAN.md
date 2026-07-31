@@ -204,7 +204,7 @@ Status: completed.
 
 - Wait for `control-file`.
 - Execute allowlisted LaunchServer commands through `control-file`.
-- Expose `serverStatus` and `securitycheck`.
+- Expose `serverStatus` and `securitycheck` as typed background jobs.
 
 The transport follows
 `GravitLauncher/Launcher@fef9bae63da1afc0518d32e3333db20f409ab196`
@@ -212,9 +212,13 @@ The transport follows
 socket and command log events are read until the server closes the connection.
 The panel executes the pinned LauncherDockered `socat` recipe inside the
 `gravitlauncher` container because a bind-mounted Unix socket is not reachable
-across the container network namespace; only `serverStatus` and `securitycheck`
-have API endpoints. Successful install/import jobs wait for the in-container
-socket before registering their canonical path and source revision in SQLite.
+across the container network namespace. Status and security inspections persist
+their progress and command output in the common jobs system. Profile/update sync
+runs the native `config profileprovider sync` command as a typed job. The broken
+5.7.9 full configuration reload is not exposed: its provider unregister name does
+not match the registration name and can leave the live configuration half-reloaded.
+Successful install/import jobs wait for the in-container socket before registering
+their canonical path and source revision in SQLite.
 
 ### Slice 6: RemoteControl
 
@@ -478,11 +482,9 @@ Status: completed.
   creating another LauncherDockered workspace.
 - Keep the technical profile ID immutable after creation while exposing editable
   launcher-visible title, description, and sort order.
-- Invalidate `.updates-cache` after profile or update mutations and restart
-  LaunchServer so its normal initialization rebuilds the shared updates index
-  and reloads profiles. Do not use the runtime
-  `config profileProvider sync` command: it is not reliable across the managed
-  LaunchServer builds.
+- Invalidate `.updates-cache` after profile or update mutations and run the native
+  `config profileprovider sync` command so the shared updates index and profiles
+  are refreshed without restarting LaunchServer.
 - Before rebuilding an existing profile whose asset index is already present,
   perform the same cache invalidation and reload so MirrorHelper reuses the
   on-disk assets instead of downloading them again from an empty in-memory map.

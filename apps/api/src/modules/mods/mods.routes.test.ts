@@ -61,10 +61,6 @@ const createHarness = (
         get: (id) => id === installation.id ? installation : null,
       },
       jobs,
-      activeJob: (id) =>
-        jobsStore
-          .listByStatuses(['queued', 'running'])
-          .find((job) => job.input.installationId === id),
       manager,
       modrinth: {
         search,
@@ -248,6 +244,8 @@ describe('mod management API', () => {
               projectId: null,
               versionId: null,
               versionName: null,
+              name: null,
+              description: null,
             },
           ],
           source: modrinthSource,
@@ -347,7 +345,7 @@ describe('mod management API', () => {
     expect([...received]).toEqual([4, 5, 6])
   })
 
-  test('rejects duplicate operations, missing confirmation, and unknown installations', async () => {
+  test('queues concurrent operations while rejecting invalid requests', async () => {
     let release: (() => void) | undefined
     const gate = new Promise<void>((resolve) => {
       release = resolve
@@ -368,6 +366,7 @@ describe('mod management API', () => {
     const first = await request('/api/mods/install', post(installBody))
     const firstJob = await first.json()
     const duplicate = await request('/api/mods/install', post(installBody))
+    const duplicateJob = await duplicate.json()
     const invalidRemoval = await request('/api/mods/remove', post({
       installationId: installation.id,
       profile: 'fabric',
@@ -381,12 +380,14 @@ describe('mod management API', () => {
       enabled: true,
     }))
     expect(first.status).toBe(202)
-    expect(duplicate.status).toBe(409)
+    expect(duplicate.status).toBe(202)
+    expect(jobsStore.get(duplicateJob.id)?.status).toBe('queued')
     expect(invalidRemoval.status).toBe(422)
     expect(unknown.status).toBe(404)
 
     release?.()
     expect((await waitForTerminalJob(jobsStore, firstJob.id)).status).toBe('succeeded')
+    expect((await waitForTerminalJob(jobsStore, duplicateJob.id)).status).toBe('succeeded')
     const unconfirmedBulkRemoval = await request('/api/mods/bulk', post({
       installationId: installation.id,
       profile: 'fabric',

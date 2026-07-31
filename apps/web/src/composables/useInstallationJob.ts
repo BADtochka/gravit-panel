@@ -37,7 +37,7 @@ export const useInstallationJob = (
     data,
     (response) => {
       const active = response?.job
-      if (active && supported.has(active.type)) job.value = active
+      job.value = active && supported.has(active.type) ? active : null
     },
     { immediate: true },
   )

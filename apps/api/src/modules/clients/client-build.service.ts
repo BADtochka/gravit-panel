@@ -536,6 +536,7 @@ export class ClientBuildService {
       category?: string
     }>,
     context: JobTaskContext,
+    removeProjectIds: string[] = [],
   ) {
     this.validateProfile(name)
     const path = join('profiles', `${name}.json`)
@@ -546,7 +547,10 @@ export class ClientBuildService {
             Boolean(item && typeof item === 'object' && !Array.isArray(item)),
         )
       : []
-    const projectIds = new Set(inputs.map((input) => input.projectId))
+    const projectIds = new Set([
+      ...inputs.map((input) => input.projectId),
+      ...removeProjectIds,
+    ])
     const nextOptional = existing.filter(
       (item) => {
         const projectId = optionalProjectId(item)
@@ -1731,15 +1735,8 @@ export class ClientBuildService {
     context.progress(progress, 'Reloading LaunchServer profiles and updates')
     await this.volume.remove(installation, '.updates-cache')
     context.log('Invalidated LaunchServer updates cache')
-    if (this.lifecycle) {
-      // LaunchServer 5.7.9 can leave LocalProfilesProvider.updatesDirMap null
-      // after a hot profileprovider sync. MirrorHelper then fails while creating
-      // the next profile, so client build boundaries require a full restart.
-      await this.lifecycle.restartLaunchServer(installation, context)
-    } else {
-      const lines = await this.control.syncProfileProvider(installation)
-      lines.forEach(context.log)
-    }
+    const lines = await this.control.syncProfileProvider(installation)
+    lines.forEach(context.log)
     context.log('LaunchServer profiles and updates reloaded')
   }
 

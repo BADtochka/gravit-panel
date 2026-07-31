@@ -1,5 +1,4 @@
 import type {
-  JobRecord,
   ModInstallInput,
   ModrinthModpackImportInput,
   OptionalModUpdateInput,
@@ -8,7 +7,7 @@ import { Elysia, t } from 'elysia'
 import { installationsStore, controlFileService } from '../gravit/gravit.runtime'
 import type { InstallationsStore } from '../gravit/installations.store'
 import type { JobsRunner } from '../jobs/jobs.runner'
-import { activeJobForInstallation, jobsRunner } from '../jobs/jobs.runtime'
+import { jobsRunner } from '../jobs/jobs.runtime'
 import { ModManagerService } from './mod-manager.service'
 import { ModrinthService, modrinthSource } from './modrinth.service'
 import { clientBuildService } from '../clients/clients.routes'
@@ -83,8 +82,7 @@ const modpackImportInput = t.Object({
 
 export interface ModsRoutesDependencies {
   installations: Pick<InstallationsStore, 'get'>
-  jobs: Pick<JobsRunner, 'create'>
-  activeJob: (installationId: string) => JobRecord | null | undefined
+  jobs: Pick<JobsRunner, 'createQueued'>
   manager: Pick<
     ModManagerService,
     | 'list'
@@ -108,7 +106,6 @@ export interface ModsRoutesDependencies {
 export const createModsRoutes = ({
   installations,
   jobs,
-  activeJob,
   manager,
   modrinth,
 }: ModsRoutesDependencies) => {
@@ -117,6 +114,19 @@ export const createModsRoutes = ({
     if (!installation) set.status = 404
     return installation
   }
+  const enqueue = (
+    installationIdValue: string,
+    type: Parameters<JobsRunner['createQueued']>[1],
+    input: Record<string, unknown>,
+    queuedMessage: string,
+    task: Parameters<JobsRunner['createQueued']>[4],
+  ) => jobs.createQueued(
+    `mods:${installationIdValue}`,
+    type,
+    input,
+    queuedMessage,
+    task,
+  )
 
   return new Elysia({ prefix: '/mods' })
   .get('/providers', () => ({
@@ -201,12 +211,8 @@ export const createModsRoutes = ({
       const input = body as ModInstallInput
       const installation = findInstallation(input.installationId, set)
       if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = activeJob(installation.id)
-      if (conflict) {
-        set.status = 409
-        return { message: 'Another mod operation is active.', jobId: conflict.id }
-      }
-      const job = jobs.create(
+      const job = enqueue(
+        installation.id,
         'gravit.mods.install',
         { ...input },
         `${input.slugs.length} mod installation queued`,
@@ -243,12 +249,8 @@ export const createModsRoutes = ({
       const input = body as OptionalModUpdateInput
       const installation = findInstallation(input.installationId, set)
       if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = activeJob(installation.id)
-      if (conflict) {
-        set.status = 409
-        return { message: 'Another mod operation is active.', jobId: conflict.id }
-      }
-      const job = jobs.create(
+      const job = enqueue(
+        installation.id,
         'gravit.mods.optional.update',
         { ...input },
         `Optional mod ${input.name} update queued`,
@@ -274,12 +276,8 @@ export const createModsRoutes = ({
     ({ body, set }) => {
       const installation = findInstallation(body.installationId, set)
       if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = activeJob(installation.id)
-      if (conflict) {
-        set.status = 409
-        return { message: 'Another mod operation is active.', jobId: conflict.id }
-      }
-      const job = jobs.create(
+      const job = enqueue(
+        installation.id,
         'gravit.mods.optional.remove',
         { ...body },
         'Optional mod removal queued',
@@ -310,12 +308,8 @@ export const createModsRoutes = ({
       const input = body as ModrinthModpackImportInput
       const installation = findInstallation(input.installationId, set)
       if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = activeJob(installation.id)
-      if (conflict) {
-        set.status = 409
-        return { message: 'Another mod operation is active.', jobId: conflict.id }
-      }
-      const job = jobs.create(
+      const job = enqueue(
+        installation.id,
         'gravit.mods.modpack.import',
         { ...input },
         'Modrinth modpack import queued',
@@ -336,13 +330,9 @@ export const createModsRoutes = ({
       const input = body.input as ModrinthModpackImportInput
       const installation = findInstallation(input.installationId, set)
       if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = activeJob(installation.id)
-      if (conflict) {
-        set.status = 409
-        return { message: 'Another mod operation is active.', jobId: conflict.id }
-      }
       const archive = new Uint8Array(await body.file.arrayBuffer())
-      const job = jobs.create(
+      const job = enqueue(
+        installation.id,
         'gravit.mods.modpack.import',
         {
           ...input,
@@ -375,11 +365,6 @@ export const createModsRoutes = ({
     ({ body, set }) => {
       const installation = findInstallation(body.installationId, set)
       if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = activeJob(installation.id)
-      if (conflict) {
-        set.status = 409
-        return { message: 'Another mod operation is active.', jobId: conflict.id }
-      }
       if (body.action === 'remove' && body.confirmRemoval !== true) {
         set.status = 422
         return { message: 'Bulk removal requires explicit confirmation.' }
@@ -388,7 +373,8 @@ export const createModsRoutes = ({
         set.status = 422
         return { message: 'Bulk update requires Minecraft version and loader.' }
       }
-      const job = jobs.create(
+      const job = enqueue(
+        installation.id,
         'gravit.mods.bulk',
         { ...body },
         `Bulk ${body.action} queued for ${body.filenames.length} mods`,
@@ -421,12 +407,8 @@ export const createModsRoutes = ({
     ({ body, set }) => {
       const installation = findInstallation(body.installationId, set)
       if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = activeJob(installation.id)
-      if (conflict) {
-        set.status = 409
-        return { message: 'Another mod operation is active.', jobId: conflict.id }
-      }
-      const job = jobs.create(
+      const job = enqueue(
+        installation.id,
         'gravit.mods.toggle',
         { ...body },
         `${body.enabled ? 'Enable' : 'Disable'} mod queued`,
@@ -452,12 +434,8 @@ export const createModsRoutes = ({
     ({ body, set }) => {
       const installation = findInstallation(body.installationId, set)
       if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = activeJob(installation.id)
-      if (conflict) {
-        set.status = 409
-        return { message: 'Another mod operation is active.', jobId: conflict.id }
-      }
-      const job = jobs.create(
+      const job = enqueue(
+        installation.id,
         'gravit.mods.remove',
         { ...body },
         'Recoverable mod removal queued',
@@ -482,12 +460,8 @@ export const createModsRoutes = ({
     ({ body, set }) => {
       const installation = findInstallation(body.installationId, set)
       if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = activeJob(installation.id)
-      if (conflict) {
-        set.status = 409
-        return { message: 'Another mod operation is active.', jobId: conflict.id }
-      }
-      const job = jobs.create(
+      const job = enqueue(
+        installation.id,
         'gravit.mods.update',
         { ...body },
         'Modrinth mod update queued',
@@ -520,7 +494,6 @@ export const createModsRoutes = ({
 export const modsRoutes = createModsRoutes({
   installations: installationsStore,
   jobs: jobsRunner,
-  activeJob: activeJobForInstallation,
   manager,
   modrinth,
 })

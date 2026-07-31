@@ -56,3 +56,32 @@ describe('JobsRunner cancellation', () => {
     expect(store.listEvents(job.id).at(-1)?.type).toBe('completed')
   })
 })
+
+describe('JobsRunner queues', () => {
+  test('runs jobs with the same queue key sequentially', async () => {
+    const database = new Database(':memory:')
+    database.exec(schema)
+    const store = new JobsStore(database)
+    const runner = new JobsRunner(store, new JobsEventHub())
+    const order: string[] = []
+    let releaseFirst: (() => void) | undefined
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve })
+    const first = runner.createQueued('mods:one', 'demo.noop', {}, 'First queued', async () => {
+      order.push('first:start')
+      await firstGate
+      order.push('first:end')
+      return {}
+    })
+    const second = runner.createQueued('mods:one', 'demo.noop', {}, 'Second queued', async () => {
+      order.push('second:start')
+      return {}
+    })
+
+    await waitFor(() => store.get(first.id)?.status === 'running')
+    expect(store.get(second.id)?.status).toBe('queued')
+    expect(order).toEqual(['first:start'])
+    releaseFirst?.()
+    await waitFor(() => store.get(second.id)?.status === 'succeeded')
+    expect(order).toEqual(['first:start', 'first:end', 'second:start'])
+  })
+})

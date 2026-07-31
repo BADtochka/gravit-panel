@@ -91,6 +91,44 @@ describe('ModManagerService', () => {
     }
   })
 
+  test('enriches installed mods with the same Modrinth name and description used at install', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gravit-mod-metadata-'))
+    const directory = join(root, 'launcher', 'updates', 'fabric', 'mods')
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'rei.jar'), 'mod')
+    const service = new ModManagerService(
+      {} as ControlFileService,
+      {
+        versionsFromHashes: async (hashes: string[]) => ({
+          [hashes[0]!]: {
+            id: 'rei-version',
+            project_id: 'rei-project',
+            version_number: '1.0.0',
+          },
+        }),
+        projectsByIds: async () => ({
+          'rei-project': {
+            id: 'rei-project',
+            slug: 'roughly-enough-items',
+            title: 'Roughly Enough Items (REI)',
+            description: 'View items and recipes.',
+          },
+        }),
+      } as unknown as ModrinthService,
+      localVolume,
+    )
+
+    try {
+      const result = await service.list(installationFor(root), 'fabric')
+      expect(result.items[0]).toMatchObject({
+        name: 'Roughly Enough Items (REI)',
+        description: 'View items and recipes.',
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('disable is reversible and removal moves the file to recoverable trash', async () => {
     const root = await mkdtemp(join(tmpdir(), 'gravit-mod-actions-'))
     const directory = join(root, 'launcher', 'updates', 'fabric', 'mods')
@@ -164,22 +202,28 @@ describe('ModManagerService', () => {
     const bindingId = crypto.randomUUID()
     const installedOnServer: string[] = []
     let optionalInputs: unknown[] = []
+    let removedOptionalProjectIds: string[] = []
     let published = 0
     let reloaded = 0
     const service = new ModManagerService(
       {} as ControlFileService,
       {
-        resolveInstall: async (slug: string) => [{
-          projectId: slug,
-          slug,
-          title: slug,
+        resolveInstall: async (slug: string) => (
+          slug === 'lithium'
+            ? ['architectury', 'cloth-config', 'lithium']
+            : [slug]
+        ).map((projectId) => ({
+          projectId,
+          slug: projectId,
+          title: projectId,
+          root: projectId === slug,
           version: {},
           file: {
-            filename: `${slug}.jar`,
+            filename: `${projectId}.jar`,
             size: 3,
             hashes: { sha1: '', sha512: '' },
           },
-        }],
+        })),
         download: async () => new TextEncoder().encode('mod'),
       } as unknown as ModrinthService,
       localVolume,
@@ -188,8 +232,11 @@ describe('ModManagerService', () => {
           _installation: GravitInstallation,
           _profile: string,
           inputs: unknown[],
+          _context: JobTaskContext,
+          removeProjectIds: string[],
         ) => {
           optionalInputs = inputs
+          removedOptionalProjectIds = removeProjectIds
           return { profile: {} }
         },
         reloadProfileUpdates: async () => {
@@ -249,6 +296,14 @@ describe('ModManagerService', () => {
         'utf8',
       )).toBe('mod')
       expect(await readFile(
+        join(root, 'launcher', 'updates', 'fabric', 'mods', 'architectury.jar'),
+        'utf8',
+      )).toBe('mod')
+      expect(await readFile(
+        join(root, 'launcher', 'updates', 'fabric', 'mods', 'cloth-config.jar'),
+        'utf8',
+      )).toBe('mod')
+      expect(await readFile(
         join(
           root,
           'launcher',
@@ -269,6 +324,7 @@ describe('ModManagerService', () => {
         sourcePath: '.gravit-panel-optional/mods/lithium/lithium.jar',
         enabledByDefault: true,
       }])
+      expect(removedOptionalProjectIds).toEqual(['architectury', 'cloth-config'])
       expect(reloaded).toBe(0)
       expect(installedOnServer).toEqual(['sodium', 'lithium'])
       expect(published).toBe(1)

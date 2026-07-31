@@ -691,6 +691,7 @@ describe('ClientBuildService', () => {
     ])
     const commands: string[] = []
     let restarts = 0
+    let syncs = 0
     const volume = {
       exists: async (_installation: GravitInstallation, path: string, kind = 'file') =>
         paths.get(path) === kind,
@@ -709,6 +710,7 @@ describe('ClientBuildService', () => {
       },
     } as VolumeFileOperations
     const control = controlWithSync({
+      syncProfileProvider: async () => { syncs += 1; return [] },
       executeClientCommand: async (_installation: GravitInstallation, command: string) => {
         commands.push(command)
         if (command === 'installClient main 1.21.4 FABRIC') {
@@ -788,7 +790,8 @@ describe('ClientBuildService', () => {
       'mirrorhelper setDisableDownloadAssets true',
       'installClient main 1.21.4 FABRIC',
     ])
-    expect(restarts).toBe(2)
+    expect(restarts).toBe(0)
+    expect(syncs).toBe(2)
   })
 
   test('downloads a missing NeoForge installer before building the client', async () => {

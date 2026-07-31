@@ -40,6 +40,11 @@ interface HarnessOptions {
     installation: GravitInstallation,
     command: LaunchServerInspectionCommand,
   ) => Promise<LaunchServerCommandResult>
+  syncProfiles?: () => Promise<{
+    installationId: string
+    synchronized: boolean
+    lines: string[]
+  }>
 }
 
 const commandResult = (
@@ -84,8 +89,18 @@ const createHarness = (options: HarnessOptions = {}) => {
       installations: {
         get: (id) => id === installation.id ? installation : null,
       },
-      transport: {
-        execute: options.execute ?? (async (_installation, command) => commandResult(command)),
+      operations: {
+        inspect: async (_installation, command) => ({
+          ...await (options.execute ?? (async (_value, selected) => commandResult(selected)))(
+            installation,
+            command,
+          ),
+        }),
+        syncProfiles: options.syncProfiles ?? (async () => ({
+          installationId: installation.id,
+          synchronized: true,
+          lines: [],
+        })),
       },
       remoteSetup: {
         setup: (options.setup ?? (async () => ({
@@ -271,9 +286,9 @@ describe('Gravit configuration API', () => {
   test.each([
     ['status', 'serverStatus'],
     ['securitycheck', 'securitycheck'],
-  ] as const)('executes the %s inspection endpoint', async (path, command) => {
+  ] as const)('queues the %s inspection endpoint', async (path, command) => {
     const executed: LaunchServerInspectionCommand[] = []
-    const { request } = createHarness({
+    const { request, jobsStore } = createHarness({
       execute: async (_installation, value) => {
         executed.push(value)
         return commandResult(value)
@@ -284,9 +299,30 @@ describe('Gravit configuration API', () => {
       `/api/gravit/${path}`,
       post({ installationId: installation.id }),
     )
+    const queued = await response.json()
+    const completed = await waitForTerminalJob(jobsStore, queued.id)
 
-    expect(response.status).toBe(200)
-    expect((await response.json()).command).toBe(command)
+    expect(response.status).toBe(202)
+    expect(queued.type).toBe(
+      command === 'serverStatus'
+        ? 'gravit.launchserver.status'
+        : 'gravit.launchserver.securitycheck',
+    )
+    expect(completed.result?.command).toBe(command)
     expect(executed).toEqual([command])
+  })
+
+  test('queues the sync-profiles maintenance endpoint', async () => {
+    const { request, jobsStore } = createHarness()
+    const response = await request(
+      '/api/gravit/sync-profiles',
+      post({ installationId: installation.id }),
+    )
+    const queued = await response.json()
+    const completed = await waitForTerminalJob(jobsStore, queued.id)
+
+    expect(response.status).toBe(202)
+    expect(queued.type).toBe('gravit.launchserver.profiles.sync')
+    expect(completed.status).toBe('succeeded')
   })
 })

@@ -80,6 +80,7 @@ const { autoScroll, logContainer } = useLogAutoScroll(() => events.value.length)
 const switchId = `job-auto-scroll-${crypto.randomUUID()}`
 const toastId = computed(() => currentJob.value ? `job-${currentJob.value.id}` : null)
 const dismissedToastIds = new Set<string>()
+const dismissalTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 const openLogs = () => {
   logsOpen.value = true
@@ -93,11 +94,21 @@ const openJobs = () => {
   })
 }
 
-const dismissNotification = () => {
-  const id = toastId.value
-  if (!id) return
+const dismissNotification = (id: string) => {
+  const timer = dismissalTimers.get(id)
+  if (timer) clearTimeout(timer)
+  dismissalTimers.delete(id)
   dismissedToastIds.add(id)
   toast.dismiss(id)
+}
+
+const scheduleDismissal = (id: string) => {
+  if (dismissalTimers.has(id)) return
+  dismissalTimers.set(id, setTimeout(() => {
+    dismissalTimers.delete(id)
+    dismissedToastIds.add(id)
+    toast.dismiss(id)
+  }, 10_000))
 }
 
 watch(
@@ -125,6 +136,8 @@ watch(
             ? `${title} cancelled`
             : title
 
+    if (terminal) scheduleDismissal(id)
+
     toast.custom(JobProgressToast, {
       id,
       componentProps: {
@@ -133,7 +146,7 @@ watch(
         status,
         onOpenLogs: openLogs,
         onOpenJobs: openJobs,
-        onDismiss: dismissNotification,
+        onDismiss: () => dismissNotification(id),
       },
       dismissible: terminal,
       duration: terminal ? (status === 'failed' ? 15_000 : 10_000) : Infinity,
@@ -143,6 +156,8 @@ watch(
 )
 
 onScopeDispose(() => {
+  for (const timer of dismissalTimers.values()) clearTimeout(timer)
+  dismissalTimers.clear()
   if (toastId.value) toast.dismiss(toastId.value)
 })
 </script>

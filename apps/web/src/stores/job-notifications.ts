@@ -12,6 +12,13 @@ const isTerminal = (job: JobRecord) =>
   job.status === 'failed' ||
   job.status === 'cancelled'
 
+const shouldReplaceTrackedJob = (current: JobRecord | null, next: JobRecord) => {
+  if (!current || isTerminal(current)) return true
+  if (current.id === next.id) return true
+  if (current.status === 'running') return false
+  return next.status === 'running'
+}
+
 export const registerJobNotification = (
   job: JobRecord,
   title: string,
@@ -26,10 +33,11 @@ export const registerJobNotification = (
         progress: Math.max(current.progress, job.progress),
       }
     }
-  } else {
+  } else if (shouldReplaceTrackedJob(current, job)) {
     trackedJob.value = { ...job }
+    trackedTitle.value = title
   }
-  trackedTitle.value = title
+  if (current?.id === job.id) trackedTitle.value = title
 
   const handlers = finishedHandlers.get(job.id) ?? new Set<FinishedHandler>()
   handlers.add(onFinished)
