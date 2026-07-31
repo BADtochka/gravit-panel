@@ -119,9 +119,14 @@ import type { JobEvent, JobRecord, JobStatus, JobsResponse } from '@gravit-panel
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { Play, RefreshCw } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
 const queryClient = useQueryClient()
-const selectedJobId = ref('')
+const route = useRoute()
+const routeJobId = computed(() =>
+  typeof route.query.job === 'string' ? route.query.job : '',
+)
+const selectedJobId = ref(routeJobId.value)
 const events = ref<JobEvent[]>([])
 const { autoScroll, logContainer } = useLogAutoScroll(() => events.value.length)
 const streamState = ref<'idle' | 'connecting' | 'live' | 'reconnecting' | 'closed'>('idle')
@@ -189,6 +194,12 @@ const connectToJob = (jobId: string) => {
 }
 
 watch(
+  routeJobId,
+  (jobId) => {
+    if (jobId) selectedJobId.value = jobId
+  },
+)
+watch(
   () => jobs.value?.items,
   (items) => {
     if (!selectedJobId.value && items?.length) {
@@ -199,7 +210,7 @@ watch(
   },
   { immediate: true },
 )
-watch(selectedJobId, connectToJob)
+watch(selectedJobId, connectToJob, { immediate: true })
 onBeforeUnmount(() => eventSource?.close())
 
 const statusLabel: Record<JobStatus, string> = {

@@ -1728,15 +1728,18 @@ export class ClientBuildService {
     context: JobTaskContext,
     progress: number,
   ) {
-    if (!this.lifecycle) {
-      throw new Error(
-        'LaunchServer restart is unavailable; profiles and updates cannot be reloaded',
-      )
-    }
     context.progress(progress, 'Reloading LaunchServer profiles and updates')
     await this.volume.remove(installation, '.updates-cache')
     context.log('Invalidated LaunchServer updates cache')
-    await this.lifecycle.restartLaunchServer(installation, context)
+    if (this.lifecycle) {
+      // LaunchServer 5.7.9 can leave LocalProfilesProvider.updatesDirMap null
+      // after a hot profileprovider sync. MirrorHelper then fails while creating
+      // the next profile, so client build boundaries require a full restart.
+      await this.lifecycle.restartLaunchServer(installation, context)
+    } else {
+      const lines = await this.control.syncProfileProvider(installation)
+      lines.forEach(context.log)
+    }
     context.log('LaunchServer profiles and updates reloaded')
   }
 

@@ -30,13 +30,13 @@
       @job="attachJob"
     />
 
-    <JobLogCard :job="activeJob" title="Server operation" @finished="jobFinished" />
+    <JobProgressNotifier :job="activeJob" title="Server operation" @finished="jobFinished" />
   </section>
 </template>
 
 <script setup lang="ts">
 import ProfileServersCard from '@/components/clients/ProfileServersCard.vue'
-import JobLogCard from '@/components/jobs/JobLogCard.vue'
+import JobProgressNotifier from '@/components/jobs/JobProgressNotifier.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useClientProfiles } from '@/composables/useClientProfiles'

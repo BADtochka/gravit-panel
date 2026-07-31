@@ -191,14 +191,14 @@
       @error="childError = $event"
     />
 
-    <JobLogCard :job="activeJob" title="Profile operation" @finished="jobFinished" />
+    <JobProgressNotifier :job="activeJob" title="Profile operation" @finished="jobFinished" />
   </section>
 </template>
 
 <script setup lang="ts">
 import MinecraftVersionCombobox from '@/components/clients/MinecraftVersionCombobox.vue'
 import JavaManagerCard from '@/components/clients/JavaManagerCard.vue'
-import JobLogCard from '@/components/jobs/JobLogCard.vue'
+import JobProgressNotifier from '@/components/jobs/JobProgressNotifier.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   AlertDialog,

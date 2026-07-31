@@ -13,48 +13,6 @@
       <AlertDescription>{{ pageError.message }}</AlertDescription>
     </Alert>
 
-    <Card>
-      <CardHeader>
-        <div class="flex items-start justify-between gap-3">
-          <CardTitle class="text-base">LaunchServer</CardTitle>
-          <Badge :variant="launchServerHealth?.status === 'healthy' ? 'secondary' : 'destructive'">
-            <CircleCheck v-if="launchServerHealth?.status === 'healthy'" />
-            {{ launchServerHealth?.status === 'healthy' ? 'Running' : 'Unavailable' }}
-          </Badge>
-        </div>
-        <CardDescription>
-          {{ launchServerHealth?.message ?? 'Check the container and LaunchServer control socket.' }}
-        </CardDescription>
-      </CardHeader>
-      <CardContent class="text-xs text-muted-foreground">
-        <template v-if="launchServerHealth">
-          Last checked: {{ new Date(launchServerHealth.checkedAt).toLocaleString() }}
-        </template>
-      </CardContent>
-      <CardFooter class="flex-wrap gap-3">
-        <Button variant="outline" :disabled="!installationId || healthFetching" @click="refetchLaunchServerHealth()">
-          <RefreshCw /> Check status
-        </Button>
-        <AlertDialog>
-          <AlertDialogTrigger as-child>
-            <Button variant="destructive" :disabled="operationPending">Restart LaunchServer</Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Restart LaunchServer?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Connected users will be interrupted while LaunchServer starts and its control socket becomes ready.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction @click="runLaunchServerRestart">Restart LaunchServer</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </CardFooter>
-    </Card>
-
     <div class="grid gap-4 lg:grid-cols-2">
       <Card>
         <CardHeader>
@@ -113,9 +71,25 @@
           <p class="break-all font-mono">sha256:{{ configuration?.sources.prestarter.sha256 }}</p>
         </CardContent>
         <CardFooter>
-          <Button class="w-full" variant="outline" :disabled="operationPending" @click="runPrestarter">
-            <RefreshCw /> Reinstall Prestarter
-          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger as-child>
+              <Button class="w-full" variant="outline" :disabled="operationPending">
+                <RefreshCw /> Reinstall Prestarter
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Reinstall Prestarter?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  LaunchServer will restart to initialize the Prestarter binary. Connected users will be interrupted.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction @click="runPrestarter">Reinstall Prestarter</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </CardFooter>
       </Card>
     </div>
@@ -229,12 +203,12 @@
       </Card>
     </div>
 
-    <JobLogCard :job="activeJob" title="Launcher operation" @finished="jobFinished" />
+    <JobProgressNotifier :job="activeJob" title="Launcher operation" @finished="jobFinished" />
   </section>
 </template>
 
 <script setup lang="ts">
-import JobLogCard from '@/components/jobs/JobLogCard.vue'
+import JobProgressNotifier from '@/components/jobs/JobProgressNotifier.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -251,7 +225,7 @@ import { panelUrl } from '@/lib/public-path'
 import { useLaunchServerStore } from '@/stores/launchserver'
 import type {
   ClientPreparationState, JobRecord, LauncherArtifact, LauncherCustomizationState,
-  LaunchServerRuntimeHealth, SourcePin,
+  SourcePin,
 } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
@@ -286,7 +260,6 @@ const {
     'gravit.prestarter.install',
     'gravit.launcher.build',
     'gravit.launcher.customize',
-    'gravit.launchserver.restart',
   ],
 )
 
@@ -308,19 +281,6 @@ const postJob = (url: string, body: Record<string, unknown>) =>
 const { data: configuration, error: configurationError } = useQuery({
   queryKey: ['client-configuration'],
   queryFn: () => getJson<Configuration>('/api/clients/configuration'),
-})
-const {
-  data: launchServerHealth,
-  error: launchServerHealthError,
-  isFetching: healthFetching,
-  refetch: refetchLaunchServerHealth,
-} = useQuery({
-  queryKey: computed(() => ['launchserver-health', installationId.value]),
-  queryFn: () => getJson<LaunchServerRuntimeHealth>(
-    `/api/clients/launcher/health?installationId=${encodeURIComponent(installationId.value)}`,
-  ),
-  enabled: computed(() => Boolean(installationId.value)),
-  retry: false,
 })
 const { data: state, error: stateError } = useQuery({
   queryKey: computed(() => ['client-preparation-state', installationId.value]),
@@ -369,10 +329,6 @@ const runPrestarter = () => run({
 })
 const runLauncherBuild = () => run({
   url: '/api/clients/launcher/build',
-  body: { installationId: installationId.value },
-})
-const runLaunchServerRestart = () => run({
-  url: '/api/clients/launcher/restart',
   body: { installationId: installationId.value },
 })
 type CustomizationAssetId = 'logo' | 'background' | 'favicon'
@@ -424,7 +380,6 @@ const pageError = computed(
     customizationError.value ||
     artifactsError.value ||
     stateError.value ||
-    launchServerHealthError.value ||
     configurationError.value ||
     activeJobError.value
   ) as Error | null,
@@ -440,9 +395,6 @@ const jobFinished = async (job: JobRecord) => {
     }),
     queryClient.invalidateQueries({
       queryKey: ['launcher-customization', installationId.value],
-    }),
-    queryClient.invalidateQueries({
-      queryKey: ['launchserver-health', installationId.value],
     }),
   ])
 }

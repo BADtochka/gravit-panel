@@ -22,6 +22,15 @@ import {
 } from './client-build.service'
 import type { LoaderInstallerProvider } from './loader-installer.service'
 
+const mockControl = {
+  syncProfileProvider: async () => [],
+} as unknown as ControlFileService
+
+const controlWithSync = (overrides: Partial<ControlFileService> = {}) => ({
+  syncProfileProvider: async () => [],
+  ...overrides,
+}) as unknown as ControlFileService
+
 const context = (): JobTaskContext => ({
   signal: new AbortController().signal,
   log: () => {},
@@ -79,7 +88,7 @@ describe('ClientBuildService', () => {
         })
       },
     } as unknown as VolumeFileOperations
-    const service = new ClientBuildService({} as ControlFileService, volume)
+    const service = new ClientBuildService(mockControl, volume)
 
     expect(await service.listProfiles(installation)).toEqual({
       items: [
@@ -165,25 +174,23 @@ describe('ClientBuildService', () => {
         }
       },
     } as VolumeFileOperations
-    let restarts = 0
+    let syncs = 0
     let cacheInvalidations = 0
     volume.remove = async (_installation, path) => {
       if (path === '.updates-cache') cacheInvalidations += 1
       paths.delete(path)
       files.delete(path)
     }
+    const control = controlWithSync({
+      syncProfileProvider: async () => { syncs += 1; return [] },
+    })
     const service = new ClientBuildService(
-      {} as ControlFileService,
+      control,
       volume,
       undefined,
       undefined,
       undefined,
       undefined,
-      {
-        restartLaunchServer: async () => {
-          restarts += 1
-        },
-      },
     )
     const now = new Date().toISOString()
     const installation: GravitInstallation = {
@@ -258,7 +265,7 @@ describe('ClientBuildService', () => {
     ).toBe(true)
     expect(removed.trashPath).toContain('.gravit-panel-trash/profiles/main-')
     expect(cacheInvalidations).toBe(3)
-    expect(restarts).toBe(3)
+    expect(syncs).toBe(3)
   })
 
   test('lists, edits, and removes native optional mod metadata', async () => {
@@ -312,7 +319,7 @@ describe('ClientBuildService', () => {
       },
     } as unknown as VolumeFileOperations
     const service = new ClientBuildService(
-      {} as ControlFileService,
+      mockControl,
       volume,
       undefined,
       undefined,
@@ -456,7 +463,7 @@ describe('ClientBuildService', () => {
       },
     } as unknown as Pick<ModuleManagementService, 'install'>
     let attempts = 0
-    const control = {
+    const control = controlWithSync({
       executeClientCommand: async () => {
         order.push('apply-workspace')
         attempts += 1
@@ -467,7 +474,7 @@ describe('ClientBuildService', () => {
         paths.set('config/MirrorHelper/workspace', 'directory')
         return ['Complete']
       },
-    } as unknown as ControlFileService
+    })
     const service = new ClientBuildService(
       control,
       volume,
@@ -525,12 +532,14 @@ describe('ClientBuildService', () => {
     )
     await writeFile(join(launcher, 'updates', 'assets', 'indexes', '17.json'), '{}')
     const commands: string[] = []
-    const control = {
+    let syncs = 0
+    const control = controlWithSync({
       executeClientCommand: async (_installation: GravitInstallation, command: string) => {
         commands.push(command)
         return ['Completed']
       },
-    } as unknown as ControlFileService
+      syncProfileProvider: async () => { syncs += 1; return [] },
+    })
     const volume = {
       exists: async (
         _installation: GravitInstallation,
@@ -556,7 +565,6 @@ describe('ClientBuildService', () => {
         if (path !== '.updates-cache') throw new Error(`Unexpected removal: ${path}`)
       },
     } as VolumeFileOperations
-    let restarts = 0
     const service = new ClientBuildService(
       control,
       volume,
@@ -564,11 +572,6 @@ describe('ClientBuildService', () => {
       undefined,
       undefined,
       undefined,
-      {
-        restartLaunchServer: async () => {
-          restarts += 1
-        },
-      },
     )
     const now = new Date().toISOString()
     const installation: GravitInstallation = {
@@ -600,7 +603,7 @@ describe('ClientBuildService', () => {
         'mirrorhelper setDisableDownloadAssets true',
         'installClient fabric-1214 1.21.4 FABRIC fabric-api,sodium',
       ])
-      expect(restarts).toBe(2)
+      expect(syncs).toBe(2)
       expect(result.compatibility.authlibArtifact).toBe('LauncherAuthlib6.jar')
       expect(result.profilePath).toEndWith('profiles/fabric-1214.json')
     } finally {
@@ -620,9 +623,9 @@ describe('ClientBuildService', () => {
       readFile: async () =>
         JSON.stringify({ assetDir: 'assets', assetIndex: '17' }),
     } as unknown as VolumeFileOperations
-    const control = {
+    const control = controlWithSync({
       executeClientCommand: async () => ['Completed'],
-    } as unknown as ControlFileService
+    })
     const service = new ClientBuildService(
       control,
       volume,
@@ -705,7 +708,7 @@ describe('ClientBuildService', () => {
         expect(path).toBe('.updates-cache')
       },
     } as VolumeFileOperations
-    const control = {
+    const control = controlWithSync({
       executeClientCommand: async (_installation: GravitInstallation, command: string) => {
         commands.push(command)
         if (command === 'installClient main 1.21.4 FABRIC') {
@@ -726,7 +729,7 @@ describe('ClientBuildService', () => {
         }
         return ['Completed']
       },
-    } as unknown as ControlFileService
+    })
     const service = new ClientBuildService(
       control,
       volume,
@@ -827,7 +830,7 @@ describe('ClientBuildService', () => {
         paths.delete(path)
       },
     }
-    const control = {
+    const control = controlWithSync({
       executeClientCommand: async (_installation: GravitInstallation, command: string) => {
         commands.push(command)
         if (command === 'installClient main 1.21.1 NEOFORGE') {
@@ -850,7 +853,7 @@ describe('ClientBuildService', () => {
         }
         return ['Completed']
       },
-    } as unknown as ControlFileService
+    })
     const loaderInstallers: LoaderInstallerProvider = {
       versions: async () => ['21.1.244', '21.1.243'],
       download: async (loader, minecraftVersion, loaderVersion) => {
@@ -873,9 +876,6 @@ describe('ClientBuildService', () => {
       undefined,
       undefined,
       loaderInstallers,
-      {
-        restartLaunchServer: async () => {},
-      },
     )
     const now = new Date().toISOString()
     const installation: GravitInstallation = {
@@ -941,7 +941,7 @@ describe('ClientBuildService', () => {
       },
       remove: async () => {},
     } as unknown as VolumeFileOperations
-    const control = {
+    const control = controlWithSync({
       executeClientCommand: async (_installation: GravitInstallation, command: string) => {
         commands.push(command)
         if (command === 'installClient forge-main 1.21.1 FORGE') {
@@ -955,7 +955,7 @@ describe('ClientBuildService', () => {
         }
         return ['Completed']
       },
-    } as unknown as ControlFileService
+    })
     const service = new ClientBuildService(
       control,
       volume,
@@ -963,9 +963,6 @@ describe('ClientBuildService', () => {
       undefined,
       undefined,
       undefined,
-      {
-        restartLaunchServer: async () => {},
-      },
     )
     const now = new Date().toISOString()
     const installation: GravitInstallation = {
@@ -1013,9 +1010,9 @@ describe('ClientBuildService', () => {
         paths.delete(path)
       },
     } as VolumeFileOperations
-    const control = {
+    const control = controlWithSync({
       executeClientCommand: async () => [],
-    } as unknown as ControlFileService
+    })
     const loaderInstallers: LoaderInstallerProvider = {
       versions: async () => ['21.1.244'],
       download: async () => {
@@ -1073,12 +1070,12 @@ describe('ClientBuildService', () => {
     )
     await writeFile(join(launcher, 'updates', 'Launcher.jar'), 'launcher')
     const order: string[] = []
-    const control = {
+    const control = controlWithSync({
       executeBuildCommand: async () => {
         order.push('build')
         return ['Build successful']
       },
-    } as unknown as ControlFileService
+    })
     const runtime = {
       ensureInstalled: async () => {
         order.push('runtime')
@@ -1136,7 +1133,7 @@ describe('ClientBuildService', () => {
       JSON.stringify({ updatesProvider: { updatesDir: 'updates', binaryName: 'Launcher' } }),
     )
     const order: string[] = []
-    const control = {
+    const control = controlWithSync({
       executeModuleCommand: async (
         _installation: GravitInstallation,
         command: string,
@@ -1153,7 +1150,7 @@ describe('ClientBuildService', () => {
         await writeFile(join(launcher, 'updates', 'Launcher.exe'), 'prestarter-launcher')
         return ['Build successful']
       },
-    } as unknown as ControlFileService
+    })
     const volume = {
       sha256: async (_installation: GravitInstallation, path: string) =>
         path === 'Prestarter.exe'
@@ -1245,12 +1242,12 @@ describe('ClientBuildService', () => {
       },
       sha256: async () => null,
     }
-    const control = {
+    const control = controlWithSync({
       executeBuildCommand: async () => {
         await writeFile(join(launcher, 'updates', 'Launcher.jar'), 'custom-launcher')
         return ['Build successful']
       },
-    } as unknown as ControlFileService
+    })
     const runtime = {
       ensureInstalled: async () => ({
         repository: 'https://github.com/GravitLauncher/LauncherRuntime',
@@ -1311,7 +1308,7 @@ describe('ClientBuildService', () => {
   })
 
   test('rejects non-PNG launcher customization assets before writing files', async () => {
-    const service = new ClientBuildService({} as ControlFileService)
+    const service = new ClientBuildService(mockControl)
     const now = new Date().toISOString()
     const installation: GravitInstallation = {
       id: crypto.randomUUID(),
@@ -1343,7 +1340,7 @@ describe('ClientBuildService', () => {
       JSON.stringify({ updatesProvider: { updatesDir: 'public', binaryName: 'Custom' } }),
     )
     await writeFile(join(launcher, 'public', 'Custom.jar'), 'launcher')
-    const service = new ClientBuildService({} as ControlFileService)
+    const service = new ClientBuildService(mockControl)
     const now = new Date().toISOString()
     const installation = {
       id: crypto.randomUUID(),
@@ -1401,7 +1398,7 @@ describe('ClientBuildService', () => {
         return null
       },
     } as VolumeFileOperations
-    const service = new ClientBuildService({} as ControlFileService, volume)
+    const service = new ClientBuildService(mockControl, volume)
     const now = new Date().toISOString()
     const installation: GravitInstallation = {
       id: crypto.randomUUID(),

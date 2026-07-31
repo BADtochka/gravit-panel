@@ -182,7 +182,7 @@
       {{ (configurationError || mutationError)?.message }}
     </p>
 
-    <JobLogCard :job="activeJob" title="LaunchServer setup" @finished="installationFinished" />
+    <JobProgressNotifier :job="activeJob" title="LaunchServer setup" @finished="installationFinished" />
   </section>
 </template>
 
@@ -197,7 +197,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import JobLogCard from '@/components/jobs/JobLogCard.vue'
+import JobProgressNotifier from '@/components/jobs/JobProgressNotifier.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'

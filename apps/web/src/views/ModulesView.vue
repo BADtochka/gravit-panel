@@ -220,12 +220,12 @@
       </TabsContent>
     </Tabs>
 
-    <JobLogCard :job="activeJob" title="Module job" @finished="jobFinished" />
+    <JobProgressNotifier :job="activeJob" title="Module job" @finished="jobFinished" />
   </section>
 </template>
 
 <script setup lang="ts">
-import JobLogCard from '@/components/jobs/JobLogCard.vue'
+import JobProgressNotifier from '@/components/jobs/JobProgressNotifier.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   AlertDialog,

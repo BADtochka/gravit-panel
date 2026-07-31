@@ -9,6 +9,8 @@ export const launchServerCommands = [
   'profile create',
   'serverStatus',
   'securitycheck',
+  'config profileprovider sync',
+  'config launchserver reload',
 ] as const
 
 export type LaunchServerCommand = (typeof launchServerCommands)[number]

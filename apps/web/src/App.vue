@@ -1,5 +1,13 @@
 <template>
   <div class="min-h-screen bg-background text-foreground">
+    <Toaster
+      class="pointer-events-auto"
+      position="bottom-right"
+      :theme="theme"
+      rich-colors
+      close-button
+    />
+    <JobNotificationCenter />
     <div v-if="authLoading" class="grid min-h-screen place-items-center">
       <div class="flex items-center gap-2 text-sm text-muted-foreground">
         <LoaderCircle class="size-4 animate-spin" />
@@ -155,8 +163,10 @@
 </template>
 
 <script setup lang="ts">
+import JobNotificationCenter from '@/components/jobs/JobNotificationCenter.vue'
 import ProfileSwitcher from '@/components/layout/ProfileSwitcher.vue'
 import { Button } from '@/components/ui/button'
+import { Toaster } from '@/components/ui/sonner'
 import {
   Sheet,
   SheetContent,
@@ -189,6 +199,7 @@ import {
 import { storeToRefs } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import 'vue-sonner/style.css'
 
 interface LaunchServerResponse {
   item: GravitInstallation | null

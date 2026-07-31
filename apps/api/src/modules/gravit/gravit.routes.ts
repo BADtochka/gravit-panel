@@ -12,6 +12,7 @@ import { activeJobForInstallation, jobsRunner } from '../jobs/jobs.runtime'
 import { launchServerCommands } from './commands'
 import { ControlFileBusyError } from './control-file.service'
 import {
+  controlFileService,
   credentialCipher,
   credentialKeyService,
   installationsStore,
@@ -170,6 +171,42 @@ export const createGravitRoutes = ({
   .post(
     '/securitycheck',
     ({ body, set }) => executeInspection(body.installationId, 'securitycheck', set),
+    { body: installationBody },
+  )
+  .post(
+    '/sync-profiles',
+    async ({ body, set }) => {
+      const installation = installations.get(body.installationId)
+      if (!installation) {
+        set.status = 404
+        return { message: 'LauncherDockered installation not found.' }
+      }
+      try {
+        const lines = await controlFileService.syncProfileProvider(installation)
+        return { installationId: installation.id, lines }
+      } catch (error) {
+        set.status = error instanceof ControlFileBusyError ? 409 : 503
+        return { message: error instanceof Error ? error.message : String(error) }
+      }
+    },
+    { body: installationBody },
+  )
+  .post(
+    '/reload-config',
+    async ({ body, set }) => {
+      const installation = installations.get(body.installationId)
+      if (!installation) {
+        set.status = 404
+        return { message: 'LauncherDockered installation not found.' }
+      }
+      try {
+        const lines = await controlFileService.reloadLaunchServerConfig(installation)
+        return { installationId: installation.id, lines }
+      } catch (error) {
+        set.status = error instanceof ControlFileBusyError ? 409 : 503
+        return { message: error instanceof Error ? error.message : String(error) }
+      }
+    },
     { body: installationBody },
   )
 }
