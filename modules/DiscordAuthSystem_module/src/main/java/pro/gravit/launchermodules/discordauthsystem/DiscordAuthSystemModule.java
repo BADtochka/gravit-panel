@@ -53,8 +53,8 @@ public class DiscordAuthSystemModule extends LauncherModule {
 
         DiscordAuthSystemContext.initialize(server, config);
 
-        NettyWebAPIHandler.addNewSeverlet("auth/discord", new DiscordWebApiHandler(server));
         NettyWebAPIHandler.addNewSeverlet("auth/discord/portal", new DiscordPortalWebApiHandler(server));
+        NettyWebAPIHandler.addNewSeverlet("auth/discord", new DiscordWebApiHandler(server));
         logger.info("DiscordAuthSystem web endpoint registered at /webapi/auth/discord");
         logger.info("DiscordAuthSystem portal endpoint registered at /webapi/auth/discord/portal");
     }

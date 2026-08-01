@@ -28,24 +28,27 @@ export const publicPortalRoutes = new Elysia({ prefix: '/public' })
       hiddenLauncherVariants: t.Array(t.Union([t.Literal('jar'), t.Literal('windows-x64')])),
     }),
   })
-  .get('/auth/login', ({ request, set }) => {
+  .get('/auth/login', ({ request }) => {
     const base = env.LAUNCHSERVER_PUBLIC_URL.replace(/\/+$/, '')
     try {
       const url = new URL(`${base}/webapi/auth/discord/portal`)
-      set.redirect = url.toString()
-      return
+      return Response.redirect(url, 302)
     } catch {
-      set.status = 503
-      return { message: 'The Discord portal endpoint is not configured.' }
+      return Response.json({ message: 'The Discord portal endpoint is not configured.' }, { status: 503 })
     }
   })
-  .get('/auth/callback', ({ query, request, set }) => {
+  .get('/auth/callback', ({ query, request }) => {
     try {
       const completed = portal.completeTicket(query.ticket)
-      set.headers['set-cookie'] = serializeCookie(playerSessionCookie, completed.session, playerCookieOptions)
-      set.redirect = `${panelRoot(request).replace(/\/$/, '')}/?playerAuth=success`
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location: `${panelRoot(request).replace(/\/$/, '')}/account?playerAuth=success`,
+          'set-cookie': serializeCookie(playerSessionCookie, completed.session, playerCookieOptions),
+        },
+      })
     } catch (error) {
-      set.redirect = `${panelRoot(request).replace(/\/$/, '')}/?playerAuth=error`
+      return Response.redirect(`${panelRoot(request).replace(/\/$/, '')}/account?playerAuth=error`, 302)
     }
   }, { query: t.Object({ ticket: t.String({ minLength: 1, maxLength: 4096 }) }) })
   .get('/session', ({ request }) => ({ player: sessionFor(request) }))
