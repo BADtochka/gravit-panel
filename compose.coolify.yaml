@@ -30,6 +30,12 @@ services:
       # Coolify generates this FQDN for the launchserver proxy service. The
       # setup form uses it as the default public LaunchServer address.
       LAUNCHSERVER_PUBLIC_ADDRESS: ${SERVICE_FQDN_LAUNCHSERVER_80}
+      # The web nginx strips /launcher and proxies it to the launchserver
+      # service, so player portal OAuth can stay on the panel hostname.
+      LAUNCHSERVER_PUBLIC_URL: https://${SERVICE_FQDN_PANELWEB}/launcher
+      # Coolify provides this stable 32-byte value for the application. It is
+      # also written into DiscordAuthSystem Config.json for portal tickets.
+      PUBLIC_PORTAL_HMAC_SECRET: ${SERVICE_REALBASE64_32_GRAVITPANEL}
       CREDENTIAL_ENCRYPTION_KEY: ${SERVICE_REALBASE64_32_GRAVITPANEL}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       # PANEL_PUBLIC_URL is the single source of truth for the panel's
