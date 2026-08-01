@@ -1,10 +1,13 @@
-import type { JobRecord, ServerBindingInput } from '@gravit-panel/shared'
+import type { JobRecord, ServerBindingInput, ServerCommandType } from '@gravit-panel/shared'
 import { Elysia, t } from 'elysia'
 import { basename } from 'node:path'
 import { installationsStore } from '../gravit/gravit.runtime'
 import { activeJobForInstallation, jobsRunner } from '../jobs/jobs.runtime'
 import {
   serverBindingService,
+  serverAgentEvents,
+  serverAgentService,
+  serverAgentStore,
   serverBindingsStore,
   serverBootstrapService,
   serverBootstrapStore,
@@ -343,6 +346,80 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
       body: t.Object({ installationId, confirmRevoke: t.Literal(true) }),
     },
   )
+  .get(
+    '/bindings/:bindingId/runtime',
+    ({ params, query, set }) => {
+      const installation = findInstallation(query.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const binding = serverBindingsStore.get(params.bindingId)
+      if (!binding || binding.installationId !== installation.id) {
+        set.status = 404
+        return { message: 'Managed server binding not found.' }
+      }
+      return serverAgentService.runtime(binding.id!)
+    },
+    { params: t.Object({ bindingId }), query: t.Object({ installationId }) },
+  )
+  .post(
+    '/bindings/:bindingId/commands',
+    ({ params, body, set }) => {
+      const installation = findInstallation(body.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const binding = serverBindingsStore.get(params.bindingId)
+      if (!binding || binding.installationId !== installation.id) {
+        set.status = 404
+        return { message: 'Managed server binding not found.' }
+      }
+      try {
+        const command = serverAgentService.createCommand(
+          binding.id!,
+          body.type as ServerCommandType,
+          body.payload,
+        )
+        set.status = 202
+        return command
+      } catch (error) {
+        set.status = 422
+        return { message: error instanceof Error ? error.message : String(error) }
+      }
+    },
+    {
+      params: t.Object({ bindingId }),
+      body: t.Object({
+        installationId,
+        type: t.Union([
+          t.Literal('service.start'),
+          t.Literal('service.stop'),
+          t.Literal('service.restart'),
+          t.Literal('console.execute'),
+        ]),
+        payload: t.Object({
+          command: t.Optional(t.String({ maxLength: 1000 })),
+        }),
+      }),
+    },
+  )
+  .get(
+    '/bindings/:bindingId/events',
+    ({ params, query, headers, set }) => {
+      const installation = findInstallation(query.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const binding = serverBindingsStore.get(params.bindingId)
+      if (!binding || binding.installationId !== installation.id) {
+        set.status = 404
+        return { message: 'Managed server binding not found.' }
+      }
+      const afterSequence = Number(headers['last-event-id'] ?? 0)
+      return serverAgentEvents.stream(
+        binding.id!,
+        () => serverAgentStore.listEvents(
+          binding.id!,
+          Number.isSafeInteger(afterSequence) && afterSequence > 0 ? afterSequence : 0,
+        ),
+      )
+    },
+    { params: t.Object({ bindingId }), query: t.Object({ installationId }) },
+  )
 
 export const serverBootstrapRoutes = new Elysia({ prefix: '/server-bootstrap' })
   .get(
@@ -448,6 +525,19 @@ const bearerToken = (authorization: string | undefined) =>
   authorization?.match(/^Bearer ([A-Za-z0-9+/=_-]{32,256})$/)?.[1] ?? ''
 
 export const serverAgentRoutes = new Elysia({ prefix: '/server-agent' })
+  .ws('/connect', {
+    idleTimeout: 45,
+    maxPayloadLength: 1024 * 1024,
+    open: (socket) => {
+      serverAgentService.open(socket)
+    },
+    message: (socket, message) => {
+      serverAgentService.handle(socket, message)
+    },
+    close: (socket) => {
+      serverAgentService.close(socket)
+    },
+  })
   .get('/update', ({ headers, set }) => {
     const token = bearerToken(headers.authorization)
     const binding = serverBootstrapService.updaterBinding(token)

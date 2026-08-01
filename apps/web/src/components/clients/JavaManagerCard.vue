@@ -350,7 +350,7 @@ watch(
 )
 
 const mutation = useMutation({
-  mutationFn: ({ url, body }: { url: string; body: BodyInit | Record<string, unknown> }) =>
+  mutationFn: ({ url, body }: { url: string; body: FormData | Record<string, unknown> }) =>
     body instanceof FormData
       ? getJson<JobRecord>(url, { method: 'POST', body })
       : post(url, body),

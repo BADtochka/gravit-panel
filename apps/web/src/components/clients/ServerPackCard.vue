@@ -18,18 +18,18 @@
 
       <div class="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
         <div>
-          <label class="text-xs font-medium" for="server-pack-path">Destination path</label>
+          <label class="text-xs font-medium" :for="pathInputId">Destination path</label>
           <Input
-            id="server-pack-path"
+            :id="pathInputId"
             v-model="uploadPath"
             class="mt-1"
             placeholder="config/server.properties"
           />
         </div>
         <div>
-          <label class="text-xs font-medium" for="server-pack-file">Local file</label>
+          <label class="text-xs font-medium" :for="fileInputId">Local file</label>
           <Input
-            id="server-pack-file"
+            :id="fileInputId"
             class="mt-1"
             type="file"
             @change="selectFile"
@@ -46,48 +46,57 @@
         </Button>
       </div>
 
-      <div class="divide-y border-y">
+      <div class="h-[60vh] max-h-[32rem] overflow-auto border-y md:h-[32rem]">
         <div
-          v-if="!pack?.items.length"
-          class="p-4 text-sm text-muted-foreground"
+          v-if="packLoading"
+          class="grid h-full place-items-center p-4 text-sm text-muted-foreground"
+        >
+          Loading server pack...
+        </div>
+        <div
+          v-else-if="!pack?.items.length"
+          class="grid h-full place-items-center p-4 text-center text-sm text-muted-foreground"
         >
           This server pack workspace is empty.
         </div>
-        <div
-          v-for="file in pack?.items"
-          :key="file.path"
-          class="flex items-center justify-between gap-3 border-b px-4 py-3 last:border-b-0"
-        >
-          <div class="min-w-0">
-            <p class="truncate font-mono text-xs">{{ file.path }}</p>
-            <p class="text-xs text-muted-foreground">{{ formatBytes(file.size) }}</p>
+        <div v-else class="divide-y">
+          <div
+            v-for="file in pack.items"
+            :key="file.path"
+            class="flex items-center justify-between gap-3 px-4 py-3"
+          >
+            <div class="min-w-0">
+              <p class="truncate font-mono text-xs">{{ file.path }}</p>
+              <p class="text-xs text-muted-foreground">{{ formatBytes(file.size) }}</p>
+            </div>
+            <AlertDialog>
+              <AlertDialogTrigger as-child>
+                <Button :disabled="pending" size="sm" type="button" variant="ghost">
+                  <Trash2 class="size-4" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Remove {{ file.path }}?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    The file moves to recoverable trash and a new pack version is assigned.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction @click="remove(file.path)">Move to trash</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
-          <AlertDialog>
-            <AlertDialogTrigger as-child>
-              <Button :disabled="pending" size="sm" type="button" variant="ghost">
-                <Trash2 class="size-4" />
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Remove {{ file.path }}?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  The file moves to recoverable trash and a new pack version is assigned.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction @click="remove(file.path)">Move to trash</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
         </div>
       </div>
     </div>
     <div>
       <p class="text-xs text-muted-foreground">
         Latest desired version: {{ latestVersion ? `v${latestVersion.versionNumber}` : 'empty' }}.
-        The installed updater applies it automatically.
+        The installed updater applies files without restarting the server. Restart it manually to
+        load mod changes.
       </p>
     </div>
   </section>
@@ -132,7 +141,7 @@ const getJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise
 }
 
 const queryKey = computed(() => ['server-pack', props.installationId, props.bindingId])
-const { data: pack, error: queryError } = useQuery({
+const { data: pack, error: queryError, isPending: packLoading } = useQuery({
   queryKey,
   queryFn: () => getJson<{ items: ServerPackFile[]; versions: ServerPackVersion[] }>(
     `/api/servers/bindings/${props.bindingId}/pack?installationId=${encodeURIComponent(props.installationId)}`,
@@ -188,6 +197,9 @@ const error = computed(
     removeMutation.error.value
   ) as Error | null,
 )
+const safeBindingId = computed(() => props.bindingId.replace(/[^a-zA-Z0-9_-]/g, '-'))
+const pathInputId = computed(() => `server-pack-path-${safeBindingId.value}`)
+const fileInputId = computed(() => `server-pack-file-${safeBindingId.value}`)
 const formatBytes = (value: number) =>
   value < 1024 * 1024
     ? `${Math.max(1, Math.round(value / 1024))} KiB`

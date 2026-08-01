@@ -57,10 +57,11 @@ test('server bootstrap claim survives downloads and ends only after a terminal r
     gameArgs: ['nogui'],
   })
   const drafts = new ServerBootstrapStore(db)
+  const packs = new ServerPackStore(db)
   const service = new ServerBootstrapService(
     drafts,
     bindings,
-    new ServerPackStore(db),
+    packs,
     {
       getProfile: async () => ({
         name: 'main',
@@ -129,7 +130,9 @@ test('server bootstrap claim survives downloads and ends only after a terminal r
   expect(script).toContain('Group=$SERVICE_GID')
   expect(script).toContain('WorkingDirectory=$SERVICE_ROOT')
   expect(script).not.toContain('WorkingDirectory="$WORKDIR"')
-  expect(script).toContain('systemd-analyze verify "$UNIT_TMP"')
+  expect(script).toContain('systemd-analyze verify "${UNITS[@]}"')
+  expect(script).toContain('ExecStartPre=+$FIREWALL_ROOT/allow-local-rcon.sh $RCON_PORT')
+  expect(script).toContain('ExecStart=/usr/local/bin/gravit-agent')
   expect(script).toContain('systemctl enable --now gravit-')
   const scriptDirectory = await mkdtemp(join(tmpdir(), 'gravit-bootstrap-script-'))
   try {
@@ -140,7 +143,26 @@ test('server bootstrap claim survives downloads and ends only after a terminal r
     await rm(scriptDirectory, { recursive: true, force: true })
   }
   expect(await service.start(installation, claim!)).not.toBeNull()
-  expect(service.report(claim!, 'installed', undefined, 'u'.repeat(48))).not.toBeNull()
+  const updaterToken = 'u'.repeat(48)
+  expect(service.report(claim!, 'installed', undefined, updaterToken)).not.toBeNull()
+  const version = packs.create({
+    installationId: installation.id,
+    profileName: 'main',
+    bindingId: binding.id!,
+    minecraftVersion: '1.21.1',
+    loader: 'VANILLA',
+    loaderVersion: null,
+    fileCount: 1,
+    size: 1,
+    sha256: 'd'.repeat(64),
+    archivePath: '/tmp/server-pack.tar.gz',
+    manifest: { files: [{ path: 'mods/example.jar', size: 1, sha256: 'e'.repeat(64) }] },
+  })
+  bindings.setDesiredPack(binding.id!, version.id)
+  const updaterScript = service.updaterScript(updaterToken)
+  expect(updaterScript).toContain('tar -xzf "$ARCHIVE"')
+  expect(updaterScript).not.toContain('systemctl stop')
+  expect(updaterScript).not.toContain('systemctl start')
   expect(await service.start(installation, claim!)).toBeNull()
   expect(JSON.stringify(drafts.internal(draft.id))).not.toContain('header.payload.signature')
 })

@@ -13,6 +13,15 @@ FROM dependencies AS build
 COPY . .
 RUN bun run --filter @gravit-panel/web build
 
+FROM golang:1.22-alpine AS server-agent-build
+WORKDIR /src
+COPY agent/go.mod agent/go.sum ./
+RUN go mod download
+COPY agent/ ./
+RUN mkdir -p /out \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/gravit-agent-amd64 . \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o /out/gravit-agent-arm64 .
+
 FROM gradle:8.10.2-jdk21-alpine AS launcher-runtime-build
 RUN apk add --no-cache git
 WORKDIR /src
@@ -36,6 +45,7 @@ COPY --from=launcher-runtime-build /out /
 FROM build AS api-runtime
 RUN apk add --no-cache docker-cli docker-cli-compose git tar unzip
 COPY --from=launcher-runtime-build /out /opt/gravit-panel/launcher-runtime
+COPY --from=server-agent-build /out /opt/gravit-panel/server-agent
 ENV NODE_ENV=production
 WORKDIR /app
 EXPOSE 3000

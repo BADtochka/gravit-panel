@@ -190,4 +190,51 @@ export const schema = `
 
   CREATE INDEX IF NOT EXISTS server_bootstrap_binding_idx
     ON server_bootstrap_drafts (binding_id, created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS server_agents (
+    binding_id TEXT PRIMARY KEY REFERENCES server_bindings(id) ON DELETE CASCADE,
+    agent_version TEXT NOT NULL,
+    hostname TEXT NOT NULL,
+    capabilities_json TEXT NOT NULL,
+    runtime_json TEXT,
+    connected_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS server_commands (
+    id TEXT PRIMARY KEY,
+    binding_id TEXT NOT NULL REFERENCES server_bindings(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK (
+      type IN ('service.start', 'service.stop', 'service.restart', 'console.execute')
+    ),
+    payload_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+      status IN ('queued', 'delivered', 'running', 'succeeded', 'failed')
+    ),
+    output TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    delivered_at TEXT,
+    started_at TEXT,
+    finished_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS server_commands_binding_status_idx
+    ON server_commands (binding_id, status, created_at);
+
+  CREATE TABLE IF NOT EXISTS server_runtime_events (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    binding_id TEXT NOT NULL REFERENCES server_bindings(id) ON DELETE CASCADE,
+    command_id TEXT REFERENCES server_commands(id) ON DELETE SET NULL,
+    type TEXT NOT NULL,
+    message TEXT NOT NULL,
+    cursor TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS server_runtime_events_binding_sequence_idx
+    ON server_runtime_events (binding_id, sequence);
+
+  CREATE UNIQUE INDEX IF NOT EXISTS server_runtime_events_binding_cursor_idx
+    ON server_runtime_events (binding_id, cursor) WHERE cursor IS NOT NULL;
 `

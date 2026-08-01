@@ -774,6 +774,59 @@ export interface ServerBootstrapIssueResult {
   expiresAt: string | null
 }
 
+export type ServerCommandType =
+  | 'service.start'
+  | 'service.stop'
+  | 'service.restart'
+  | 'console.execute'
+
+export type ServerCommandStatus =
+  | 'queued'
+  | 'delivered'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+
+export interface ServerCommand {
+  id: string
+  bindingId: string
+  type: ServerCommandType
+  payload: Record<string, unknown>
+  status: ServerCommandStatus
+  output: string | null
+  error: string | null
+  createdAt: string
+  deliveredAt: string | null
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export interface ServerServiceRuntime {
+  state: string
+  subState: string
+  mainPid: number
+  updatedAt: string
+}
+
+export interface ServerRuntimeState {
+  bindingId: string
+  connected: boolean
+  agentVersion: string | null
+  hostname: string | null
+  capabilities: string[]
+  lastSeenAt: string | null
+  runtime: ServerServiceRuntime | null
+}
+
+export interface ServerRuntimeEvent {
+  sequence: number
+  bindingId: string
+  commandId?: string
+  type: string
+  message: string
+  createdAt: string
+}
+
 export interface ClientProfileUpdateInput {
   installationId: string
   name: string

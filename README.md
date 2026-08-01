@@ -8,6 +8,7 @@ Stack:
 - Tailwind CSS, shadcn-vue
 - Bun, Elysia
 - Bun workspaces
+- Go host agent for remote systemd Minecraft servers
 
 Project plan: [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)
 
@@ -41,11 +42,25 @@ https://mine.example.com   → launchserver service → managed nginx (host:1754
 The managed workspace uses `PANEL_DATA_DIR/installations/default`. The proxy
 service does not mount the legacy `PANEL_DATA_DIR/launchserver` directory.
 
+Managed Minecraft servers run on remote Linux hosts through the outbound
+`gravit-agent` WebSocket connection. One host agent can manage multiple server
+bindings. Commands use local RCON, logs come from journald, and no RCON or
+management port is exposed to the panel. Production API images contain static
+agent binaries for Linux amd64 and arm64.
+
+Remote hosts require systemd, journald, nftables, and `ss` from iproute2. The
+bootstrap command installs the agent, creates its systemd service, and adds a
+fail-closed nftables rule for each local RCON port. Existing servers need one
+new bootstrap run to enable runtime management alongside the legacy pack-update
+timer; moving pack application into the agent is a later migration step.
+
 ## Development
 
 ```bash
 bun install
 bun run build:launcher-runtime:local
+make -C agent build
+export SERVER_AGENT_ARTIFACTS_DIR="$PWD/agent/dist"
 bun run dev
 ```
 

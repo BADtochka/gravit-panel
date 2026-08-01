@@ -42,6 +42,7 @@ services:
       LAUNCHSERVER_PUBLIC_URL: ${LAUNCHSERVER_PUBLIC_URL:-http://${LAUNCHSERVER_PUBLIC_ADDRESS:-localhost:9274}}
       SERVER_PACK_MAX_FILE_BYTES: ${SERVER_PACK_MAX_FILE_BYTES:-268435456}
       SERVER_PACK_MAX_BYTES: ${SERVER_PACK_MAX_BYTES:-4294967296}
+      SERVER_AGENT_ARTIFACTS_DIR: /opt/gravit-panel/server-agent
     depends_on:
       launchserver:
         condition: service_healthy

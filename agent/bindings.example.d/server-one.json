@@ -1,0 +1,10 @@
+{
+  "id": "panel-binding-id-1",
+  "token": "replace-with-binding-token",
+  "unit": "gravit-server-12345678-1234-1234-1234-123456789abc.service",
+  "rcon": {
+    "address": "127.0.0.1:25575",
+    "password": "replace-with-rcon-password",
+    "timeoutSeconds": 10
+  }
+}

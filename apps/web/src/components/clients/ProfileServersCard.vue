@@ -87,69 +87,100 @@
         </div>
       </div>
 
-      <div>
-        <div v-if="!bindings?.items.length" class="p-4 text-sm text-muted-foreground">
-          No servers are attached to this profile.
-        </div>
-        <div
-          v-for="binding in bindings?.items"
-          :key="binding.id ?? binding.name"
-          class="space-y-3 border-t py-5 first:border-t-0"
-        >
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <div class="flex flex-wrap items-center gap-2">
-                <p class="font-medium">{{ binding.name }}</p>
-                <Badge v-if="binding.isDefault" variant="secondary">Default</Badge>
+      <div
+        v-if="bindings?.items.length"
+        class="grid items-start gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]"
+      >
+        <div class="min-w-0 space-y-2 lg:sticky lg:top-4">
+          <p class="text-xs font-medium uppercase text-muted-foreground">Profile servers</p>
+          <div class="max-h-[24rem] space-y-2 overflow-auto pr-1 lg:max-h-[calc(100vh-8rem)]">
+            <button
+              v-for="binding in bindings.items"
+              :key="bindingKeyFor(binding)"
+              type="button"
+              class="w-full rounded-md border bg-card p-3 text-left transition-colors hover:bg-accent"
+              :class="{
+                'border-foreground/30 bg-accent': selectedBindingKey === bindingKeyFor(binding),
+              }"
+              @click="selectedBindingKey = bindingKeyFor(binding)"
+            >
+              <span class="flex items-start justify-between gap-2">
+                <span class="min-w-0">
+                  <span class="block truncate text-sm font-medium">{{ binding.name }}</span>
+                  <span class="mt-1 block truncate text-xs text-muted-foreground">
+                    {{ binding.serverAddress }}:{{ binding.serverPort }}
+                  </span>
+                </span>
                 <Badge :variant="binding.managed ? 'outline' : 'destructive'">
                   {{ binding.managed ? binding.deploymentState : 'Legacy' }}
                 </Badge>
+              </span>
+              <Badge v-if="binding.isDefault" class="mt-2" variant="secondary">Default</Badge>
+            </button>
+          </div>
+        </div>
+
+        <div v-if="selectedBinding" class="min-w-0 space-y-4 rounded-lg border p-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h3 class="font-semibold">{{ selectedBinding.name }}</h3>
+                <Badge v-if="selectedBinding.isDefault" variant="secondary">Default</Badge>
+                <Badge :variant="selectedBinding.managed ? 'outline' : 'destructive'">
+                  {{ selectedBinding.managed ? selectedBinding.deploymentState : 'Legacy' }}
+                </Badge>
               </div>
               <p class="mt-1 text-xs text-muted-foreground">
-                {{ binding.serverAddress }}:{{ binding.serverPort }}
+                {{ selectedBinding.serverAddress }}:{{ selectedBinding.serverPort }}
               </p>
             </div>
             <div class="flex flex-wrap gap-2">
               <Button
-                v-if="!binding.managed"
+                v-if="!selectedBinding.managed"
                 size="sm"
                 type="button"
                 variant="outline"
-                @click="adopt(binding)"
+                @click="adopt(selectedBinding)"
               >
                 <Plus class="size-4" />
                 Adopt
               </Button>
               <Button
-                v-if="binding.managed"
+                v-if="selectedBinding.managed"
                 size="sm"
                 type="button"
                 variant="outline"
-                @click="edit(binding)"
+                @click="edit(selectedBinding)"
               >
                 <Pencil class="size-4" />
                 Edit
               </Button>
               <Button
-                v-if="binding.managed"
+                v-if="selectedBinding.managed"
                 size="sm"
                 type="button"
                 variant="outline"
                 :disabled="pending"
-                @click="requestPrepare(binding)"
+                @click="requestPrepare(selectedBinding)"
               >
                 <Terminal class="size-4" />
                 Prepare install
               </Button>
-              <AlertDialog v-if="binding.managed">
+              <AlertDialog v-if="selectedBinding.managed">
                 <AlertDialogTrigger as-child>
-                  <Button size="sm" type="button" variant="ghost" :disabled="pending">
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                    :disabled="pending"
+                    :aria-label="`Remove ${selectedBinding.name}`"
+                  >
                     <Trash2 class="size-4" />
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Remove {{ binding.name }}?</AlertDialogTitle>
+                    <AlertDialogTitle>Remove {{ selectedBinding.name }}?</AlertDialogTitle>
                     <AlertDialogDescription>
                       The server disappears from the launcher profile. Its native JWT cannot be
                       revoked separately.
@@ -157,16 +188,25 @@
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction @click="remove(binding)">Remove server</AlertDialogAction>
+                    <AlertDialogAction @click="remove(selectedBinding)">Remove server</AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
             </div>
           </div>
-          <div v-if="binding.id && activeDraft(binding.id)" class="rounded-md bg-muted p-3">
+
+          <Alert v-if="!selectedBinding.managed">
+            <TriangleAlert class="size-4" />
+            <AlertTitle>Legacy server binding</AlertTitle>
+            <AlertDescription>
+              Adopt this server to manage installation, runtime controls, and pack files.
+            </AlertDescription>
+          </Alert>
+
+          <div v-if="activeDraft" class="rounded-md bg-muted p-3">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <p class="text-xs text-muted-foreground">
-                <template v-if="activeDraft(binding.id)?.status === 'ready'">
+                <template v-if="activeDraft.status === 'ready'">
                   Bundle ready for command generation.
                 </template>
                 <template v-else>
@@ -176,11 +216,11 @@
               </p>
               <div class="flex gap-2">
                 <Button
-                  v-if="activeDraft(binding.id)?.status === 'ready'"
+                  v-if="activeDraft.status === 'ready'"
                   size="sm"
                   type="button"
                   :disabled="pending"
-                  @click="issue(activeDraft(binding.id)!)"
+                  @click="issue(activeDraft)"
                 >
                   Generate curl command
                 </Button>
@@ -199,7 +239,7 @@
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction @click="revoke(activeDraft(binding.id)!)">
+                      <AlertDialogAction @click="revoke(activeDraft)">
                         Revoke command
                       </AlertDialogAction>
                     </AlertDialogFooter>
@@ -208,31 +248,44 @@
               </div>
             </div>
           </div>
+
           <div
-            v-if="binding.managed && binding.id && binding.updaterInstalledAt"
+            v-if="selectedBinding.managed && selectedBinding.id && selectedBinding.updaterInstalledAt"
             class="bg-muted/40 p-3"
           >
             <p class="text-xs font-medium">Manual pack update</p>
             <code class="mt-2 block overflow-x-auto rounded bg-muted p-2 text-xs">
-              sudo systemctl start gravit-{{ binding.id.slice(0, 8) }}-pack-update.service
+              sudo systemctl start gravit-{{ selectedBinding.id.slice(0, 8) }}-pack-update.service
             </code>
             <p class="mt-2 text-xs text-muted-foreground">
-              Applied: {{ binding.appliedPackVersionId ? 'current version reported' : 'not reported' }}
-              · last poll {{ binding.updaterLastSeenAt ?? 'never' }}
+              Applied: {{ selectedBinding.appliedPackVersionId ? 'current version reported' : 'not reported' }}
+              · last poll {{ selectedBinding.updaterLastSeenAt ?? 'never' }}
             </p>
-            <p v-if="binding.updaterError" class="mt-2 text-xs text-destructive">
-              Last update failed: {{ binding.updaterError }}
+            <p v-if="selectedBinding.updaterError" class="mt-2 text-xs text-destructive">
+              Last update failed: {{ selectedBinding.updaterError }}
             </p>
           </div>
-          <ServerPackCard
-            v-if="binding.managed && binding.id"
-            :binding-id="binding.id"
+
+          <ServerRuntimeConsole
+            v-if="selectedBinding.managed && selectedBinding.id"
+            :key="selectedBinding.id"
+            :binding-id="selectedBinding.id"
             :disabled="pending"
             :installation-id="installationId"
-            :server-name="binding.name"
+          />
+          <ServerPackCard
+            v-if="selectedBinding.managed && selectedBinding.id"
+            :key="`pack-${selectedBinding.id}`"
+            :binding-id="selectedBinding.id"
+            :disabled="pending"
+            :installation-id="installationId"
+            :server-name="selectedBinding.name"
             @job="emit('job', $event)"
           />
         </div>
+      </div>
+      <div v-else class="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+        No servers are attached to this profile.
       </div>
 
       <AlertDialog v-model:open="eulaOpen">
@@ -267,6 +320,7 @@
 
 <script setup lang="ts">
 import ServerPackCard from '@/components/clients/ServerPackCard.vue'
+import ServerRuntimeConsole from '@/components/servers/ServerRuntimeConsole.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -289,7 +343,7 @@ import type {
   ServerBootstrapDraft,
   ServerBootstrapIssueResult,
 } from '@gravit-panel/shared'
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
   Copy, Pencil, Plus, Save, ShieldAlert, Terminal, Trash2, TriangleAlert,
 } from '@lucide/vue'
@@ -303,6 +357,7 @@ const props = defineProps<{
 const emit = defineEmits<{ job: [job: JobRecord] }>()
 const queryClient = useQueryClient()
 const editing = ref<'new' | string | null>(null)
+const selectedBindingKey = ref('')
 const issuedCommand = ref('')
 const eulaOpen = ref(false)
 const pendingPrepareBinding = ref<ProfileServerBinding | null>(null)
@@ -344,26 +399,46 @@ const { data: auth } = useQuery({
 watch(auth, (value) => {
   if (!form.authId) form.authId = value?.providers.find((item) => item.isDefault)?.id ?? value?.providers[0]?.id ?? ''
 }, { immediate: true })
-const managedIds = computed(
-  () => bindings.value?.items.flatMap((item) => item.id ? [item.id] : []) ?? [],
+const bindingKeyFor = (binding: ProfileServerBinding) =>
+  binding.id ?? `legacy:${binding.name}:${binding.serverAddress}:${binding.serverPort}`
+const selectedBinding = computed(
+  () => bindings.value?.items.find(
+    (binding) => bindingKeyFor(binding) === selectedBindingKey.value,
+  ) ?? null,
 )
-const draftQueries = useQueries({
-  queries: computed(() => managedIds.value.map((id) => ({
-    queryKey: ['server-bootstrap', props.installationId, id],
-    queryFn: () => getJson<{ items: ServerBootstrapDraft[] }>(
-      `/api/servers/bindings/${id}/bootstrap?installationId=${encodeURIComponent(props.installationId)}`,
-    ),
-    refetchInterval: 5000,
-  }))),
+watch(
+  () => bindings.value?.items,
+  (items) => {
+    if (!items?.length) {
+      selectedBindingKey.value = ''
+      return
+    }
+    if (!items.some((binding) => bindingKeyFor(binding) === selectedBindingKey.value)) {
+      selectedBindingKey.value = bindingKeyFor(items[0])
+    }
+  },
+  { immediate: true },
+)
+const selectedManagedId = computed(
+  () => selectedBinding.value?.managed ? selectedBinding.value.id : null,
+)
+const { data: selectedDrafts } = useQuery({
+  queryKey: computed(
+    () => ['server-bootstrap', props.installationId, selectedManagedId.value],
+  ),
+  queryFn: () => getJson<{ items: ServerBootstrapDraft[] }>(
+    `/api/servers/bindings/${selectedManagedId.value}/bootstrap?installationId=${encodeURIComponent(props.installationId)}`,
+  ),
+  enabled: computed(() => Boolean(selectedManagedId.value)),
+  refetchInterval: 5000,
 })
-const activeDraft = (bindingId: string) =>
-  draftQueries.value
-    .find((query) => query.data?.items.some((item) => item.bindingId === bindingId))
-    ?.data?.items.find(
-      (item) =>
-        item.bindingId === bindingId &&
-        ['ready', 'issued', 'claimed'].includes(item.status),
-    ) ?? null
+const activeDraft = computed(
+  () => selectedDrafts.value?.items.find(
+    (item) =>
+      item.bindingId === selectedManagedId.value &&
+      ['ready', 'issued', 'claimed'].includes(item.status),
+  ) ?? null,
+)
 
 const jobMutation = useMutation({
   mutationFn: (request: { path: string; body: Record<string, unknown>; nestedJob?: boolean }) =>
@@ -440,6 +515,7 @@ const startCreate = () => {
   gameArgs.value = 'nogui'
 }
 const edit = (binding: ProfileServerBinding) => {
+  selectedBindingKey.value = bindingKeyFor(binding)
   editing.value = binding.id
   Object.assign(form, {
     name: binding.name,

@@ -1,0 +1,6 @@
+{
+  "panelUrl": "https://panel.example.com",
+  "heartbeatIntervalSeconds": 15,
+  "stateDir": "/var/lib/gravit-agent",
+  "bindingsDir": "/etc/gravit-agent/bindings.d"
+}

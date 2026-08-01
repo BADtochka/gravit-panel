@@ -9,6 +9,9 @@ import { ServerPackService } from './server-pack.service'
 import { ServerPackStore } from './server-pack.store'
 import { ServerBootstrapStore } from './server-bootstrap.store'
 import { ServerBootstrapService } from './server-bootstrap.service'
+import { ServerAgentStore } from './server-agent.store'
+import { ServerAgentEventHub } from './server-agent.events'
+import { ServerAgentService } from './server-agent.service'
 
 export const serverBindingsStore = new ServerBindingsStore(database)
 export const serverPackStore = new ServerPackStore(database)
@@ -31,4 +34,14 @@ export const serverBootstrapService = new ServerBootstrapService(
   clientBuildService,
   controlFileService,
   env.PANEL_PUBLIC_URL,
+)
+export const serverAgentStore = new ServerAgentStore(database)
+export const serverAgentEvents = new ServerAgentEventHub()
+export const serverAgentService = new ServerAgentService(
+  serverAgentStore,
+  serverAgentEvents,
+  (token) => {
+    const binding = serverBootstrapService.updaterBinding(token)
+    return binding?.id ? { id: binding.id } : null
+  },
 )

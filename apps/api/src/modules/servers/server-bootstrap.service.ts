@@ -17,6 +17,7 @@ import {
 } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { env } from '../../core/env'
 import type { ClientBuildService } from '../clients/client-build.service'
 import { resolveClientCompatibility } from '../clients/compatibility.service'
 import type { ControlFileService } from '../gravit/control-file.service'
@@ -224,6 +225,14 @@ export class ServerBootstrapService {
           writeFile(join(staging, 'ServerWrapperInline.jar'), inline),
           writeFile(join(staging, config.coreFile), core.bytes),
         ])
+        const [agentAmd64, agentArm64] = await Promise.all([
+          readFile(join(env.SERVER_AGENT_ARTIFACTS_DIR, 'gravit-agent-amd64')),
+          readFile(join(env.SERVER_AGENT_ARTIFACTS_DIR, 'gravit-agent-arm64')),
+        ])
+        await Promise.all([
+          writeFile(join(staging, 'gravit-agent-amd64'), agentAmd64),
+          writeFile(join(staging, 'gravit-agent-arm64'), agentArm64),
+        ])
         const authlibPath = join(
           installation.path,
           'launcher',
@@ -429,7 +438,6 @@ bash "$TMP"
     const curl = publicUrl.startsWith('https:')
       ? "curl --proto '=https' --tlsv1.2"
       : 'curl'
-    const serviceName = `gravit-${binding.id.slice(0, 8)}`
     const archiveUrl = `${publicUrl}/api/server-agent/archive/${version.id}`
     const reportUrl = `${publicUrl}/api/server-agent/report`
     return `#!/usr/bin/env bash
@@ -458,7 +466,6 @@ else
   tar -czf "$BACKUP" --files-from=/dev/null
 fi
 rm -f "$EXISTING"
-systemctl stop ${serviceName}.service
 apply_failed=false
 while IFS= read -r path; do
   [[ -z "$path" ]] || rm -f "$WORKDIR/$path"
@@ -467,7 +474,6 @@ tar -xzf "$ARCHIVE" --no-same-owner -C "$WORKDIR" || apply_failed=true
 if [[ "$apply_failed" == false ]]; then
   mv "$NEW_LIST" "$OLD_LIST"
   chown -R "$(stat -c %u "$WORKDIR")":"$(stat -c %g "$WORKDIR")" "$WORKDIR"
-  systemctl start ${serviceName}.service || apply_failed=true
 fi
 if [[ "$apply_failed" == true ]]; then
   while IFS= read -r path; do
@@ -475,7 +481,6 @@ if [[ "$apply_failed" == true ]]; then
   done < "$ROLLBACK_LIST"
   tar -xzf "$BACKUP" -C "$WORKDIR" || true
   rm -f "$NEW_LIST"
-  systemctl start ${serviceName}.service >/dev/null 2>&1 || true
   curl -fsS -X POST -H "authorization: Bearer $UPDATER_TOKEN" \
     -H 'content-type: application/json' \
     --data ${shellQuote(JSON.stringify({
@@ -678,6 +683,7 @@ curl -fsS -X POST -H "authorization: Bearer $UPDATER_TOKEN" \
     ].join(' ')
     const serviceName = `gravit-${config.binding.id!.slice(0, 8)}`
     const updaterServiceName = `${serviceName}-pack-update`
+    const rconPort = 26_000 + (Number.parseInt(config.binding.id!.slice(0, 4), 16) % 10_000)
     const updaterUrl = `${publicUrl}/api/server-agent/update`
     const packCommand = config.hasServerPack
       ? `tar -xzf "$PAYLOAD/server-pack.tar.gz" --no-same-owner -C "$WORKDIR"
@@ -724,7 +730,7 @@ if [[ "$EUID" -ne 0 || -z "\${SUDO_USER:-}" || "$SUDO_USER" == root ]]; then
   echo "Run this command from a non-root account through sudo." >&2
   exit 1
 fi
-for command in curl tar sha256sum systemctl systemd-analyze install ln sed base64 head tr; do
+for command in curl tar sha256sum systemctl systemd-analyze install ln sed base64 head tr grep find nft ss; do
   command -v "$command" >/dev/null || { echo "Missing dependency: $command" >&2; exit 1; }
 done
 
@@ -794,6 +800,23 @@ install -m 0644 "$PAYLOAD/ServerWrapper.jar" "$WORKDIR/ServerWrapper.jar"
 install -m 0644 "$PAYLOAD/ServerWrapperInline.jar" "$WORKDIR/ServerWrapperInline.jar"
 printf 'eula=true\\n' > "$WORKDIR/eula.txt"
 
+RCON_PORT=${rconPort}
+for attempt in {1..100}; do
+  if ! ss -H -ltn "sport = :$RCON_PORT" | grep -q .; then break; fi
+  RCON_PORT=$((RCON_PORT + 1))
+  [[ "$RCON_PORT" -le 35999 ]] || RCON_PORT=26000
+  [[ "$attempt" -lt 100 ]] || { echo "Unable to allocate a local RCON port" >&2; exit 1; }
+done
+RCON_PASSWORD="$(head -c 32 /dev/urandom | base64 | tr '/+' '_-' | tr -d '\\n')"
+touch "$WORKDIR/server.properties"
+sed -i '/^enable-rcon=/d;/^rcon\\.port=/d;/^rcon\\.password=/d;/^broadcast-rcon-to-ops=/d' "$WORKDIR/server.properties"
+cat >> "$WORKDIR/server.properties" <<RCON_PROPERTIES
+enable-rcon=true
+rcon.port=$RCON_PORT
+rcon.password=$RCON_PASSWORD
+broadcast-rcon-to-ops=false
+RCON_PROPERTIES
+
 cat > "$WORKDIR/gravit-server.env" <<'GRAVIT_ENV'
 SERVERWRAPPER_ADDRESS=${shellQuote(config.launchServerAddress)}
 SERVERWRAPPER_SERVER_NAME=${shellQuote(config.binding.name)}
@@ -825,6 +848,23 @@ ln -sfn "$WORKDIR" "$SERVICE_ROOT"
 
 UNIT_TMP_DIR="$(mktemp -d /run/gravit-systemd.XXXXXXXX)"
 UNIT_TMP="$UNIT_TMP_DIR/${serviceName}.service"
+FIREWALL_ROOT=/usr/local/lib/gravit-panel-agent
+install -d -m 0755 "$FIREWALL_ROOT"
+cat > "$FIREWALL_ROOT/allow-local-rcon.sh" <<'RCON_FIREWALL'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+PORT="$1"
+nft list table inet gravit_panel_agent >/dev/null 2>&1 || nft add table inet gravit_panel_agent
+nft list set inet gravit_panel_agent rcon_ports >/dev/null 2>&1 || \
+  nft 'add set inet gravit_panel_agent rcon_ports { type inet_service; }'
+nft list chain inet gravit_panel_agent input >/dev/null 2>&1 || \
+  nft 'add chain inet gravit_panel_agent input { type filter hook input priority 0; policy accept; }'
+nft list chain inet gravit_panel_agent input | grep -Fq 'tcp dport @rcon_ports drop' || \
+  nft add rule inet gravit_panel_agent input iifname != lo tcp dport @rcon_ports drop
+nft add element inet gravit_panel_agent rcon_ports "{ $PORT }" 2>/dev/null || true
+nft get element inet gravit_panel_agent rcon_ports "{ $PORT }" >/dev/null
+RCON_FIREWALL
+chmod 0755 "$FIREWALL_ROOT/allow-local-rcon.sh"
 cat > "$UNIT_TMP" <<SYSTEMD_UNIT
 [Unit]
 Description=Gravit Minecraft server
@@ -836,6 +876,7 @@ Type=simple
 User=$SERVICE_UID
 Group=$SERVICE_GID
 WorkingDirectory=$SERVICE_ROOT
+ExecStartPre=+$FIREWALL_ROOT/allow-local-rcon.sh $RCON_PORT
 ExecStart=$SERVICE_ROOT/start-gravit-server.sh
 Restart=on-failure
 RestartSec=10
@@ -854,6 +895,53 @@ UPDATER_TOKEN=$UPDATER_TOKEN
 UPDATER_URL=${updaterUrl}
 UPDATER_ENV_FILE
 chmod 0600 "$UPDATER_ENV"
+AGENT_UNIT_TMP=
+case "$ARCH" in
+  x86_64|amd64) AGENT_BINARY="$PAYLOAD/gravit-agent-amd64" ;;
+  aarch64|arm64) AGENT_BINARY="$PAYLOAD/gravit-agent-arm64" ;;
+esac
+if [[ -f "$AGENT_BINARY" ]]; then
+  AGENT_CONFIG_ROOT=/etc/gravit-agent
+  AGENT_BINDINGS_DIR="$AGENT_CONFIG_ROOT/bindings.d"
+  install -d -m 0700 "$AGENT_CONFIG_ROOT" "$AGENT_BINDINGS_DIR"
+  install -m 0755 "$AGENT_BINARY" /usr/local/bin/gravit-agent
+  cat > "$AGENT_CONFIG_ROOT/config.json" <<'AGENT_CONFIG'
+${JSON.stringify({ panelUrl: publicUrl, bindingsDir: '/etc/gravit-agent/bindings.d' }, null, 2)}
+AGENT_CONFIG
+  chmod 0600 "$AGENT_CONFIG_ROOT/config.json"
+  cat > "$AGENT_BINDINGS_DIR/${config.binding.id!}.json" <<AGENT_BINDING
+{
+  "id": ${JSON.stringify(config.binding.id!)},
+  "token": "$UPDATER_TOKEN",
+  "unit": ${JSON.stringify(`${serviceName}.service`)},
+  "rcon": {
+    "address": "127.0.0.1:$RCON_PORT",
+    "password": "$RCON_PASSWORD",
+    "timeoutSeconds": 10
+  }
+}
+AGENT_BINDING
+  chmod 0600 "$AGENT_BINDINGS_DIR/${config.binding.id!}.json"
+  AGENT_UNIT_TMP="$UNIT_TMP_DIR/gravit-agent.service"
+  cat > "$AGENT_UNIT_TMP" <<AGENT_SERVICE
+[Unit]
+Description=Gravit Panel host agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gravit-agent -config /etc/gravit-agent/config.json
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+AGENT_SERVICE
+fi
 cat > "$UPDATER_ROOT/update.sh" <<'UPDATER_SCRIPT'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -898,7 +986,9 @@ Unit=${updaterServiceName}.service
 [Install]
 WantedBy=timers.target
 UPDATER_TIMER
-if ! systemd-analyze verify "$UNIT_TMP" "$UPDATER_UNIT_TMP" "$UPDATER_TIMER_TMP"; then
+UNITS=("$UNIT_TMP" "$UPDATER_UNIT_TMP" "$UPDATER_TIMER_TMP")
+[[ -z "$AGENT_UNIT_TMP" ]] || UNITS+=("$AGENT_UNIT_TMP")
+if ! systemd-analyze verify "\${UNITS[@]}"; then
   echo "Generated systemd units are invalid:" >&2
   sed -n '1,200p' "$UNIT_TMP" "$UPDATER_UNIT_TMP" "$UPDATER_TIMER_TMP" >&2
   exit 1
@@ -906,11 +996,18 @@ fi
 install -m 0644 "$UNIT_TMP" /etc/systemd/system/${serviceName}.service
 install -m 0644 "$UPDATER_UNIT_TMP" /etc/systemd/system/${updaterServiceName}.service
 install -m 0644 "$UPDATER_TIMER_TMP" /etc/systemd/system/${updaterServiceName}.timer
+if [[ -n "$AGENT_UNIT_TMP" ]]; then
+  install -m 0644 "$AGENT_UNIT_TMP" /etc/systemd/system/gravit-agent.service
+fi
 rm -rf "$UNIT_TMP_DIR"
 UNIT_TMP_DIR=
 systemctl daemon-reload
 systemctl enable --now ${serviceName}.service
 systemctl enable --now ${updaterServiceName}.timer
+if [[ -n "$AGENT_UNIT_TMP" ]]; then
+  systemctl enable gravit-agent.service
+  systemctl restart gravit-agent.service
+fi
 systemctl is-active --quiet ${serviceName}.service
 rm -rf "$PAYLOAD"
 PAYLOAD=

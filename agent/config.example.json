@@ -1,0 +1,26 @@
+{
+  "panelUrl": "https://panel.example.com",
+  "heartbeatIntervalSeconds": 15,
+  "stateDir": "/var/lib/gravit-agent",
+  "bindings": [
+    {
+      "id": "panel-binding-id-1",
+      "token": "replace-with-binding-token",
+      "unit": "gravit-server-12345678-1234-1234-1234-123456789abc.service",
+      "rcon": {
+        "address": "127.0.0.1:25575",
+        "password": "replace-with-rcon-password",
+        "timeoutSeconds": 10
+      }
+    },
+    {
+      "id": "panel-binding-id-2",
+      "token": "replace-with-another-binding-token",
+      "unit": "gravit-deadbeef.service",
+      "rcon": {
+        "address": "127.0.0.1:25576",
+        "password": "replace-with-another-rcon-password"
+      }
+    }
+  ]
+}

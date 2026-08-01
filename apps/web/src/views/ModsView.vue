@@ -329,91 +329,93 @@
             </AlertDialogContent>
           </AlertDialog>
         </div>
-        <p v-if="!stateReady" class="py-8 text-center text-sm text-muted-foreground">Select a complete target profile.</p>
-        <p v-else-if="installedFetching" class="py-8 text-center text-sm text-muted-foreground">Hashing mod files…</p>
-        <p v-else-if="!installed?.items.length" class="py-8 text-center text-sm text-muted-foreground">No mod JARs detected.</p>
-        <p v-else-if="!filteredInstalledItems.length" class="py-8 text-center text-sm text-muted-foreground">
-          No mods match your filter.
-        </p>
-        <div v-else class="max-h-[32rem] space-y-2 overflow-auto pr-1">
-          <div
-            v-for="item in filteredInstalledItems"
-            :key="item.filename"
-            class="cursor-pointer rounded-md border p-3 transition-colors hover:bg-accent"
-            :class="{ 'border-primary bg-primary/5': selectedInstalledFilenames.includes(item.filename) }"
-            @click="toggleInstalledSelection(item.filename)"
-          >
-            <div class="flex items-start justify-between gap-2">
-              <div class="flex min-w-0 items-start gap-3">
-                <Checkbox
-                  :model-value="selectedInstalledFilenames.includes(item.filename)"
-                  class="mt-1"
-                  @click.stop
-                  @update:model-value="toggleInstalledSelection(item.filename)"
-                />
-                <div class="min-w-0">
-                  <p class="truncate text-sm font-medium">{{ item.filename }}</p>
-                  <p class="mt-1 text-xs text-muted-foreground">
-                    {{ item.versionName ?? 'Unknown to Modrinth' }} · {{ formatBytes(item.size) }}
-                  </p>
-                </div>
-              </div>
-              <Badge :variant="item.disabled ? 'outline' : 'secondary'">
-                {{ item.disabled ? 'Disabled' : 'Enabled' }}
-              </Badge>
-            </div>
-            <div class="mt-3 inline-flex max-w-full flex-wrap gap-2">
-              <Button size="sm" variant="outline" @click.stop="toggleMod(item)">
-                <Power /> {{ item.disabled ? 'Enable' : 'Disable' }}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                :disabled="!item.projectId || !targetReady"
-                @click.stop="updateMod(item)"
-              >
-                <RefreshCw /> Update
-              </Button>
-              <Button
-                v-if="item.projectId"
-                size="sm"
-                variant="outline"
-                @click.stop="openOptionalDialog(item)"
-              >
-                <Settings /> Make optional
-              </Button>
-              <Button
-                v-if="canInstallOnServer(item)"
-                size="sm"
-                variant="outline"
-                :disabled="!managedServers.length || !targetReady"
-                @click.stop="openServerInstall([item])"
-              >
-                <ServerCog /> Add to server
-              </Button>
-              <AlertDialog>
-                <AlertDialogTrigger as-child>
-                  <Button size="sm" variant="destructive" @click.stop><Trash2 /> Remove</Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Remove {{ item.filename }}?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      The file will be moved to recoverable .gravit-panel-trash inside the profile.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <div class="py-3">
-                    <label class="flex items-center gap-2 text-sm">
-                      <Checkbox v-model="item._removeFromServer" />
-                      Also remove from managed servers
-                    </label>
+        <div class="h-[60vh] max-h-[32rem] overflow-auto pr-1 md:h-[32rem]">
+          <p v-if="!stateReady" class="grid h-full place-items-center text-center text-sm text-muted-foreground">Select a complete target profile.</p>
+          <p v-else-if="installedFetching" class="grid h-full place-items-center text-center text-sm text-muted-foreground">Hashing mod files…</p>
+          <p v-else-if="!installed?.items.length" class="grid h-full place-items-center text-center text-sm text-muted-foreground">No mod JARs detected.</p>
+          <p v-else-if="!filteredInstalledItems.length" class="grid h-full place-items-center text-center text-sm text-muted-foreground">
+            No mods match your filter.
+          </p>
+          <div v-else class="space-y-2">
+            <div
+              v-for="item in filteredInstalledItems"
+              :key="item.filename"
+              class="cursor-pointer rounded-md border p-3 transition-colors hover:bg-accent"
+              :class="{ 'border-primary bg-primary/5': selectedInstalledFilenames.includes(item.filename) }"
+              @click="toggleInstalledSelection(item.filename)"
+            >
+              <div class="flex items-start justify-between gap-2">
+                <div class="flex min-w-0 items-start gap-3">
+                  <Checkbox
+                    :model-value="selectedInstalledFilenames.includes(item.filename)"
+                    class="mt-1"
+                    @click.stop
+                    @update:model-value="toggleInstalledSelection(item.filename)"
+                  />
+                  <div class="min-w-0">
+                    <p class="truncate text-sm font-medium">{{ item.filename }}</p>
+                    <p class="mt-1 text-xs text-muted-foreground">
+                      {{ item.versionName ?? 'Unknown to Modrinth' }} · {{ formatBytes(item.size) }}
+                    </p>
                   </div>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction @click="removeMod(item)">Move to trash</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+                </div>
+                <Badge :variant="item.disabled ? 'outline' : 'secondary'">
+                  {{ item.disabled ? 'Disabled' : 'Enabled' }}
+                </Badge>
+              </div>
+              <div class="mt-3 inline-flex max-w-full flex-wrap gap-2">
+                <Button size="sm" variant="outline" @click.stop="toggleMod(item)">
+                  <Power /> {{ item.disabled ? 'Enable' : 'Disable' }}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  :disabled="!item.projectId || !targetReady"
+                  @click.stop="updateMod(item)"
+                >
+                  <RefreshCw /> Update
+                </Button>
+                <Button
+                  v-if="item.projectId"
+                  size="sm"
+                  variant="outline"
+                  @click.stop="openOptionalDialog(item)"
+                >
+                  <Settings /> Make optional
+                </Button>
+                <Button
+                  v-if="canInstallOnServer(item)"
+                  size="sm"
+                  variant="outline"
+                  :disabled="!managedServers.length || !targetReady"
+                  @click.stop="openServerInstall([item])"
+                >
+                  <ServerCog /> Add to server
+                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger as-child>
+                    <Button size="sm" variant="destructive" @click.stop><Trash2 /> Remove</Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Remove {{ item.filename }}?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        The file will be moved to recoverable .gravit-panel-trash inside the profile.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <div class="py-3">
+                      <label class="flex items-center gap-2 text-sm">
+                        <Checkbox v-model="item._removeFromServer" />
+                        Also remove from managed servers
+                      </label>
+                    </div>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction @click="removeMod(item)">Move to trash</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
             </div>
           </div>
         </div>
