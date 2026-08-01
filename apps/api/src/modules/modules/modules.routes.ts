@@ -5,6 +5,8 @@ import type {
   JobRecord,
 } from '@gravit-panel/shared'
 import { Elysia, t } from 'elysia'
+import { env } from '../../core/env'
+import { LauncherDockeredService } from '../docker/launcherdockered.service'
 import { ControlFileBusyError } from '../gravit/control-file.service'
 import { installationsStore } from '../gravit/gravit.runtime'
 import type { InstallationsStore } from '../gravit/installations.store'
@@ -14,6 +16,8 @@ import { activeJobForInstallation, jobsRunner, jobsStore } from '../jobs/jobs.ru
 import { DiscordAuthSystemBuildService } from './discord-auth-system-build.service'
 import { findCatalogModule, moduleCatalog } from './module-catalog'
 import { moduleManagement } from './modules.runtime'
+
+const lifecycle = new LauncherDockeredService(env.INSTALLATIONS_ROOT)
 
 const installationId = t.String({ format: 'uuid' })
 const moduleId = t.String({
@@ -29,6 +33,7 @@ export interface ModulesRoutesDependencies {
   activeJob: (installationId: string) => JobRecord | null | undefined
   management: Pick<typeof moduleManagement, 'getState' | 'install' | 'remove'>
   buildService?: DiscordAuthSystemBuildService
+  lifecycle?: Pick<LauncherDockeredService, 'restartLaunchServer'>
 }
 
 export const createModulesRoutes = ({
@@ -38,6 +43,7 @@ export const createModulesRoutes = ({
   activeJob,
   management,
   buildService = new DiscordAuthSystemBuildService(),
+  lifecycle: managedLifecycle = lifecycle,
 }: ModulesRoutesDependencies) => {
   const activeModuleJobs = () => jobsStore.listByStatuses(['queued', 'running'])
 
@@ -193,9 +199,12 @@ export const createModulesRoutes = ({
         'gravit.module.discordauthsystem.build',
         { ...input },
         'DiscordAuthSystem module Docker build queued',
-        async (context) => ({
-          ...(await buildService.build(context, installation)),
-        }),
+        async (context) => {
+          const result = await buildService.build(context, installation)
+          context.progress(96, 'Restarting LaunchServer with the rebuilt DiscordAuthSystem module')
+          await managedLifecycle.restartLaunchServer(installation, context)
+          return { ...result }
+        },
       )
       set.status = 202
       return job

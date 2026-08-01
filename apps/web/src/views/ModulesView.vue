@@ -163,6 +163,18 @@
             </p>
           </CardContent>
           <CardFooter v-if="runtimeFor(item.id)?.loaded" class="space-y-2">
+            <Button
+              v-if="item.id === 'DiscordAuthSystem_module'"
+              class="w-full"
+              type="button"
+              variant="outline"
+              :disabled="!stateEnabled || isBuildPending"
+              @click="buildDiscordModule"
+            >
+              <LoaderCircle v-if="isBuildPending" class="animate-spin" />
+              <RefreshCw v-else />
+              Rebuild module
+            </Button>
             <AlertDialog>
               <AlertDialogTrigger as-child>
                 <Button
@@ -193,15 +205,15 @@
           </CardFooter>
           <CardFooter v-else class="space-y-2">
             <Button
-              v-if="item.id === 'DiscordAuthSystem_module' && !runtimeFor(item.id)?.built"
+              v-if="item.id === 'DiscordAuthSystem_module'"
               class="w-full bg-white text-black hover:bg-white/90 dark:bg-white dark:text-black dark:hover:bg-white/90"
               type="button"
               :disabled="!stateEnabled || isBuildPending"
               @click="buildDiscordModule"
             >
               <LoaderCircle v-if="isBuildPending" class="animate-spin" />
-              <Download v-else />
-              Build module
+              <RefreshCw v-else />
+              {{ runtimeFor(item.id)?.built ? 'Rebuild module' : 'Build module' }}
             </Button>
             <Button
               v-if="item.id !== 'DiscordAuthSystem_module' || runtimeFor(item.id)?.available"

@@ -168,7 +168,7 @@ describe('AuthProviderService.applyProvider', () => {
       readFile: async (_installation: GravitInstallation, path: string) => {
         if (path === 'LaunchServer.json') return launchServerConfig
         if (path === 'config/DiscordAuthSystem/Config.json') return discordConfig
-        if (path === 'modules/.gravit-panel-discordauthsystem-version') return '1.0.8\n'
+        if (path === 'modules/.gravit-panel-discordauthsystem-version') return '1.0.9\n'
         throw new Error(`Unexpected read: ${path}`)
       },
       copy: async () => {},
