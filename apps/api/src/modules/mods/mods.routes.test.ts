@@ -356,7 +356,10 @@ describe('mod management API', () => {
   })
 
   test('accepts server bulk installs larger than the client search limit', async () => {
-    const slugs = Array.from({ length: 65 }, (_, index) => `server-mod-${index + 1}`)
+    const slugs = [
+      'create-steam-n-rails-1.21.1',
+      ...Array.from({ length: 64 }, (_, index) => `server-mod-${index + 1}`),
+    ]
     const { request, jobsStore } = createHarness()
     const response = await request('/api/mods/server/install', post({
       installationId: installation.id,
