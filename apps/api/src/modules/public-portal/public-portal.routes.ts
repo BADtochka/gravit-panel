@@ -4,16 +4,19 @@ import { database } from '../../db/client'
 import { parseCookie, serializeCookie } from '../panel-auth/panel-auth.service'
 import { PublicPortalService } from './public-portal.service'
 
-const playerCookie = 'gravit_player_session'
+export const playerSessionCookie = 'gravit_player_session'
 const playerCookieOptions = {
   maxAgeSeconds: 7 * 24 * 60 * 60,
   secure: env.PANEL_AUTH_COOKIE_SECURE,
   path: '/',
 }
 const portal = new PublicPortalService(database, env.PUBLIC_PORTAL_HMAC_SECRET)
+export const publicPortalService = portal
 
 const panelRoot = (request: Request) => env.PANEL_PUBLIC_URL ?? new URL(request.url).origin
-const sessionFor = (request: Request) => portal.session(parseCookie(request.headers.get('cookie'), playerCookie))
+export const playerSessionForRequest = (request: Request) =>
+  portal.session(parseCookie(request.headers.get('cookie'), playerSessionCookie))
+const sessionFor = playerSessionForRequest
 
 export const publicPortalRoutes = new Elysia({ prefix: '/public' })
   .get('/page', () => portal.settings())
@@ -39,7 +42,7 @@ export const publicPortalRoutes = new Elysia({ prefix: '/public' })
   .get('/auth/callback', ({ query, request, set }) => {
     try {
       const completed = portal.completeTicket(query.ticket)
-      set.headers['set-cookie'] = serializeCookie(playerCookie, completed.session, playerCookieOptions)
+      set.headers['set-cookie'] = serializeCookie(playerSessionCookie, completed.session, playerCookieOptions)
       set.redirect = `${panelRoot(request).replace(/\/$/, '')}/?playerAuth=success`
     } catch (error) {
       set.redirect = `${panelRoot(request).replace(/\/$/, '')}/?playerAuth=error`
@@ -47,8 +50,8 @@ export const publicPortalRoutes = new Elysia({ prefix: '/public' })
   }, { query: t.Object({ ticket: t.String({ minLength: 1, maxLength: 4096 }) }) })
   .get('/session', ({ request }) => ({ player: sessionFor(request) }))
   .post('/logout', ({ request, set }) => {
-    portal.revokeSession(parseCookie(request.headers.get('cookie'), playerCookie))
-    set.headers['set-cookie'] = serializeCookie(playerCookie, '', { ...playerCookieOptions, maxAgeSeconds: 0 })
+    portal.revokeSession(parseCookie(request.headers.get('cookie'), playerSessionCookie))
+    set.headers['set-cookie'] = serializeCookie(playerSessionCookie, '', { ...playerCookieOptions, maxAgeSeconds: 0 })
     set.status = 204
   })
   .get('/skin', ({ request, set }) => {

@@ -5,6 +5,7 @@ import {
   parseCookie,
   serializeCookie,
 } from './panel-auth.service'
+import { playerSessionForRequest } from '../public-portal/public-portal.routes'
 
 const sessionCookie = 'gravit_panel_session'
 const stateCookie = 'gravit_panel_oauth_state'
@@ -102,6 +103,10 @@ export const createPanelAuthGuard = (service: PanelAuthService) => {
       (path.startsWith('/api/public/') && !path.startsWith('/api/public/settings')) ||
       /^\/api\/server-bootstrap\/[A-Za-z0-9_-]{32,128}(?:\/start|\/report|\/artifacts\/(?:bundle|jre-x64|jre-aarch64))?$/.test(path) ||
       /^\/api\/server-agent\/(?:update|report|archive\/[0-9a-f-]{36})$/.test(path)
+    ) return
+    if (
+      /^\/api\/clients\/launcher\/artifacts\/(?:jar|windows-x64)$/.test(path) &&
+      playerSessionForRequest(request)
     ) return
     const session = service.session(parseCookie(request.headers.get('cookie'), sessionCookie))
     if (session) return
