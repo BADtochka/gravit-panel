@@ -5,18 +5,14 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.*;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import pro.gravit.launcher.base.request.auth.password.AuthCodePassword;
 import pro.gravit.launchserver.LaunchServer;
 import pro.gravit.launchserver.auth.AuthException;
 import pro.gravit.launchserver.auth.AuthProviderPair;
-import pro.gravit.launchserver.manangers.AuthManager;
-import pro.gravit.launchserver.socket.Client;
 import pro.gravit.launchserver.socket.NettyConnectContext;
 import pro.gravit.launchserver.socket.handlers.NettyWebAPIHandler;
 
 import java.io.IOException;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
@@ -60,29 +56,8 @@ public class DiscordWebApiHandler implements NettyWebAPIHandler.SimpleSeverletHa
             return;
         }
 
-        AtomicReference<Client> matchedClient = new AtomicReference<>();
-        server.nettyServerSocketHandler.nettyServer.service.forEachActiveChannels((ch, ws) -> {
-            Client client = ws.getClient();
-            if (client == null) return;
-            if (provider.consumePendingState(state, client)) {
-                matchedClient.compareAndSet(null, client);
-            }
-        });
-
-        Client client = matchedClient.get();
-        if (client == null) {
-            sendHttpResponse(ctx, authorizationPage(
-                HttpResponseStatus.BAD_REQUEST,
-                "Authorization link expired",
-                "Return to the launcher and start Discord authorization again.",
-                false
-            ));
-            return;
-        }
-
-        AuthManager.AuthReport report;
         try {
-            report = provider.authorize("", null, new AuthCodePassword(code), true);
+            provider.completeBrowserAuthorization(state, code);
         } catch (AuthException e) {
             logger.warn("Discord authorization failed: {}", e.getMessage());
             sendHttpResponse(ctx, authorizationPage(
@@ -108,7 +83,6 @@ public class DiscordWebApiHandler implements NettyWebAPIHandler.SimpleSeverletHa
         // report pending for that request instead of marking the WebSocket
         // client authenticated here; doing so would make the normal request
         // fail with "You are already logged in".
-        provider.completeBrowserAuthorization(client, report);
         sendHttpResponse(ctx, authorizationPage(
             HttpResponseStatus.OK,
             "Authorization complete",

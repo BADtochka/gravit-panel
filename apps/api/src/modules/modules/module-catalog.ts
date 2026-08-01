@@ -17,7 +17,7 @@ export const discordAuthSystemSource = {
   path: 'modules/DiscordAuthSystem_module',
 } as const
 
-export const discordAuthSystemArtifactVersion = '1.0.10'
+export const discordAuthSystemArtifactVersion = '1.0.11'
 export const discordAuthSystemJarName = 'DiscordAuthSystem_module.jar'
 
 export const moduleRelease = {

@@ -54,6 +54,27 @@ class DiscordAuthCoreProviderTest {
     }
 
     @Test
+    void completedAuthorizationSurvivesLaunchServerReplacingClientOnLogout() throws Exception {
+        DiscordAuthCoreProvider provider = new DiscordAuthCoreProvider();
+        Client clientBeforeLogout = new Client();
+        String state = provider.createPendingState(clientBeforeLogout);
+        DiscordUser user = new DiscordUser(
+            UUID.fromString("aa90f8c5-1214-3f4e-a64c-3afde444097b"),
+            "1531370122256711680",
+            "formallybad",
+            ClientPermissions.DEFAULT
+        );
+        var report = DiscordAuthCoreProvider.reportFor(user, "token", true);
+
+        provider.completeBrowserAuthorization(state, report);
+        Client clientAfterLogout = new Client();
+
+        assertNotEquals(clientBeforeLogout, clientAfterLogout);
+        assertSame(report, provider.consumeBrowserAuthorizationState(state));
+        assertNull(provider.consumeBrowserAuthorizationState(state));
+    }
+
+    @Test
     void keepsMinecraftAndOAuthAccessTokensInTheirProtocolFields() {
         DiscordUser user = new DiscordUser(
             UUID.fromString("aa90f8c5-1214-3f4e-a64c-3afde444097b"),

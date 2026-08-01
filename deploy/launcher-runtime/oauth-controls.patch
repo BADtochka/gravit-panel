@@ -106,7 +106,7 @@ index 73d86ac..535679d 100644
 -                    });
 +                    codeLabel.setOnMouseClicked(evt -> copyToClipboard(userCode));
                  }
-@@ -154,4 +153,12 @@ public class WebAuthMethod extends AbstractAuthMethod<AuthWebDetails> {
+@@ -154,4 +153,13 @@ public class WebAuthMethod extends AbstractAuthMethod<AuthWebDetails> {
              } else {
 -                codeLabel.setText("");
 +                if (copyLinkBtn != null) {
@@ -118,7 +118,9 @@ index 73d86ac..535679d 100644
 +                    codeLabel.setText(url);
 +                    codeLabel.setOnMouseClicked(evt -> copyToClipboard(url));
 +                }
-                 codeLabel.setUserData(null);
+-                codeLabel.setUserData(null);
++                String state = queryParameter(url, "state");
++                codeLabel.setUserData(state == null ? null : "state:" + state);
              }
 @@ -158,7 +165,3 @@ public class WebAuthMethod extends AbstractAuthMethod<AuthWebDetails> {
              // try to open immediately
@@ -129,7 +131,7 @@ index 73d86ac..535679d 100644
 -            }
 +            openExternalBrowser(url);
              // when user clicks submit, prefer pasted URL; if empty and device marker present, use marker
-@@ -171,3 +174,45 @@ public class WebAuthMethod extends AbstractAuthMethod<AuthWebDetails> {
+@@ -171,3 +175,57 @@ public class WebAuthMethod extends AbstractAuthMethod<AuthWebDetails> {
 +        private void copyToClipboard(String value) {
 +            try {
 +                Clipboard clipboard = Clipboard.getSystemClipboard();
@@ -139,6 +141,18 @@ index 73d86ac..535679d 100644
 +            } catch (Exception ex) {
 +                accessor.errorHandle(ex);
 +            }
++        }
++
++        private String queryParameter(String url, String name) {
++            String query = URI.create(url).getRawQuery();
++            if (query == null) return null;
++            for (String item : query.split("&")) {
++                String[] pair = item.split("=", 2);
++                if (pair.length == 2 && name.equals(pair[0])) {
++                    return java.net.URLDecoder.decode(pair[1], java.nio.charset.StandardCharsets.UTF_8);
++                }
++            }
++            return null;
 +        }
 +
 +        private void openExternalBrowser(String url) {

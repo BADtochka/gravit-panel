@@ -41,6 +41,7 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
     private transient final ConcurrentMap<String, PendingAuthState> pendingStates = new ConcurrentHashMap<>();
     private transient final ConcurrentMap<String, PendingPortalState> pendingPortalStates = new ConcurrentHashMap<>();
     private transient final ConcurrentMap<Client, CompletedAuth> completedAuth = new ConcurrentHashMap<>();
+    private transient final ConcurrentMap<String, CompletedAuth> completedAuthByState = new ConcurrentHashMap<>();
 
     @Override
     public void init(LaunchServer server, AuthProviderPair pair) {
@@ -107,6 +108,27 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
             pendingStates.remove(state, pending);
     }
 
+    public void completeBrowserAuthorization(String state, String code) throws IOException {
+        ensureInitialized();
+        cleanupExpiredStates();
+        PendingAuthState pending = pendingStates.get(state);
+        if (pending == null) {
+            throw new AuthException("Authorization link expired");
+        }
+        AuthManager.AuthReport report = authorizeByCode(code, true);
+        completeBrowserAuthorization(state, report);
+    }
+
+    void completeBrowserAuthorization(String state, AuthManager.AuthReport report) throws AuthException {
+        PendingAuthState pending = pendingStates.remove(state);
+        if (pending == null) {
+            throw new AuthException("Authorization link expired");
+        }
+        CompletedAuth completed = new CompletedAuth(report);
+        completedAuth.put(pending.client, completed);
+        completedAuthByState.put(state, completed);
+    }
+
     private void refreshRuntimeServices() throws IOException {
         if (config != null && storage != null && oauthClient != null) {
             return;
@@ -163,12 +185,22 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
         return completed == null ? null : completed.report;
     }
 
+    AuthManager.AuthReport consumeBrowserAuthorizationState(String state) {
+        CompletedAuth completed = completedAuthByState.remove(state);
+        if (completed == null) return null;
+        completedAuth.values().removeIf((item) -> item == completed);
+        return completed.report;
+    }
+
     private void cleanupExpiredStates() {
         long now = System.currentTimeMillis();
         pendingStates.entrySet().removeIf((entry) ->
             now - entry.getValue().createdAt > PENDING_STATE_TTL_MS
         );
         completedAuth.entrySet().removeIf((entry) ->
+            now - entry.getValue().createdAt > COMPLETED_AUTH_TTL_MS
+        );
+        completedAuthByState.entrySet().removeIf((entry) ->
             now - entry.getValue().createdAt > COMPLETED_AUTH_TTL_MS
         );
         pendingPortalStates.entrySet().removeIf((entry) ->
@@ -245,6 +277,15 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
                     throw new AuthException("Discord browser authorization requires a launcher connection");
                 }
                 AuthManager.AuthReport completed = consumeBrowserAuthorization(context.client);
+                if (completed == null) {
+                    throw new AuthException("Complete Discord authorization in your browser first");
+                }
+                return completed;
+            }
+            if (codePassword.uri.startsWith("state:")) {
+                AuthManager.AuthReport completed = consumeBrowserAuthorizationState(
+                    codePassword.uri.substring("state:".length())
+                );
                 if (completed == null) {
                     throw new AuthException("Complete Discord authorization in your browser first");
                 }
@@ -369,6 +410,7 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
         pendingStates.clear();
         pendingPortalStates.clear();
         completedAuth.clear();
+        completedAuthByState.clear();
         if (storage != null) {
             storage.save();
         }

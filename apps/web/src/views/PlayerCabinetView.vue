@@ -1,5 +1,10 @@
 <template>
   <main class="mx-auto min-h-screen max-w-2xl px-4 py-12 md:px-6">
+    <div class="mb-6">
+      <Button as-child variant="outline">
+        <RouterLink to="/"><ArrowLeft />Главная</RouterLink>
+      </Button>
+    </div>
     <Card v-if="sessionLoading"><CardContent class="p-6 text-sm text-muted-foreground">Проверка авторизации...</CardContent></Card>
     <Card v-else-if="!player"><CardHeader><CardTitle>Личный кабинет</CardTitle><CardDescription>Войдите через Discord, чтобы управлять скином игрового аккаунта.</CardDescription></CardHeader><CardFooter><Button @click="login"><LogIn />Войти через Discord</Button></CardFooter></Card>
     <Card v-else><CardHeader><div class="flex items-start justify-between gap-4"><div><CardTitle>{{ player.username }}</CardTitle><CardDescription>UUID: {{ player.playerUuid }}</CardDescription></div><Button variant="outline" size="sm" @click="logout">Выйти</Button></div></CardHeader><CardContent class="space-y-5"><div><p class="text-sm font-medium">Скин</p><p class="mt-1 text-sm text-muted-foreground">{{ skin ? `${skin.width}×${skin.height}, обновлён ${new Date(skin.updatedAt).toLocaleString()}` : 'Скин не загружен' }}</p></div><img v-if="skin" :src="panelUrl(`/api/public/skins/${player.username}.png`)" alt="Текущий скин" class="size-32 rounded border object-cover [image-rendering:pixelated]" /><label class="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-accent"><Upload />Загрузить PNG<input class="hidden" type="file" accept="image/png" @change="upload" /></label><p v-if="message" class="text-sm text-muted-foreground">{{ message }}</p></CardContent></Card>
@@ -9,7 +14,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { LogIn, Upload } from '@lucide/vue'
+import { ArrowLeft, LogIn, Upload } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { panelFetch, panelUrl } from '@/lib/public-path'
