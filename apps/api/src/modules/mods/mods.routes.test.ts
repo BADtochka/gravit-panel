@@ -120,11 +120,7 @@ describe('mod management API', () => {
         minecraftVersion: '1.21.4',
         loader: 'FABRIC',
         slugs: ['lithium'],
-        selections: [{
-          slug: 'lithium',
-          clientMode: 'none',
-          serverBindingIds: ['f60b5c42-9420-4135-b894-8a87d3805504'],
-        }],
+        serverBindingIds: ['f60b5c42-9420-4135-b894-8a87d3805504'],
       },
     },
     {
@@ -320,6 +316,43 @@ describe('mod management API', () => {
     expect(response.status).toBe(202)
     expect(queued.type).toBe('gravit.mods.install')
     expect(await waitForTerminalJob(jobsStore, queued.id)).toMatchObject({ status: 'succeeded' })
+  })
+
+  test('normalizes the simple server install payload into a persisted job', async () => {
+    let received: unknown = null
+    const { request, jobsStore } = createHarness({
+      install: async (_installation, input) => {
+        received = input
+        return {
+          installationId: installation.id,
+          profile: input.profile,
+          selections: input.selections ?? [],
+          source: modrinthSource,
+        }
+      },
+    })
+    const response = await request('/api/mods/server/install', post({
+      installationId: installation.id,
+      profile: 'fabric',
+      minecraftVersion: '1.21.4',
+      loader: 'FABRIC',
+      slugs: ['lithium'],
+      serverBindingIds: ['legacy-server-binding'],
+    }))
+    const queued = await response.json()
+    const completed = await waitForTerminalJob(jobsStore, queued.id)
+
+    expect(response.status).toBe(202)
+    expect(completed?.type).toBe('gravit.mods.server.install')
+    expect(completed?.input).toMatchObject({
+      slugs: ['lithium'],
+      selections: [{
+        slug: 'lithium',
+        clientMode: 'none',
+        serverBindingIds: ['legacy-server-binding'],
+      }],
+    })
+    expect(received).toMatchObject(completed?.input ?? {})
   })
 
   test('inspects an uploaded local mrpack', async () => {

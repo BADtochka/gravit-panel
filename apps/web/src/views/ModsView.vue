@@ -870,11 +870,7 @@ const installModsOnServers = () => {
       minecraftVersion: version.value,
       loader: loader.value,
       slugs,
-      selections: slugs.map((slug) => ({
-        slug,
-        clientMode: 'none',
-        serverBindingIds: serverInstallBindingIds.value,
-      })),
+      serverBindingIds: serverInstallBindingIds.value,
     },
   })
   serverInstallDialogOpen.value = false

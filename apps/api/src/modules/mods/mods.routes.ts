@@ -73,6 +73,18 @@ const modInstallBody = t.Object({
     serverBindingIds: t.Array(t.String({ format: 'uuid' }), { maxItems: 32 }),
   }), { minItems: 1, maxItems: 64 })),
 })
+const serverModInstallBody = t.Object({
+  installationId,
+  profile,
+  minecraftVersion,
+  loader,
+  slugs: t.Array(slug, { minItems: 1, maxItems: 64, uniqueItems: true }),
+  serverBindingIds: t.Array(t.String({ minLength: 1, maxLength: 128 }), {
+    minItems: 1,
+    maxItems: 32,
+    uniqueItems: true,
+  }),
+})
 const modpackImportInput = t.Object({
   installationId,
   profile,
@@ -247,30 +259,27 @@ export const createModsRoutes = ({
   .post(
     '/server/install',
     ({ body, set }) => {
-      const input = body as ModInstallInput
-      const installation = findInstallation(input.installationId, set)
+      const installation = findInstallation(body.installationId, set)
       if (!installation) return { message: 'LauncherDockered installation not found.' }
-      if (
-        !input.selections?.length ||
-        input.selections.some(
-          (item) => item.clientMode !== 'none' || item.serverBindingIds.length === 0,
-        )
-      ) {
-        set.status = 422
-        return { message: 'Server mod installation requires server-only destination selections.' }
+      const input: ModInstallInput = {
+        ...body,
+        selections: body.slugs.map((selectedSlug) => ({
+          slug: selectedSlug,
+          clientMode: 'none',
+          serverBindingIds: body.serverBindingIds,
+        })),
       }
-      const bindingCount = new Set(input.selections.flatMap((item) => item.serverBindingIds)).size
       const job = enqueue(
         installation.id,
         'gravit.mods.server.install',
         { ...input },
-        `${input.slugs.length} mod server installation queued for ${bindingCount} server(s)`,
+        `${input.slugs.length} mod server installation queued for ${body.serverBindingIds.length} server(s)`,
         async (context) => ({ ...(await manager.install(installation, input, context)) }),
       )
       set.status = 202
       return job
     },
-    { body: modInstallBody },
+    { body: serverModInstallBody },
   )
   .post(
     '/optional/update',
