@@ -25,7 +25,7 @@
         <p v-if="authErrorMessage" class="mt-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
           {{ authErrorMessage }}
         </p>
-        <Button as="a" :href="panelUrl('/api/panel-auth/login')" class="mt-6 w-full">
+        <Button as="a" :href="panelLoginUrl" class="mt-6 w-full">
           Continue with Discord
         </Button>
       </section>
@@ -242,6 +242,9 @@ const { data: panelAuth, isLoading: authLoading } = useQuery({
 const loginRequired = computed(
   () => Boolean(panelAuth.value?.enabled) && !panelAuth.value?.authenticated,
 )
+const panelLoginUrl = computed(
+  () => `${panelUrl('/api/panel-auth/login')}?returnTo=${encodeURIComponent(route.fullPath)}`,
+)
 const authErrorMessage = computed(() => {
   const error = route.query.authError
   if (error === 'not-authorized') return 'This Discord account is not on the access list.'
@@ -253,7 +256,7 @@ const authErrorMessage = computed(() => {
 
 const logout = async () => {
   await panelFetch('/api/panel-auth/logout', { method: 'POST' })
-  window.location.assign(panelUrl('/'))
+  window.location.assign(panelUrl(route.fullPath))
 }
 
 const getLaunchServer = async () => {

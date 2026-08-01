@@ -1,6 +1,6 @@
 <template>
-  <section class="space-y-4 border-t pt-4">
-    <div class="flex flex-wrap items-start justify-between gap-3">
+  <section class="space-y-5">
+    <div class="flex min-h-16 flex-col justify-between gap-3 sm:flex-row sm:items-start">
       <div>
         <div class="flex items-center gap-2">
           <h4 class="text-sm font-semibold">Server runtime</h4>
@@ -12,7 +12,7 @@
           {{ runtimeSummary }}
         </p>
       </div>
-      <div class="flex flex-wrap gap-2">
+      <div class="grid grid-cols-3 gap-2 sm:flex">
         <Button
           size="sm"
           type="button"
@@ -71,30 +71,32 @@
       </Button>
     </form>
 
-    <div class="overflow-hidden rounded-md border bg-card">
-      <div class="flex h-11 flex-wrap items-center justify-between gap-2 border-b px-3">
-        <p class="text-xs font-medium">Realtime log</p>
+    <div class="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-200 shadow-inner">
+      <div class="flex min-h-11 flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-3 py-2">
+        <p class="flex items-center gap-2 text-xs font-medium text-zinc-300">
+          <TerminalSquare class="size-3.5" /> Realtime log
+        </p>
         <div class="flex items-center gap-3">
           <div class="flex items-center gap-2">
             <Switch :id="autoScrollId" v-model="autoScroll" />
-            <label class="text-xs text-muted-foreground" :for="autoScrollId">Auto-scroll</label>
+            <label class="text-xs text-zinc-400" :for="autoScrollId">Auto-scroll</label>
           </div>
-          <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span class="flex items-center gap-1.5 text-xs text-zinc-400">
             <span class="size-1.5 rounded-full" :class="streamStateClass" />
             {{ streamStateLabel }}
           </span>
         </div>
       </div>
-      <div ref="logContainer" class="h-80 overflow-auto p-3 font-mono text-xs">
-        <p v-if="!events.length" class="text-muted-foreground">Waiting for server events...</p>
+      <div ref="logContainer" class="h-[26rem] overflow-auto p-3 font-mono text-[11px] leading-5 sm:h-[32rem] sm:text-xs">
+        <p v-if="!events.length" class="text-zinc-500">Waiting for server events...</p>
         <div
           v-for="event in events"
           :key="event.sequence"
-          class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 border-b py-1.5 last:border-0 sm:grid-cols-[4.5rem_7rem_minmax(0,1fr)]"
+          class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2 border-b border-zinc-900 py-1 last:border-0 sm:grid-cols-[4.5rem_7rem_minmax(0,1fr)]"
         >
-          <span class="text-muted-foreground">{{ formatTime(event.createdAt) }}</span>
-          <span class="hidden truncate font-medium sm:block">{{ event.type }}</span>
-          <span class="whitespace-pre-wrap break-words">{{ event.message }}</span>
+          <span class="text-zinc-400">{{ formatTime(event.createdAt) }}</span>
+          <span class="hidden truncate text-zinc-400 sm:block">{{ event.type }}</span>
+          <span class="whitespace-pre-wrap break-words text-zinc-200">{{ event.message }}</span>
         </div>
       </div>
     </div>
@@ -115,13 +117,14 @@ import type {
   ServerRuntimeState,
 } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { Play, RotateCw, Send, Square, TriangleAlert } from '@lucide/vue'
+import { Play, RotateCw, Send, Square, TerminalSquare, TriangleAlert } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 const props = defineProps<{
   installationId: string
   bindingId: string
   disabled: boolean
+  active: boolean
 }>()
 const queryClient = useQueryClient()
 const events = ref<ServerRuntimeEvent[]>([])
@@ -153,6 +156,7 @@ const {
   queryFn: () => getJson<ServerRuntimeState>(
     `/api/servers/bindings/${props.bindingId}/runtime?installationId=${encodeURIComponent(props.installationId)}`,
   ),
+  enabled: computed(() => props.active),
   refetchInterval: 5_000,
 })
 
@@ -217,10 +221,19 @@ const connect = () => {
   })
 }
 
-watch(() => [props.installationId, props.bindingId], connect, { immediate: true })
-onBeforeUnmount(() => {
+const disconnect = () => {
   eventSource?.close()
+  eventSource = null
   streamState.value = 'closed'
+}
+
+watch(
+  () => [props.installationId, props.bindingId, props.active] as const,
+  ([, , active]) => active ? connect() : disconnect(),
+  { immediate: true },
+)
+onBeforeUnmount(() => {
+  disconnect()
 })
 
 const runtimeStatus = computed(() => {

@@ -1,12 +1,5 @@
 <template>
-  <section class="space-y-6">
-    <div>
-      <h2 class="text-2xl font-semibold tracking-tight">Servers</h2>
-      <p class="mt-1 text-sm text-muted-foreground">
-        Bind game servers, install ServerWrapper, and manage per-server file packs.
-      </p>
-    </div>
-
+  <section class="mx-auto w-full max-w-[96rem] space-y-6">
     <Alert v-if="pageError" variant="destructive">
       <TriangleAlert class="size-4" />
       <AlertTitle>Server operation failed</AlertTitle>
