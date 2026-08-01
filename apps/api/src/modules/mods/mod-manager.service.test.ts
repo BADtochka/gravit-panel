@@ -112,6 +112,8 @@ describe('ModManagerService', () => {
             slug: 'roughly-enough-items',
             title: 'Roughly Enough Items (REI)',
             description: 'View items and recipes.',
+            client_side: 'required',
+            server_side: 'optional',
           },
         }),
       } as unknown as ModrinthService,
@@ -123,6 +125,8 @@ describe('ModManagerService', () => {
       expect(result.items[0]).toMatchObject({
         name: 'Roughly Enough Items (REI)',
         description: 'View items and recipes.',
+        slug: 'roughly-enough-items',
+        serverSide: 'optional',
       })
     } finally {
       await rm(root, { recursive: true, force: true })

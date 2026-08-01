@@ -897,6 +897,8 @@ export interface InstalledMod {
   versionName: string | null
   name: string | null
   description: string | null
+  slug: string | null
+  serverSide: 'required' | 'optional' | 'unsupported' | 'unknown' | null
 }
 
 export interface ModInstallInput {

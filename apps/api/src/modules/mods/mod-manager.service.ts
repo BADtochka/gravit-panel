@@ -99,6 +99,8 @@ export class ModManagerService {
             versionName: version?.version_number ?? null,
             name: project?.title ?? null,
             description: project?.description ?? null,
+            slug: project?.slug ?? null,
+            serverSide: project?.server_side ?? null,
           }
         },
       ),

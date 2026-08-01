@@ -246,6 +246,8 @@ describe('mod management API', () => {
               versionName: null,
               name: null,
               description: null,
+              slug: null,
+              serverSide: null,
             },
           ],
           source: modrinthSource,

@@ -291,6 +291,14 @@
           >
             <RefreshCw /> Update
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            :disabled="!bulkServerMods.length || !managedServers.length || !targetReady"
+            @click="openServerInstall(selectedInstalledItems)"
+          >
+            <ServerCog /> Add to server ({{ bulkServerMods.length }})
+          </Button>
           <AlertDialog>
             <AlertDialogTrigger as-child>
               <Button size="sm" variant="destructive">
@@ -374,6 +382,15 @@
               >
                 <Settings /> Make optional
               </Button>
+              <Button
+                v-if="canInstallOnServer(item)"
+                size="sm"
+                variant="outline"
+                :disabled="!managedServers.length || !targetReady"
+                @click.stop="openServerInstall([item])"
+              >
+                <ServerCog /> Add to server
+              </Button>
               <AlertDialog>
                 <AlertDialogTrigger as-child>
                   <Button size="sm" variant="destructive" @click.stop><Trash2 /> Remove</Button>
@@ -451,6 +468,45 @@
       </DialogContent>
     </Dialog>
 
+    <Dialog v-model:open="serverInstallDialogOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add mods to server</DialogTitle>
+          <DialogDescription>
+            Select managed servers. A new server pack version will be published for every target.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4">
+          <div class="rounded-md border p-3 text-sm">
+            {{ serverInstallMods.length }} compatible mod{{ serverInstallMods.length === 1 ? '' : 's' }} selected
+          </div>
+          <p v-if="!managedServers.length" class="text-sm text-muted-foreground">
+            No managed servers are configured for this profile.
+          </p>
+          <label
+            v-for="server in managedServers"
+            :key="server.id!"
+            class="flex items-center justify-between gap-3 rounded-md border p-3 text-sm"
+          >
+            <span>{{ server.name }}</span>
+            <Checkbox
+              :model-value="serverInstallBindingIds.includes(server.id!)"
+              @update:model-value="toggleServerInstallBinding(server.id!)"
+            />
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="serverInstallDialogOpen = false">Cancel</Button>
+          <Button
+            :disabled="!serverInstallMods.length || !serverInstallBindingIds.length"
+            @click="installModsOnServers"
+          >
+            <ServerCog /> Add to selected servers
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <JobProgressNotifier :job="activeJob" title="Mod operation" @finished="jobFinished" />
   </section>
 </template>
@@ -488,7 +544,7 @@ import type {
 } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
-  Download, Lock, Power, RefreshCw, Search, Settings, Trash2, TriangleAlert, Unlock,
+  Download, Lock, Power, RefreshCw, Search, ServerCog, Settings, Trash2, TriangleAlert, Unlock,
 } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { computed, reactive, ref, watch } from 'vue'
@@ -508,7 +564,11 @@ const childError = ref<Error | null>(null)
 const installDialogOpen = ref(false)
 const bulkRemoveFromServer = ref(false)
 const optionalDialogOpen = ref(false)
-const optionalDialogMod = ref<InstalledMod | null>(null)
+type InstalledModItem = InstalledMod & { _removeFromServer?: boolean }
+const optionalDialogMod = ref<InstalledModItem | null>(null)
+const serverInstallDialogOpen = ref(false)
+const serverInstallMods = ref<InstalledModItem[]>([])
+const serverInstallBindingIds = ref<string[]>([])
 const optionalForm = reactive({
   name: '',
   description: '',
@@ -605,7 +665,7 @@ const {
   refetch: refetchInstalled,
 } = useQuery({
   queryKey: computed(() => ['installed-mods', installationId.value, profile.value]),
-  queryFn: () => getJson<{ items: InstalledMod[] }>(
+  queryFn: () => getJson<{ items: InstalledModItem[] }>(
     `/api/mods/installed?installationId=${encodeURIComponent(installationId.value)}&profile=${encodeURIComponent(profile.value)}`,
   ),
   enabled: stateReady,
@@ -649,6 +709,10 @@ const bulkUpdateReady = computed(
     selectedInstalledItems.value.every((item) => item.projectId),
   ),
 )
+const canInstallOnServer = (item: InstalledMod) => Boolean(
+  item.slug && (item.serverSide === 'required' || item.serverSide === 'optional'),
+)
+const bulkServerMods = computed(() => selectedInstalledItems.value.filter(canInstallOnServer))
 watch(installed, (value) => {
   const available = new Set(value?.items.map((item) => item.filename) ?? [])
   selectedInstalledFilenames.value = selectedInstalledFilenames.value.filter(
@@ -749,7 +813,7 @@ const updateMod = (item: InstalledMod) => runOperation({
     loader: loader.value,
   },
 })
-const removeMod = (item: InstalledMod & { _removeFromServer?: boolean }) => runOperation({
+const removeMod = (item: InstalledModItem) => runOperation({
   url: '/api/mods/remove',
   body: {
     ...commonBody(),
@@ -780,6 +844,39 @@ const convertToOptional = () => {
     },
   })
   optionalDialogOpen.value = false
+}
+const openServerInstall = (items: InstalledModItem[]) => {
+  const projects = new Map<string, InstalledModItem>()
+  for (const item of items) {
+    if (canInstallOnServer(item) && item.slug) projects.set(item.slug, item)
+  }
+  serverInstallMods.value = [...projects.values()]
+  serverInstallBindingIds.value = managedServers.value.flatMap((server) => server.id ? [server.id] : [])
+  serverInstallDialogOpen.value = true
+}
+const toggleServerInstallBinding = (bindingId: string) => {
+  serverInstallBindingIds.value = serverInstallBindingIds.value.includes(bindingId)
+    ? serverInstallBindingIds.value.filter((id) => id !== bindingId)
+    : [...serverInstallBindingIds.value, bindingId]
+}
+const installModsOnServers = () => {
+  const slugs = serverInstallMods.value.flatMap((item) => item.slug ? [item.slug] : [])
+  if (!slugs.length || !serverInstallBindingIds.value.length) return
+  runOperation({
+    url: '/api/mods/install',
+    body: {
+      ...commonBody(),
+      minecraftVersion: version.value,
+      loader: loader.value,
+      slugs,
+      selections: slugs.map((slug) => ({
+        slug,
+        clientMode: 'none',
+        serverBindingIds: serverInstallBindingIds.value,
+      })),
+    },
+  })
+  serverInstallDialogOpen.value = false
 }
 const toggleInstalledSelection = (filename: string) => {
   selectedInstalledFilenames.value = selectedInstalledFilenames.value.includes(filename)
