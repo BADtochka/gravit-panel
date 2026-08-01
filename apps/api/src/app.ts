@@ -11,6 +11,7 @@ import { modsRoutes } from './modules/mods/mods.routes'
 import { modulesRoutes } from './modules/modules/modules.routes'
 import { createPanelAuthGuard, createPanelAuthRoutes } from './modules/panel-auth/panel-auth.routes'
 import { panelAuthService } from './modules/panel-auth/panel-auth.runtime'
+import { publicPortalRoutes } from './modules/public-portal/public-portal.routes'
 import { setupRoutes } from './modules/setup/setup.routes'
 import {
   serverAgentRoutes,
@@ -42,6 +43,7 @@ export const app = new Elysia({ prefix: '/api' })
     time: new Date().toISOString(),
   }))
   .use(createPanelAuthRoutes(panelAuthService))
+  .use(publicPortalRoutes)
   .use(setupRoutes)
   .use(dockerRoutes)
   .use(authRoutes)

@@ -72,6 +72,41 @@ export const schema = `
   CREATE INDEX IF NOT EXISTS panel_sessions_expires_at_idx
     ON panel_sessions (expires_at);
 
+  CREATE TABLE IF NOT EXISTS public_page_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    title TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    hidden_launcher_variants_json TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS public_player_ticket_nonces (
+    nonce TEXT PRIMARY KEY,
+    expires_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS public_player_sessions (
+    session_hash TEXT PRIMARY KEY,
+    player_uuid TEXT NOT NULL,
+    discord_id TEXT NOT NULL,
+    username TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS public_player_sessions_expires_at_idx
+    ON public_player_sessions (expires_at);
+
+  CREATE TABLE IF NOT EXISTS player_skins (
+    player_uuid TEXT PRIMARY KEY,
+    username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    image BLOB NOT NULL,
+    sha256 TEXT NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS server_bindings (
     id TEXT PRIMARY KEY,
     installation_id TEXT NOT NULL REFERENCES gravit_installations(id) ON DELETE CASCADE,

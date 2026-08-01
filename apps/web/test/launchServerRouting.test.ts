@@ -9,12 +9,12 @@ describe('LaunchServer-aware routing', () => {
     },
   )
 
-  test('opens status only when a configured server lands on the setup route', () => {
-    expect(resolveLaunchServerRedirect('/', true)).toBe('/status')
+  test('keeps the public page available after a server is configured', () => {
+    expect(resolveLaunchServerRedirect('/', true)).toBeNull()
   })
 
-  test('opens LaunchServer setup when no server exists', () => {
-    expect(resolveLaunchServerRedirect('/clients', false)).toBe('/')
+  test('returns the empty setup route to the public page', () => {
+    expect(resolveLaunchServerRedirect('/setup', false)).toBe('/')
     expect(resolveLaunchServerRedirect('/', false)).toBeNull()
   })
 })

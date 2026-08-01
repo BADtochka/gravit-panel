@@ -8,14 +8,14 @@
       close-button
     />
     <JobNotificationCenter />
-    <div v-if="authLoading" class="grid min-h-screen place-items-center">
+    <div v-if="authLoading && !route.meta.public" class="grid min-h-screen place-items-center">
       <div class="flex items-center gap-2 text-sm text-muted-foreground">
         <LoaderCircle class="size-4 animate-spin" />
         Checking access…
       </div>
     </div>
 
-    <main v-else-if="loginRequired" class="grid min-h-screen place-items-center p-4">
+    <main v-else-if="loginRequired && !route.meta.public" class="grid min-h-screen place-items-center p-4">
       <section class="w-full max-w-md rounded-xl border bg-card p-6 shadow-sm">
         <p class="text-sm font-medium text-muted-foreground">Gravit Panel</p>
         <h1 class="mt-2 text-2xl font-semibold tracking-tight">Sign in to continue</h1>
@@ -31,12 +31,16 @@
       </section>
     </main>
 
-    <div v-else-if="launchServerLoading" class="grid min-h-screen place-items-center">
+    <div v-else-if="launchServerLoading && !route.meta.public" class="grid min-h-screen place-items-center">
       <div class="flex items-center gap-2 text-sm text-muted-foreground">
         <LoaderCircle class="size-4 animate-spin" />
         Loading LaunchServer…
       </div>
     </div>
+
+    <main v-else-if="route.meta.public" class="min-h-screen">
+      <RouterView />
+    </main>
 
     <main v-else-if="!hasLaunchServer" class="min-h-screen p-4 md:p-8">
       <div class="mx-auto max-w-7xl">
@@ -191,6 +195,7 @@ import {
   Menu,
   Moon,
   PackageSearch,
+  FilePenLine,
   Rocket,
   ServerCog,
   Sun,
@@ -286,5 +291,6 @@ const navItems = [
   { to: '/clients', label: 'Clients', icon: Boxes },
   { to: '/servers', label: 'Servers', icon: ServerCog },
   { to: '/mods', label: 'Mods', icon: PackageSearch },
+  { to: '/public-settings', label: 'Public page', icon: FilePenLine },
 ]
 </script>

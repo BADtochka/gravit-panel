@@ -9,12 +9,18 @@ import ServersView from './views/ServersView.vue'
 import ModulesView from './views/ModulesView.vue'
 import StatusView from './views/StatusView.vue'
 import UsersView from './views/UsersView.vue'
+import PublicHomeView from './views/PublicHomeView.vue'
+import PlayerCabinetView from './views/PlayerCabinetView.vue'
+import PublicPageSettingsView from './views/PublicPageSettingsView.vue'
 import { panelPublicPath } from './lib/public-path'
 
 export const router = createRouter({
   history: createWebHistory(panelPublicPath || '/'),
   routes: [
-    { path: '/', name: 'launchserver-setup', component: LaunchServerSetupView },
+    { path: '/', name: 'public-home', component: PublicHomeView, meta: { public: true } },
+    { path: '/account', component: PlayerCabinetView, meta: { public: true } },
+    { path: '/public-settings', component: PublicPageSettingsView },
+    { path: '/setup', name: 'launchserver-setup', component: LaunchServerSetupView },
     { path: '/status', component: StatusView },
     { path: '/jobs', component: JobsView },
     { path: '/modules', component: ModulesView },

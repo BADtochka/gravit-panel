@@ -21,6 +21,7 @@ import pro.gravit.utils.helper.SecurityHelper;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.URI;
 import java.util.Map;
 import java.util.UUID;
 import java.util.List;
@@ -39,6 +40,7 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
     private transient DiscordOAuthClient oauthClient;
 
     private transient final ConcurrentMap<String, PendingAuthState> pendingStates = new ConcurrentHashMap<>();
+    private transient final ConcurrentMap<String, PendingPortalState> pendingPortalStates = new ConcurrentHashMap<>();
     private transient final ConcurrentMap<Client, CompletedAuth> completedAuth = new ConcurrentHashMap<>();
 
     @Override
@@ -63,6 +65,39 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
     public String buildAuthorizeUrl(String state) throws IOException {
         ensureInitialized();
         return oauthClient.buildAuthorizeUrl(state);
+    }
+
+    public String startPortalAuthorization() throws IOException {
+        ensureInitialized();
+        validatePortalConfiguration();
+        cleanupExpiredStates();
+        if (pendingPortalStates.size() >= 10_000) {
+            throw new IOException("Too many pending portal authorizations");
+        }
+        String state = SecurityHelper.randomStringToken();
+        pendingPortalStates.put(state, new PendingPortalState());
+        return oauthClient.buildAuthorizeUrl(state, config.portalRedirectUrl);
+    }
+
+    public DiscordUser completePortalAuthorization(String state, String code) throws IOException {
+        ensureInitialized();
+        validatePortalConfiguration();
+        cleanupExpiredStates();
+        PendingPortalState pending = pendingPortalStates.remove(state);
+        if (pending == null) {
+            throw new AuthException("Portal authorization link expired");
+        }
+        if (code == null || code.isBlank()) {
+            throw new AuthException("Discord did not return an authorization code");
+        }
+        return authenticateDiscord(code, config.portalRedirectUrl);
+    }
+
+    public String createPortalTicket(DiscordUser user) throws IOException {
+        ensureInitialized();
+        validatePortalConfiguration();
+        long expiresAt = (System.currentTimeMillis() / 1000L) + config.portalTicketTtlSeconds;
+        return PortalTicket.create(user, config.portalHmacSecret, expiresAt, SecurityHelper.randomStringToken());
     }
 
     public boolean consumePendingState(String state, Client client) {
@@ -149,6 +184,9 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
         );
         completedAuth.entrySet().removeIf((entry) ->
             now - entry.getValue().createdAt > COMPLETED_AUTH_TTL_MS
+        );
+        pendingPortalStates.entrySet().removeIf((entry) ->
+            now - entry.getValue().createdAt > PENDING_STATE_TTL_MS
         );
     }
 
@@ -239,7 +277,12 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
     }
 
     private AuthManager.AuthReport authorizeByCode(String code, boolean minecraftAccess) throws IOException {
-        DiscordOAuthClient.TokenResponse tokens = oauthClient.exchangeCode(code);
+        DiscordUser user = authenticateDiscord(code, config.redirectUrl);
+        return reportFor(user, user.accessToken, minecraftAccess);
+    }
+
+    private DiscordUser authenticateDiscord(String code, String redirectUrl) throws IOException {
+        DiscordOAuthClient.TokenResponse tokens = oauthClient.exchangeCode(code, redirectUrl);
         DiscordOAuthClient.DiscordUserInfo userInfo = oauthClient.fetchUserInfo(tokens.accessToken);
 
         if (userInfo.id == null || userInfo.id.isEmpty()) {
@@ -276,7 +319,35 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
         user.updateOAuth(accessToken, refreshToken, expireIn);
         storage.save();
 
-        return reportFor(user, user.accessToken, minecraftAccess);
+        return user;
+    }
+
+    private void validatePortalConfiguration() throws IOException {
+        if (config.portalRedirectUrl == null || config.portalRedirectUrl.isBlank() ||
+            config.portalCallbackUrl == null || config.portalCallbackUrl.isBlank()) {
+            throw new IOException("Portal OAuth is not configured");
+        }
+        validateHttpUrl(config.portalRedirectUrl, "portalRedirectUrl");
+        validateHttpUrl(config.portalCallbackUrl, "portalCallbackUrl");
+        if (config.portalHmacSecret == null ||
+            config.portalHmacSecret.getBytes(java.nio.charset.StandardCharsets.UTF_8).length < 32) {
+            throw new IOException("portalHmacSecret must contain at least 32 bytes");
+        }
+        if (config.portalTicketTtlSeconds < 30 || config.portalTicketTtlSeconds > 300) {
+            throw new IOException("portalTicketTtlSeconds must be between 30 and 300");
+        }
+    }
+
+    private static void validateHttpUrl(String value, String field) throws IOException {
+        try {
+            URI uri = URI.create(value);
+            if ((!("https".equalsIgnoreCase(uri.getScheme())) && !("http".equalsIgnoreCase(uri.getScheme()))) ||
+                uri.getHost() == null || uri.getUserInfo() != null) {
+                throw new IOException(field + " must be an absolute HTTP(S) URL without user info");
+            }
+        } catch (IllegalArgumentException e) {
+            throw new IOException(field + " must be a valid URL", e);
+        }
     }
 
     static AuthManager.AuthReport reportFor(DiscordUser user, String accessToken, boolean minecraftAccess) {
@@ -310,6 +381,7 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
     @Override
     public void close() {
         pendingStates.clear();
+        pendingPortalStates.clear();
         completedAuth.clear();
         if (storage != null) {
             storage.save();
@@ -328,6 +400,10 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
             this.client = client;
             this.createdAt = System.currentTimeMillis();
         }
+    }
+
+    private static class PendingPortalState {
+        public final long createdAt = System.currentTimeMillis();
     }
 
     private static class CompletedAuth {

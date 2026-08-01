@@ -50,6 +50,10 @@
   "clientId": "YOUR_DISCORD_CLIENT_ID",
   "clientSecret": "YOUR_DISCORD_CLIENT_SECRET",
   "redirectUrl": "http://127.0.0.1:9274/webapi/auth/discord",
+   "portalRedirectUrl": "https://launch.example.com/webapi/auth/discord/portal",
+   "portalCallbackUrl": "https://panel.example.com/auth/discord/callback",
+   "portalHmacSecret": "32-or-more-random-bytes-shared-with-the-panel",
+   "portalTicketTtlSeconds": 60,
   "discordAuthorizeUrl": "https://discord.com/oauth2/authorize",
   "discordTokenUrl": "https://discord.com/api/oauth2/token",
   "discordApiEndpoint": "https://discord.com/api/v10",
@@ -65,6 +69,10 @@
 
 - `clientId` / `clientSecret` — OAuth2-приложение Discord.
 - `redirectUrl` — redirect URI, должен совпадать с настройками приложения Discord и заканчиваться на `/webapi/auth/discord`.
+- `portalRedirectUrl` — отдельный redirect URI для портала, зарегистрированный в Discord и заканчивающийся на `/webapi/auth/discord/portal`. Не заменяет `redirectUrl`, поэтому launcher OAuth остаётся независимым.
+- `portalCallbackUrl` — доверенный HTTPS URL панели. После успешного OAuth модуль перенаправляет браузер сюда с параметром `ticket`.
+- `portalHmacSecret` — общий с панелью секрет длиной не менее 32 байт. Сгенерируйте криптографически случайное значение и не помещайте его в клиентский код.
+- `portalTicketTtlSeconds` — срок действия portal ticket, от 30 до 300 секунд (по умолчанию 60).
 - `requiredGuildIds` — список ID гильдий, членство в одной из которых обязательно для входа.
 - `useGlobalNickname` — если `true`, использовать глобальный ник Discord пользователя; иначе — ник на первой обязательной гильдии.
 - `usernameRegex` — regex для проверки итогового никнейма.
@@ -123,6 +131,14 @@ upstream называется «Сохранить пароль». Панель 
 В `Database.json` Discord provider tokens хранятся отдельно от локальных
 LaunchServer session tokens. В протокол лаунчера и его TRACE-логи Discord
 access/refresh tokens не передаются.
+
+## Portal OAuth
+
+Откройте в браузере `https://launch.example.com/webapi/auth/discord/portal`. Этот endpoint создаёт случайный server-side `state`, действующий 10 минут и удаляемый при первом callback. Для portal flow в Discord application должны быть зарегистрированы **оба** URI: существующий `redirectUrl` launcher-а и новый `portalRedirectUrl`.
+
+После проверки Discord, guild membership, форматирования имени и auto-registration используется тот же `DiscordUser` из `Database.json` (и, соответственно, тот же UUIDv5 на Discord ID). Модуль перенаправляет на `portalCallbackUrl?ticket=...`. Ticket имеет формат `base64url(json).base64url(hmac-sha256)` и содержит только `uuid`, `username`, `discordId`, `exp` (Unix seconds) и `nonce`; Discord access/refresh tokens в него не входят.
+
+Панель должна проверять HMAC над первой частью ticket с `portalHmacSecret`, отклонять истёкший ticket и атомарно отмечать `nonce` использованным до создания своей сессии. Это делает ticket одноразовым на стороне получателя. `portalCallbackUrl` должен быть HTTPS в production; endpoint также отправляет `Cache-Control: no-store` и `Referrer-Policy: no-referrer`.
 
 ## Безопасность никнеймов
 

@@ -16,6 +16,7 @@ import type {
   GravitInstallation,
 } from '@gravit-panel/shared'
 import { join } from 'node:path'
+import { env } from '../../core/env'
 import type { AuthControlCommand, ControlFileService } from '../gravit/control-file.service'
 import { ContainerVolumeService } from '../docker/container-volume.service'
 import type { LauncherDockeredService } from '../docker/launcherdockered.service'
@@ -350,6 +351,9 @@ export class AuthProviderService {
       usernameRegex: config.usernameRegex || '^[a-zA-Z0-9_]{3,16}$',
       usernameFormat: config.usernameFormat || '{discord}',
       autoRegister: config.autoRegister ?? true,
+      portalRedirectUrl: `${env.LAUNCHSERVER_PUBLIC_URL.replace(/\/$/, '')}/webapi/auth/discord/portal`,
+      portalCallbackUrl: `${(env.PANEL_PUBLIC_URL ?? '').replace(/\/$/, '')}/api/public/auth/callback`,
+      portalHmacSecret: env.PUBLIC_PORTAL_HMAC_SECRET ?? '',
     }
 
     context.progress(12, 'Writing DiscordAuthSystem module configuration')
@@ -392,7 +396,12 @@ export class AuthProviderService {
     const textureProvider =
       input.textureProvider ??
       (existing.textureProvider as AuthTextureProviderConfig | undefined) ??
-      ({ type: 'void' } satisfies AuthTextureProviderConfig)
+      (input.recipeId === 'discord' && env.PANEL_PUBLIC_URL
+        ? ({
+            type: 'request',
+            skinURL: `${env.PANEL_PUBLIC_URL.replace(/\/$/, '')}/api/public/skins/%username%.png`,
+          } satisfies AuthTextureProviderConfig)
+        : ({ type: 'void' } satisfies AuthTextureProviderConfig))
 
     return {
       isDefault: input.isDefault,

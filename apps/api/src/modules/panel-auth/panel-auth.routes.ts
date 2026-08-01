@@ -92,13 +92,14 @@ export const createPanelAuthRoutes = (service: PanelAuthService) =>
     })
 
 export const createPanelAuthGuard = (service: PanelAuthService) => {
-  const publicPaths = new Set(['/api/health'])
+    const publicPaths = new Set(['/api/health', '/api/docker/launchserver', '/api/clients/launcher/artifacts'])
   return ({ request }: { request: Request }) => {
     if (!service.enabled) return
     const path = new URL(request.url).pathname
     if (
       publicPaths.has(path) ||
       path.startsWith('/api/panel-auth/') ||
+      (path.startsWith('/api/public/') && !path.startsWith('/api/public/settings')) ||
       /^\/api\/server-bootstrap\/[A-Za-z0-9_-]{32,128}(?:\/start|\/report|\/artifacts\/(?:bundle|jre-x64|jre-aarch64))?$/.test(path) ||
       /^\/api\/server-agent\/(?:update|report|archive\/[0-9a-f-]{36})$/.test(path)
     ) return

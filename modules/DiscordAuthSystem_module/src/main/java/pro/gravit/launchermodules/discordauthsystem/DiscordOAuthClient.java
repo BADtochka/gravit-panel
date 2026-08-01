@@ -26,22 +26,30 @@ public class DiscordOAuthClient {
     }
 
     public String buildAuthorizeUrl(String state) {
+        return buildAuthorizeUrl(state, config.redirectUrl);
+    }
+
+    public String buildAuthorizeUrl(String state, String redirectUrl) {
         String scope = "identify guilds";
         return config.discordAuthorizeUrl
             + "?client_id=" + urlEncode(config.clientId)
-            + "&redirect_uri=" + urlEncode(config.redirectUrl)
+            + "&redirect_uri=" + urlEncode(redirectUrl)
             + "&response_type=code"
             + "&scope=" + urlEncode(scope)
             + "&state=" + urlEncode(state);
     }
 
     public TokenResponse exchangeCode(String code) throws IOException {
+        return exchangeCode(code, config.redirectUrl);
+    }
+
+    public TokenResponse exchangeCode(String code, String redirectUrl) throws IOException {
         Map<String, String> params = new HashMap<>();
         params.put("client_id", config.clientId);
         params.put("client_secret", config.clientSecret);
         params.put("grant_type", "authorization_code");
         params.put("code", code);
-        params.put("redirect_uri", config.redirectUrl);
+        params.put("redirect_uri", redirectUrl);
         return exchangeToken(params);
     }
 
