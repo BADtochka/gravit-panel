@@ -19,7 +19,12 @@ import { AuthProviderService } from './auth-provider.service'
 import { AuthUsersService } from './auth-users.service'
 import { moduleManagement } from '../modules/modules.runtime'
 
-const lifecycle = new LauncherDockeredService(env.INSTALLATIONS_ROOT)
+const lifecycle = new LauncherDockeredService(
+  env.INSTALLATIONS_ROOT,
+  undefined,
+  undefined,
+  env.LAUNCHSERVER_PUBLIC_URL,
+)
 const providerService = new AuthProviderService(
   controlFileService,
   undefined,

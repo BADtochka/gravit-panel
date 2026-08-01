@@ -2,15 +2,19 @@ diff --git a/src/main/java/pro/gravit/launcher/gui/scenes/login/LoginScene.java 
 index 8152e91..cf7a91b 100644
 --- a/src/main/java/pro/gravit/launcher/gui/scenes/login/LoginScene.java
 +++ b/src/main/java/pro/gravit/launcher/gui/scenes/login/LoginScene.java
-@@ -11,6 +11,7 @@ import javafx.util.StringConverter;
+@@ -11,8 +11,10 @@
+ import javafx.util.Duration;
+ import javafx.util.StringConverter;
  import pro.gravit.launcher.base.events.request.GetAvailabilityAuthRequestEvent;
++import pro.gravit.launcher.core.api.LauncherAPIHolder;
  import pro.gravit.launcher.core.api.method.AuthMethod;
  import pro.gravit.launcher.core.api.model.Texture;
 +import pro.gravit.launcher.core.api.method.details.AuthWebDetails;
  import pro.gravit.launcher.core.backend.LauncherBackendAPIHolder;
  import pro.gravit.launcher.core.backend.UserSettings;
  import pro.gravit.launcher.gui.core.JavaFXApplication;
-@@ -180,8 +181,23 @@ public class LoginScene extends FxScene {
+@@ -179,9 +181,24 @@ public void changeAuthAvailability(AuthMethod authAvailability) {
+         this.application.authService.setAuthAvailability(authAvailability);
          this.authList.selectionModelProperty().get().select(authAvailability);
          authFlow.init(authAvailability);
 +        updateCredentialControls();
@@ -34,7 +38,7 @@ index 8152e91..cf7a91b 100644
      public void addAuthAvailability(AuthMethod authAvailability) {
          authList.getItems().add(authAvailability);
          logger.trace("Added {}: {}", authAvailability.getName(), authAvailability.getDisplayName());
-@@ -214,7 +230,7 @@ public class LoginScene extends FxScene {
+@@ -214,7 +231,7 @@ public String getName() {
      public void onSuccessLogin(AuthFlow.SuccessAuth successAuth) {
          var user = successAuth.user();
          application.authService.setUser(user);
@@ -43,6 +47,15 @@ index 8152e91..cf7a91b 100644
  
          if (savePassword) {
              application.runtimeSettings.login = successAuth.recentLogin();
+@@ -253,2 +270,7 @@ public class LoginScene extends FxScene {
+     public void onGetProfiles() {
++        if (LauncherAPIHolder.profile() == null) {
++            errorHandle(new IllegalStateException(
++                    "LaunchServer connection is unavailable. Restart the launcher and try again."));
++            return;
++        }
+         processing(LauncherBackendAPIHolder.getApi().fetchProfiles(), application.getTranslation("runtime.overlay.processing.text.profiles"),
+                    (profiles) -> {/*
 diff --git a/src/main/java/pro/gravit/launcher/gui/scenes/login/methods/WebAuthMethod.java b/src/main/java/pro/gravit/launcher/gui/scenes/login/methods/WebAuthMethod.java
 index 73d86ac..535679d 100644
 --- a/src/main/java/pro/gravit/launcher/gui/scenes/login/methods/WebAuthMethod.java

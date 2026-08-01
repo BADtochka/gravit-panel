@@ -25,7 +25,12 @@ import {
 import { LauncherDockeredService } from './launcherdockered.service'
 
 const preflight = new DockerPreflightService()
-const installer = new LauncherDockeredService(env.INSTALLATIONS_ROOT)
+const installer = new LauncherDockeredService(
+  env.INSTALLATIONS_ROOT,
+  undefined,
+  undefined,
+  env.LAUNCHSERVER_PUBLIC_URL,
+)
 const provisioning = new ProfileProvisioningService(
   credentialKeyService,
   remoteControlStore,

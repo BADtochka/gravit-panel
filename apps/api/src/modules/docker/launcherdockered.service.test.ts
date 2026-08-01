@@ -146,7 +146,7 @@ describe('LauncherDockeredService', () => {
     }
   })
 
-  test('synchronizes persisted public URLs to HTTPS and WSS during restart', async () => {
+  test('synchronizes persisted public URLs through a configured HTTPS path prefix', async () => {
     const root = await mkdtemp(join(tmpdir(), 'gravit-launcherdockered-public-url-'))
     const installationPath = join(root, 'default')
     await mkdir(join(installationPath, 'launcher'), { recursive: true })
@@ -180,6 +180,7 @@ describe('LauncherDockeredService', () => {
         return { exitCode: 0, output: 'ok' }
       },
       ready,
+      'https://mine.example.com/launcher',
     )
     const now = new Date().toISOString()
     const installation: GravitInstallation = {
@@ -206,13 +207,13 @@ describe('LauncherDockeredService', () => {
       expect(config).toMatchObject({
         updatesProvider: {
           urls: {
-            EXE_WINDOWS_X86_64: 'https://mine.example.com/Launcher.exe',
-            JAR: 'https://mine.example.com/Launcher.jar',
+            EXE_WINDOWS_X86_64: 'https://mine.example.com/launcher/Launcher.exe',
+            JAR: 'https://mine.example.com/launcher/Launcher.jar',
           },
         },
         netty: {
-          downloadURL: 'https://mine.example.com/',
-          address: 'wss://mine.example.com/api',
+          downloadURL: 'https://mine.example.com/launcher/',
+          address: 'wss://mine.example.com/launcher/api',
         },
       })
       expect(await readFile(join(installationPath, 'nginx.conf'), 'utf8')).toContain(

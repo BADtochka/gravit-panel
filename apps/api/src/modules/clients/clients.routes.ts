@@ -28,7 +28,12 @@ import { MinecraftVersionsService } from './minecraft-versions.service'
 import { JavaRuntimeManagerService } from './java-runtime-manager.service'
 import { LoaderInstallerService } from './loader-installer.service'
 
-const launcherLifecycle = new LauncherDockeredService(env.INSTALLATIONS_ROOT)
+const launcherLifecycle = new LauncherDockeredService(
+  env.INSTALLATIONS_ROOT,
+  undefined,
+  undefined,
+  env.LAUNCHSERVER_PUBLIC_URL,
+)
 const loaderInstallers = new LoaderInstallerService()
 const launcherRuntimeService = new LauncherRuntimeService(
   controlFileService,

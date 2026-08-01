@@ -7,5 +7,5 @@ import { ModuleManagementService } from './module-management.service'
 export const moduleManagement = new ModuleManagementService(
   controlFileService,
   new ContainerVolumeService(),
-  new LauncherDockeredService(env.INSTALLATIONS_ROOT),
+  new LauncherDockeredService(env.INSTALLATIONS_ROOT, undefined, undefined, env.LAUNCHSERVER_PUBLIC_URL),
 )

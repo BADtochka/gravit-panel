@@ -17,7 +17,12 @@ import { DiscordAuthSystemBuildService } from './discord-auth-system-build.servi
 import { findCatalogModule, moduleCatalog } from './module-catalog'
 import { moduleManagement } from './modules.runtime'
 
-const lifecycle = new LauncherDockeredService(env.INSTALLATIONS_ROOT)
+const lifecycle = new LauncherDockeredService(
+  env.INSTALLATIONS_ROOT,
+  undefined,
+  undefined,
+  env.LAUNCHSERVER_PUBLIC_URL,
+)
 
 const installationId = t.String({ format: 'uuid' })
 const moduleId = t.String({

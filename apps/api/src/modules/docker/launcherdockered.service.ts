@@ -162,6 +162,7 @@ export class LauncherDockeredService {
     installationsRoot: string,
     private readonly commandRunner: InstallerCommandRunner = runCommand,
     private readonly readinessWaiter: InstallationReadinessWaiter = waitForControlSocket,
+    private readonly publicUrl?: string,
   ) {
     this.installationsRoot = resolve(installationsRoot)
   }
@@ -718,11 +719,16 @@ export class LauncherDockeredService {
     }
 
     const { address } = await this.readExistingEnvironment(installationPath)
-    const publicAddress = new URL(`http://${address}`)
+    const configuredPublicUrl = this.publicUrl?.trim()
+    const publicAddress = configuredPublicUrl
+      ? new URL(configuredPublicUrl)
+      : new URL(`http://${address}`)
     const localAddress = new Set(['localhost', '127.0.0.1', '::1']).has(
       publicAddress.hostname.toLowerCase(),
     )
-    const secure = !localAddress && (!publicAddress.port || publicAddress.port === '443')
+    const secure = publicAddress.protocol === 'https:' || (
+      !configuredPublicUrl && !localAddress && (!publicAddress.port || publicAddress.port === '443')
+    )
     const httpProtocol = secure ? 'https:' : 'http:'
     const websocketProtocol = secure ? 'wss:' : 'ws:'
     const contents = await readFile(configPath, 'utf8')
@@ -752,6 +758,9 @@ export class LauncherDockeredService {
       }
     }
     const updatesPrefix = `/${updatesDir}/`
+    const publicPathPrefix = publicAddress.pathname === '/'
+      ? ''
+      : publicAddress.pathname.replace(/\/+$/, '')
 
     const rewriteUrl = (value: unknown, protocol: string, normalizeUpdatesPath: boolean) => {
       if (typeof value !== 'string') return value
@@ -761,6 +770,9 @@ export class LauncherDockeredService {
         url.host = publicAddress.host
         if (normalizeUpdatesPath && url.pathname.startsWith(updatesPrefix)) {
           url.pathname = url.pathname.slice(updatesPrefix.length - 1)
+        }
+        if (publicPathPrefix && !url.pathname.startsWith(`${publicPathPrefix}/`)) {
+          url.pathname = `${publicPathPrefix}${url.pathname.startsWith('/') ? '' : '/'}${url.pathname}`
         }
         const rewritten = url.toString()
         if (rewritten !== value) changed = true
@@ -805,7 +817,7 @@ export class LauncherDockeredService {
       throw error
     }
     context.log(`LaunchServer public URL snapshot created: ${backupPath}`)
-    context.log(`Synchronized launcher download URLs and WebSocket address to ${publicAddress.host}`)
+    context.log(`Synchronized launcher download URLs and WebSocket address to ${publicAddress.origin}${publicPathPrefix}`)
     return true
   }
 

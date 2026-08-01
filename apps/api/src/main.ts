@@ -15,7 +15,7 @@ logger.info(`API listening on http://${env.HOST}:${env.PORT}`)
 
 const launchServerStartup = new LaunchServerStartupService(
   installationsStore,
-  new LauncherDockeredService(env.INSTALLATIONS_ROOT),
+  new LauncherDockeredService(env.INSTALLATIONS_ROOT, undefined, undefined, env.LAUNCHSERVER_PUBLIC_URL),
   javaRuntimes,
 )
 void launchServerStartup.recoverUnhealthyInstallations().catch((error) => {
