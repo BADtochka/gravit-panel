@@ -162,7 +162,10 @@
               Configure provider cores on the Auth page after this module is loaded.
             </p>
           </CardContent>
-          <CardFooter v-if="runtimeFor(item.id)?.loaded" class="space-y-2">
+          <CardFooter
+            v-if="runtimeFor(item.id)?.loaded"
+            class="flex-col items-stretch gap-2"
+          >
             <Button
               v-if="item.id === 'DiscordAuthSystem_module'"
               class="w-full"
@@ -203,7 +206,7 @@
               </AlertDialogContent>
             </AlertDialog>
           </CardFooter>
-          <CardFooter v-else class="space-y-2">
+          <CardFooter v-else class="flex-col items-stretch gap-2">
             <Button
               v-if="item.id === 'DiscordAuthSystem_module'"
               class="w-full bg-white text-black hover:bg-white/90 dark:bg-white dark:text-black dark:hover:bg-white/90"

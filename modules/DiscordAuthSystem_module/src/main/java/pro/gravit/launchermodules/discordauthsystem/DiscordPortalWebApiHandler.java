@@ -101,14 +101,19 @@ public class DiscordPortalWebApiHandler implements NettyWebAPIHandler.SimpleSeve
         return false;
     }
 
-    private static String stateCookie(String state, String redirectUrl) {
-        return STATE_COOKIE + "=" + state + "; Path=/webapi/auth/discord/portal; Max-Age=600; HttpOnly; SameSite=Lax"
+    static String stateCookie(String state, String redirectUrl) {
+        return STATE_COOKIE + "=" + state + "; Path=" + cookiePath(redirectUrl) + "; Max-Age=600; HttpOnly; SameSite=Lax"
             + ("https".equalsIgnoreCase(URI.create(redirectUrl).getScheme()) ? "; Secure" : "");
+    }
+
+    static String cookiePath(String redirectUrl) {
+        String path = URI.create(redirectUrl).getPath();
+        return path == null || path.isBlank() ? "/" : path;
     }
 
     private static void expireStateCookie(FullHttpResponse response, String redirectUrl) {
         response.headers().add(HttpHeaderNames.SET_COOKIE,
-            STATE_COOKIE + "=; Path=/webapi/auth/discord/portal; Max-Age=0; HttpOnly; SameSite=Lax"
+            STATE_COOKIE + "=; Path=" + cookiePath(redirectUrl) + "; Max-Age=0; HttpOnly; SameSite=Lax"
                 + ("https".equalsIgnoreCase(URI.create(redirectUrl).getScheme()) ? "; Secure" : ""));
     }
 

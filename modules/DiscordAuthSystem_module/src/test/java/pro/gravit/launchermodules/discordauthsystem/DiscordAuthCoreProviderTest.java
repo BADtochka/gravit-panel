@@ -5,6 +5,7 @@ import pro.gravit.launcher.base.ClientPermissions;
 import pro.gravit.launchserver.socket.Client;
 
 import java.util.UUID;
+import java.util.Map;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 
@@ -20,17 +21,36 @@ class DiscordAuthCoreProviderTest {
     Path temporaryDirectory;
 
     @Test
-    void keepsEarlierAuthorizationLinkValidWhenLauncherRequestsAnotherOne() {
+    void reusesAuthorizationLinkWhenLauncherRequestsAvailabilityAgain() {
         DiscordAuthCoreProvider provider = new DiscordAuthCoreProvider();
         Client client = new Client();
 
         String firstState = provider.createPendingState(client);
         String secondState = provider.createPendingState(client);
 
-        assertNotEquals(firstState, secondState);
+        assertEquals(firstState, secondState);
         assertTrue(provider.consumePendingState(firstState, client));
-        assertTrue(provider.consumePendingState(secondState, client));
-        assertFalse(provider.consumePendingState(firstState, client));
+        assertFalse(provider.consumePendingState(secondState, client));
+    }
+
+    @Test
+    void availabilityRefreshDoesNotDiscardCompletedBrowserAuthorization() throws Exception {
+        DiscordAuthCoreProvider provider = new DiscordAuthCoreProvider();
+        Client client = new Client();
+        DiscordUser user = new DiscordUser(
+            UUID.fromString("aa90f8c5-1214-3f4e-a64c-3afde444097b"),
+            "1531370122256711680",
+            "formallybad",
+            ClientPermissions.DEFAULT
+        );
+        provider.completeBrowserAuthorization(client, DiscordAuthCoreProvider.reportFor(user, "token", true));
+
+        provider.createPendingState(client);
+
+        var completedField = DiscordAuthCoreProvider.class.getDeclaredField("completedAuth");
+        completedField.setAccessible(true);
+        Map<?, ?> completed = (Map<?, ?>) completedField.get(provider);
+        assertTrue(completed.containsKey(client));
     }
 
     @Test

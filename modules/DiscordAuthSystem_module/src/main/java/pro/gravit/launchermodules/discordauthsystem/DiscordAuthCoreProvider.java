@@ -31,7 +31,6 @@ import java.util.concurrent.ConcurrentMap;
 public class DiscordAuthCoreProvider extends AuthCoreProvider {
     private static final long PENDING_STATE_TTL_MS = 10 * 60 * 1000L;
     private static final long COMPLETED_AUTH_TTL_MS = 2 * 60 * 1000L;
-    private static final int MAX_PENDING_STATES_PER_CLIENT = 5;
     // These are runtime services initialized by the module after LaunchServer
     // has deserialized the core config. Gson must never persist them into
     // LaunchServer.json: Gson and HttpClient contain JDK-internal state.
@@ -137,10 +136,16 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
         this.oauthClient = new DiscordOAuthClient(loadedConfig);
     }
 
-    public String createPendingState(Client client) {
+    public synchronized String createPendingState(Client client) {
         cleanupExpiredStates();
-        trimPendingStates(client);
-        completedAuth.remove(client);
+        // Availability may be requested repeatedly while the browser is open.
+        // Reuse the pending state so LauncherRuntime never displays a link that
+        // a later availability refresh has made stale.
+        for (Map.Entry<String, PendingAuthState> entry : pendingStates.entrySet()) {
+            if (entry.getValue().client == client) {
+                return entry.getKey();
+            }
+        }
         String state = SecurityHelper.randomStringToken();
         pendingStates.put(state, new PendingAuthState(client));
         return state;
@@ -150,25 +155,6 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
         cleanupExpiredStates();
         pendingStates.entrySet().removeIf((entry) -> entry.getValue().client == client);
         completedAuth.put(client, new CompletedAuth(report));
-    }
-
-    private void trimPendingStates(Client client) {
-        while (pendingStates.values().stream().filter((pending) -> pending.client == client).count()
-            >= MAX_PENDING_STATES_PER_CLIENT) {
-            Map.Entry<String, PendingAuthState> oldest = null;
-            for (Map.Entry<String, PendingAuthState> entry : pendingStates.entrySet()) {
-                PendingAuthState pending = entry.getValue();
-                if (
-                    pending.client == client &&
-                    (oldest == null || pending.createdAt < oldest.getValue().createdAt)
-                ) {
-                    oldest = entry;
-                }
-            }
-            if (oldest == null || !pendingStates.remove(oldest.getKey(), oldest.getValue())) {
-                return;
-            }
-        }
     }
 
     private AuthManager.AuthReport consumeBrowserAuthorization(Client client) {
