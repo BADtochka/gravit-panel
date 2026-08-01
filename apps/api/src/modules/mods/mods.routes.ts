@@ -78,7 +78,7 @@ const serverModInstallBody = t.Object({
   profile,
   minecraftVersion,
   loader,
-  slugs: t.Array(slug, { minItems: 1, maxItems: 64, uniqueItems: true }),
+  slugs: t.Array(slug, { minItems: 1, maxItems: 200, uniqueItems: true }),
   serverBindingIds: t.Array(t.String({ minLength: 1, maxLength: 128 }), {
     minItems: 1,
     maxItems: 32,

@@ -355,6 +355,27 @@ describe('mod management API', () => {
     expect(received).toMatchObject(completed?.input ?? {})
   })
 
+  test('accepts server bulk installs larger than the client search limit', async () => {
+    const slugs = Array.from({ length: 65 }, (_, index) => `server-mod-${index + 1}`)
+    const { request, jobsStore } = createHarness()
+    const response = await request('/api/mods/server/install', post({
+      installationId: installation.id,
+      profile: 'main',
+      minecraftVersion: '1.21.1',
+      loader: 'NEOFORGE',
+      slugs,
+      serverBindingIds: ['8a7cbb2c-98d8-4489-b1e2-67c87525d9d5'],
+    }))
+    const queued = await response.json()
+
+    expect(response.status).toBe(202)
+    expect(queued.type).toBe('gravit.mods.server.install')
+    expect(await waitForTerminalJob(jobsStore, queued.id)).toMatchObject({
+      status: 'succeeded',
+      input: { slugs },
+    })
+  })
+
   test('inspects an uploaded local mrpack', async () => {
     let received: Uint8Array<ArrayBufferLike> = new Uint8Array()
     const { request } = createHarness({}, undefined, {
