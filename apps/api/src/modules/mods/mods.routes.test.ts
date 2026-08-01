@@ -110,6 +110,24 @@ describe('mod management API', () => {
       },
     },
     {
+      name: 'server install',
+      path: '/api/mods/server/install',
+      method: 'install',
+      type: 'gravit.mods.server.install',
+      body: {
+        installationId: installation.id,
+        profile: 'fabric',
+        minecraftVersion: '1.21.4',
+        loader: 'FABRIC',
+        slugs: ['lithium'],
+        selections: [{
+          slug: 'lithium',
+          clientMode: 'none',
+          serverBindingIds: ['f60b5c42-9420-4135-b894-8a87d3805504'],
+        }],
+      },
+    },
+    {
       name: 'toggle',
       path: '/api/mods/toggle',
       method: 'toggle',
@@ -281,6 +299,27 @@ describe('mod management API', () => {
     expect((await providers.json()).primary).toBe('modrinth')
     expect((await search.json()).items[0]?.slug).toBe('sodium')
     expect((await installed.json()).items[0]?.filename).toBe('sodium.jar')
+  })
+
+  test('accepts server-only selections on the legacy install endpoint', async () => {
+    const { request, jobsStore } = createHarness()
+    const response = await request('/api/mods/install', post({
+      installationId: installation.id,
+      profile: 'fabric',
+      minecraftVersion: '1.21.4',
+      loader: 'FABRIC',
+      slugs: ['lithium'],
+      selections: [{
+        slug: 'lithium',
+        clientMode: 'none',
+        serverBindingIds: ['f60b5c42-9420-4135-b894-8a87d3805504'],
+      }],
+    }))
+    const queued = await response.json()
+
+    expect(response.status).toBe(202)
+    expect(queued.type).toBe('gravit.mods.install')
+    expect(await waitForTerminalJob(jobsStore, queued.id)).toMatchObject({ status: 'succeeded' })
   })
 
   test('inspects an uploaded local mrpack', async () => {

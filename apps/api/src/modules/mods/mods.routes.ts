@@ -54,6 +54,25 @@ const projectId = t.String({
   pattern: '^[A-Za-z0-9_-]+$',
 })
 const packPath = t.String({ minLength: 1, maxLength: 512 })
+const modInstallBody = t.Object({
+  installationId,
+  profile,
+  minecraftVersion,
+  loader,
+  slugs: t.Array(slug, { minItems: 1, maxItems: 64 }),
+  selections: t.Optional(t.Array(t.Object({
+    slug,
+    clientMode: t.Union([
+      t.Literal('required'),
+      t.Literal('optional'),
+      t.Literal('none'),
+    ]),
+    optionalEnabledByDefault: t.Optional(t.Boolean()),
+    optionalName: t.Optional(t.String({ minLength: 1, maxLength: 80 })),
+    optionalDescription: t.Optional(t.String({ maxLength: 500 })),
+    serverBindingIds: t.Array(t.String({ format: 'uuid' }), { maxItems: 32 }),
+  }), { minItems: 1, maxItems: 64 })),
+})
 const modpackImportInput = t.Object({
   installationId,
   profile,
@@ -222,26 +241,36 @@ export const createModsRoutes = ({
       return job
     },
     {
-      body: t.Object({
-        installationId,
-        profile,
-        minecraftVersion,
-        loader,
-        slugs: t.Array(slug, { minItems: 1, maxItems: 64 }),
-        selections: t.Optional(t.Array(t.Object({
-          slug,
-          clientMode: t.Union([
-            t.Literal('required'),
-            t.Literal('optional'),
-            t.Literal('none'),
-          ]),
-          optionalEnabledByDefault: t.Optional(t.Boolean()),
-          optionalName: t.Optional(t.String({ minLength: 1, maxLength: 80 })),
-          optionalDescription: t.Optional(t.String({ maxLength: 500 })),
-          serverBindingIds: t.Array(t.String({ format: 'uuid' }), { maxItems: 32 }),
-        }), { minItems: 1, maxItems: 64 })),
-      }),
+      body: modInstallBody,
     },
+  )
+  .post(
+    '/server/install',
+    ({ body, set }) => {
+      const input = body as ModInstallInput
+      const installation = findInstallation(input.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      if (
+        !input.selections?.length ||
+        input.selections.some(
+          (item) => item.clientMode !== 'none' || item.serverBindingIds.length === 0,
+        )
+      ) {
+        set.status = 422
+        return { message: 'Server mod installation requires server-only destination selections.' }
+      }
+      const bindingCount = new Set(input.selections.flatMap((item) => item.serverBindingIds)).size
+      const job = enqueue(
+        installation.id,
+        'gravit.mods.server.install',
+        { ...input },
+        `${input.slugs.length} mod server installation queued for ${bindingCount} server(s)`,
+        async (context) => ({ ...(await manager.install(installation, input, context)) }),
+      )
+      set.status = 202
+      return job
+    },
+    { body: modInstallBody },
   )
   .post(
     '/optional/update',

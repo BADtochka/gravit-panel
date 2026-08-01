@@ -585,6 +585,7 @@ const {
   () => installationId.value,
   [
     'gravit.mods.install',
+    'gravit.mods.server.install',
     'gravit.mods.update',
     'gravit.mods.toggle',
     'gravit.mods.remove',
@@ -863,7 +864,7 @@ const installModsOnServers = () => {
   const slugs = serverInstallMods.value.flatMap((item) => item.slug ? [item.slug] : [])
   if (!slugs.length || !serverInstallBindingIds.value.length) return
   runOperation({
-    url: '/api/mods/install',
+    url: '/api/mods/server/install',
     body: {
       ...commonBody(),
       minecraftVersion: version.value,

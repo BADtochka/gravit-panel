@@ -49,6 +49,7 @@ export type JobType =
   | 'gravit.server-pack.publish'
   | 'gravit.server-bootstrap.prepare'
   | 'gravit.mods.install'
+  | 'gravit.mods.server.install'
   | 'gravit.mods.update'
   | 'gravit.mods.toggle'
   | 'gravit.mods.remove'
