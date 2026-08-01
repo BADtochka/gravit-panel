@@ -101,7 +101,10 @@ const requestHeaders = {
 }
 
 export class ModrinthService {
-  constructor(private readonly fetcher: typeof fetch = fetch) {}
+  constructor(
+    private readonly fetcher: typeof fetch = fetch,
+    private readonly sleeper: (milliseconds: number) => Promise<unknown> = Bun.sleep,
+  ) {}
 
   async search(query: string, minecraftVersion: string, loader: string) {
     return this.searchProjects(query, minecraftVersion, loader, 'mod')
@@ -453,13 +456,32 @@ export class ModrinthService {
       throw new Error('Modrinth returned a non-CDN artifact URL')
     }
     if (file.size > maximumBytes) throw new Error('Modrinth artifact exceeds the size limit')
-    const response = await this.fetcher(file.url, { headers: requestHeaders })
-    if (!response.ok) throw new Error(`Mod download failed with HTTP ${response.status}`)
-    const bytes = new Uint8Array(await response.arrayBuffer())
-    if (bytes.byteLength > maximumBytes) throw new Error('Modrinth artifact exceeds the size limit')
-    const digest = new Bun.CryptoHasher('sha512').update(bytes).digest('hex')
-    if (digest !== file.hashes.sha512) throw new Error('Modrinth artifact checksum mismatch')
-    return bytes
+    let lastError: unknown
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      let response: Response
+      try {
+        response = await this.fetcher(file.url, { headers: requestHeaders })
+      } catch (error) {
+        lastError = error
+        if (attempt === 3) throw error
+        await this.sleeper(attempt * 500)
+        continue
+      }
+      if (!response.ok) {
+        const error = new Error(`Mod download failed with HTTP ${response.status}`)
+        const retryable = response.status === 429 || response.status >= 500
+        if (!retryable || attempt === 3) throw error
+        lastError = error
+        await this.sleeper(attempt * 500)
+        continue
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      if (bytes.byteLength > maximumBytes) throw new Error('Modrinth artifact exceeds the size limit')
+      const digest = new Bun.CryptoHasher('sha512').update(bytes).digest('hex')
+      if (digest !== file.hashes.sha512) throw new Error('Modrinth artifact checksum mismatch')
+      return bytes
+    }
+    throw lastError instanceof Error ? lastError : new Error('Mod download failed')
   }
 
   async downloadPackFile(file: ModrinthPackIndex['files'][number]) {

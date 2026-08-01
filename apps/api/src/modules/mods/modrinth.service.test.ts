@@ -70,6 +70,30 @@ describe('ModrinthService', () => {
     expect(downloaded).toEqual(bytes)
   })
 
+  test('retries transient CDN failures before verifying the artifact', async () => {
+    const bytes = new TextEncoder().encode('retried-mod')
+    const hash = new Bun.CryptoHasher('sha512').update(bytes).digest('hex')
+    let attempts = 0
+    const service = new ModrinthService(
+      (async () => {
+        attempts += 1
+        return attempts < 3 ? new Response(null, { status: 429 }) : new Response(bytes)
+      }) as unknown as typeof fetch,
+      async () => {},
+    )
+
+    const downloaded = await service.download({
+      hashes: { sha1: '', sha512: hash },
+      url: 'https://cdn.modrinth.com/data/test/mod.jar',
+      filename: 'mod.jar',
+      primary: true,
+      size: bytes.byteLength,
+    })
+
+    expect(attempts).toBe(3)
+    expect(downloaded).toEqual(bytes)
+  })
+
   test('skips required dependencies that are unsupported on the install target', async () => {
     const projects = {
       'dynamic-trees': {

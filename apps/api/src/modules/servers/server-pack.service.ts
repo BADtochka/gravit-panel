@@ -128,18 +128,44 @@ export class ServerPackService {
     bindingId: string,
     slug: string,
   ) {
+    return this.installMods(installation, bindingId, [slug])
+  }
+
+  async installMods(
+    installation: GravitInstallation,
+    bindingId: string,
+    slugs: string[],
+    context?: Pick<JobTaskContext, 'log'>,
+  ) {
     const binding = this.requireBinding(installation, bindingId)
     const profile = await this.clients.getProfile(installation, binding.profileName)
     if (!profile.minecraftVersion || !profile.loader || profile.loader === 'VANILLA') {
       throw new Error('Profile must use a supported mod loader')
     }
-    const resolved = await this.modrinth.resolveServerInstall(
-      slug,
-      profile.minecraftVersion,
-      profile.loader,
-    )
+    const artifacts = new Map<string, Awaited<ReturnType<ModrinthService['resolveServerInstall']>>[number]>()
+    const filenames = new Map<string, string>()
+    for (const [index, slug] of [...new Set(slugs)].entries()) {
+      context?.log(`Resolving server mod ${index + 1}/${slugs.length}: ${slug}`)
+      const resolved = await this.modrinth.resolveServerInstall(
+        slug,
+        profile.minecraftVersion,
+        profile.loader,
+      )
+      for (const item of resolved) {
+        const digest = item.file.hashes.sha512
+        const existingDigest = filenames.get(item.file.filename)
+        if (existingDigest && existingDigest !== digest) {
+          throw new Error(`Conflicting Modrinth files resolve to ${item.file.filename}`)
+        }
+        filenames.set(item.file.filename, digest)
+        artifacts.set(digest, item)
+      }
+    }
     const installed = []
-    for (const item of resolved) {
+    let index = 0
+    for (const item of artifacts.values()) {
+      index += 1
+      context?.log(`Downloading server mod file ${index}/${artifacts.size}: ${item.file.filename}`)
       const bytes = await this.modrinth.download(item.file)
       installed.push(
         await this.putFile(
@@ -150,7 +176,7 @@ export class ServerPackService {
         ),
       )
     }
-    return { installed }
+    return { installed, requestedSlugs: [...new Set(slugs)] }
   }
 
   async publish(

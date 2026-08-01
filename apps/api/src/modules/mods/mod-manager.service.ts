@@ -47,7 +47,7 @@ export class ModManagerService {
     >,
     private readonly serverPacks?: Pick<
       ServerPackService,
-      'installMod' | 'putFile' | 'publish'
+      'installMods' | 'putFile' | 'publish'
     >,
     private readonly serverBindings?: Pick<ServerBindingsStore, 'get' | 'setDesiredPack'>,
   ) {}
@@ -221,9 +221,7 @@ export class ModManagerService {
         }
       }
       for (const [bindingId, slugs] of serverSelections) {
-        for (const slug of slugs) {
-          await this.serverPacks.installMod(installation, bindingId, slug)
-        }
+        await this.serverPacks.installMods(installation, bindingId, [...slugs], context)
         const published = await this.serverPacks.publish(
           installation,
           bindingId,

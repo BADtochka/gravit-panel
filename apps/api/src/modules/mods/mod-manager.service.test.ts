@@ -248,12 +248,12 @@ describe('ModManagerService', () => {
         },
       } as never,
       {
-        installMod: async (
+        installMods: async (
           _installation: GravitInstallation,
           _bindingId: string,
-          slug: string,
+          slugs: string[],
         ) => {
-          installedOnServer.push(slug)
+          installedOnServer.push(...slugs)
           return { installed: [] }
         },
         publish: async () => {
