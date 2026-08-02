@@ -35,6 +35,7 @@ export const serverBootstrapService = new ServerBootstrapService(
   clientBuildService,
   controlFileService,
   env.PANEL_PUBLIC_URL,
+  env.LAUNCHSERVER_PUBLIC_URL,
 )
 export const serverAgentStore = new ServerAgentStore(database)
 export const serverAgentEvents = new ServerAgentEventHub()

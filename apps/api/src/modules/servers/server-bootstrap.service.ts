@@ -106,6 +106,20 @@ const fetchSha256Verified = async (url: string, expected: string) => {
   return bytes
 }
 
+export const launchServerWebSocketAddress = (publicUrl: string) => {
+  const url = new URL(publicUrl)
+  if (url.protocol === 'https:') url.protocol = 'wss:'
+  else if (url.protocol === 'http:') url.protocol = 'ws:'
+  else if (url.protocol !== 'wss:' && url.protocol !== 'ws:') {
+    throw new Error('LAUNCHSERVER_PUBLIC_URL must use HTTP, HTTPS, WS, or WSS')
+  }
+  const basePath = url.pathname.replace(/\/+$/, '')
+  url.pathname = basePath.endsWith('/api') ? basePath : `${basePath}/api`
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
 export class ServerBootstrapService {
   constructor(
     private readonly drafts: ServerBootstrapStore,
@@ -114,6 +128,7 @@ export class ServerBootstrapService {
     private readonly clients: Pick<ClientBuildService, 'getProfile'>,
     private readonly control: Pick<ControlFileService, 'createServerToken'>,
     private readonly publicUrl: string | undefined,
+    private readonly launchServerPublicUrl: string,
   ) {}
 
   list(bindingId: string) {
@@ -184,7 +199,7 @@ export class ServerBootstrapService {
       ) throw new Error('Selected server pack version does not match the current profile')
 
       const compatibility = resolveClientCompatibility(profile.minecraftVersion)
-      const launchServerAddress = this.launchServerAddress(installation.address)
+      const launchServerAddress = launchServerWebSocketAddress(this.launchServerPublicUrl)
       const draftConfig = JSON.parse(draft.config_json) as { eulaAcceptedAt?: unknown }
       const config: BootstrapConfig = {
         eulaAcceptedAt:
@@ -575,14 +590,6 @@ curl -fsS -X POST -H "authorization: Bearer $UPDATER_TOKEN" \
       throw new Error('PANEL_PUBLIC_URL must use HTTPS')
     }
     return this.publicUrl.replace(/\/+$/, '')
-  }
-
-  private launchServerAddress(address: string) {
-    if (/^wss?:\/\//i.test(address)) {
-      return `${address.replace(/\/+$/, '')}/api`
-    }
-    const local = /^(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(address)
-    return `${local ? 'ws' : 'wss'}://${address}/api`
   }
 
   private async resolveCore(config: BootstrapConfig) {

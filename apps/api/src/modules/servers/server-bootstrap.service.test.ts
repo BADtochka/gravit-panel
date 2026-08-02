@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { schema } from '../../db/schema'
 import { ServerBindingsStore } from './server-bindings.store'
-import { ServerBootstrapService } from './server-bootstrap.service'
+import {
+  launchServerWebSocketAddress,
+  ServerBootstrapService,
+} from './server-bootstrap.service'
 import { ServerBootstrapStore } from './server-bootstrap.store'
 import { ServerPackStore } from './server-pack.store'
 
@@ -21,6 +24,18 @@ const installation: GravitInstallation = {
   createdAt: '2026-07-28T00:00:00.000Z',
   updatedAt: '2026-07-28T00:00:00.000Z',
 }
+
+test('derives the ServerWrapper address from the public LaunchServer URL', () => {
+  expect(launchServerWebSocketAddress('https://panel.example.com/launcher')).toBe(
+    'wss://panel.example.com/launcher/api',
+  )
+  expect(launchServerWebSocketAddress('http://127.0.0.1:9274')).toBe(
+    'ws://127.0.0.1:9274/api',
+  )
+  expect(launchServerWebSocketAddress('wss://mine.example.com/api')).toBe(
+    'wss://mine.example.com/api',
+  )
+})
 
 test('server bootstrap claim survives downloads and ends only after a terminal report', async () => {
   const db = new Database(':memory:')
@@ -79,6 +94,7 @@ test('server bootstrap claim survives downloads and ends only after a terminal r
       createServerToken: async () => 'header.payload.signature',
     },
     'https://panel.example.com/panel',
+    'https://panel.example.com/launcher',
   )
   expect(() => service.createDraft(installation, binding.id!)).toThrow(
     'Minecraft EULA must be accepted',
