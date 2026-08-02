@@ -133,7 +133,7 @@ describe('ModManagerService', () => {
     }
   })
 
-  test('disable is reversible and removal moves the file to recoverable trash', async () => {
+  test('disable is reversible and removal deletes the file permanently', async () => {
     const root = await mkdtemp(join(tmpdir(), 'gravit-mod-actions-'))
     const directory = join(root, 'launcher', 'updates', 'fabric', 'mods')
     await mkdir(directory, { recursive: true })
@@ -162,8 +162,13 @@ describe('ModManagerService', () => {
         'sodium.jar.disabled',
         context,
       )
-      expect(removed.trashPath).toContain('.gravit-panel-trash')
-      expect(await readFile(removed.trashPath, 'utf8')).toBe('mod')
+      expect(removed).toEqual({
+        installationId: installation.id,
+        profile: 'fabric',
+        filename: 'sodium.jar.disabled',
+      })
+      await expect(access(join(directory, 'sodium.jar.disabled'))).rejects.toThrow()
+      await expect(access(join(directory, '.gravit-panel-trash'))).rejects.toThrow()
     } finally {
       await rm(root, { recursive: true, force: true })
     }

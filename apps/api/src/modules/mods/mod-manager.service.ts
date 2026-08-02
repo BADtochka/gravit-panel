@@ -25,8 +25,6 @@ import {
 
 const profilePattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/
 const filenamePattern = /^[^/\\\0]{1,255}\.jar(?:\.disabled)?$/
-const safeTimestamp = () => new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
-
 const sha1File = async (path: string) =>
   createHash('sha1').update(await readFile(path)).digest('hex')
 
@@ -624,22 +622,12 @@ export class ModManagerService {
     const directory = this.modsDirectory(installation, profile)
     const relativeDirectory = this.modsRelativeDirectory(profile)
     const safeName = this.safeFilename(filename)
-    const trashRelativePath = posix.join(
-      relativeDirectory,
-      '.gravit-panel-trash',
-      `${safeTimestamp()}-${crypto.randomUUID()}-${safeName}`,
-    )
-    const trashPath = join(installation.path, 'launcher', trashRelativePath)
     const sourcePath = join(directory, safeName)
     await this.assertRegularMod(sourcePath)
-    await this.volume.move(
-      installation,
-      posix.join(relativeDirectory, safeName),
-      trashRelativePath,
-    )
-    context.log(`Moved ${safeName} to recoverable trash: ${trashPath}`)
-    context.progress(95, 'Mod removed from active profile')
-    return { installationId: installation.id, profile, filename: safeName, trashPath }
+    await this.volume.remove(installation, posix.join(relativeDirectory, safeName))
+    context.log(`Deleted ${safeName} permanently`)
+    context.progress(95, 'Mod deleted from profile')
+    return { installationId: installation.id, profile, filename: safeName }
   }
 
   async update(
@@ -687,10 +675,8 @@ export class ModManagerService {
     await this.volume.writeFileAtomic(installation, pendingRelativePath, bytes, '0644')
     const backupRelativePath = posix.join(
       relativeDirectory,
-      '.gravit-panel-trash',
-      `${safeTimestamp()}-${crypto.randomUUID()}-${safeName}`,
+      `.gravit-panel-${crypto.randomUUID()}.backup`,
     )
-    const backupPath = join(installation.path, 'launcher', backupRelativePath)
     await this.volume.move(
       installation,
       posix.join(relativeDirectory, safeName),
@@ -711,7 +697,8 @@ export class ModManagerService {
       await this.volume.remove(installation, pendingRelativePath)
       throw error
     }
-    context.log(`Updated ${safeName} to ${targetName}; previous file: ${backupPath}`)
+    await this.volume.remove(installation, backupRelativePath)
+    context.log(`Updated ${safeName} to ${targetName}; previous file deleted`)
     context.progress(95, 'Mod update verified and installed')
     return {
       installationId: installation.id,
@@ -719,7 +706,6 @@ export class ModManagerService {
       filename: targetName,
       versionId: version.id,
       versionName: version.version_number,
-      previousFile: backupPath,
       source: modrinthSource,
     }
   }

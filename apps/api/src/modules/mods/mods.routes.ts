@@ -476,7 +476,7 @@ export const createModsRoutes = ({
         installation.id,
         'gravit.mods.remove',
         { ...body },
-        'Recoverable mod removal queued',
+        'Permanent mod deletion queued',
         async (context) => ({
           ...(await manager.remove(installation, body.profile, body.filename, context)),
         }),

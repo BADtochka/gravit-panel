@@ -346,7 +346,7 @@
                   Remove {{ selectedInstalledItems.length }} selected mods?
                 </AlertDialogTitle>
                 <AlertDialogDescription>
-                  Every selected file will be moved to recoverable .gravit-panel-trash.
+                  Every selected file will be deleted permanently. This action cannot be undone.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <div class="py-3">
@@ -358,7 +358,7 @@
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
                 <AlertDialogAction @click="runBulk('remove')">
-                  Move selected to trash
+                  Delete permanently
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -435,7 +435,7 @@
                     <AlertDialogHeader>
                       <AlertDialogTitle>Remove {{ item.filename }}?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        The file will be moved to recoverable .gravit-panel-trash inside the profile.
+                        The file will be deleted permanently. This action cannot be undone.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <div class="py-3">
@@ -446,7 +446,7 @@
                     </div>
                     <AlertDialogFooter>
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction @click="removeMod(item)">Move to trash</AlertDialogAction>
+                      <AlertDialogAction @click="removeMod(item)">Delete permanently</AlertDialogAction>
                     </AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>

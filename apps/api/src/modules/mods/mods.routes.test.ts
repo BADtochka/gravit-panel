@@ -136,7 +136,7 @@ describe('mod management API', () => {
       },
     },
     {
-      name: 'recoverable remove',
+      name: 'permanent remove',
       path: '/api/mods/remove',
       method: 'remove',
       type: 'gravit.mods.remove',
