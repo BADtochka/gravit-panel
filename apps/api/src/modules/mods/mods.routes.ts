@@ -45,7 +45,7 @@ const loader = t.Union([
 const slug = t.String({
   minLength: 1,
   maxLength: 64,
-  pattern: '^[a-z0-9][a-z0-9._-]*$',
+  pattern: '^[a-z0-9][a-z0-9._()-]*$',
 })
 const filename = t.String({ minLength: 5, maxLength: 255 })
 const projectId = t.String({

@@ -320,6 +320,7 @@ describe('mod management API', () => {
 
   test('accepts a unified install containing 96 selected mods', async () => {
     const slugs = Array.from({ length: 96 }, (_, index) => `selected-mod-${index + 1}`)
+    slugs[0] = 'mod-menu-(neoforge-edition)'
     const { request, jobsStore } = createHarness({
       install: async (_installation, input) => ({
         installationId: installation.id,
