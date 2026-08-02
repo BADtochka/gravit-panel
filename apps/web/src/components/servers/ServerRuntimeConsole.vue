@@ -133,6 +133,14 @@ const props = defineProps<{
 const queryClient = useQueryClient()
 const events = ref<ServerRuntimeEvent[]>([])
 const showAgentLogs = ref(false)
+const technicalEventTypes = new Set([
+  'agent.connected',
+  'agent.disconnected',
+  'command.queued',
+  'command.delivered',
+  'command.running',
+  'command.succeeded',
+])
 const isRconLifecycleEvent = (event: ServerRuntimeEvent) =>
   event.type === 'log.stdout' &&
   event.message.includes('Thread RCON Client /') &&
@@ -140,7 +148,8 @@ const isRconLifecycleEvent = (event: ServerRuntimeEvent) =>
 const visibleEvents = computed(() =>
   showAgentLogs.value
     ? events.value
-    : events.value.filter((event) => event.type.startsWith('log.') && !isRconLifecycleEvent(event)),
+    : events.value.filter((event) =>
+        !technicalEventTypes.has(event.type) && !isRconLifecycleEvent(event)),
 )
 const consoleCommand = ref('')
 const commandHistory = ref<string[]>([])
