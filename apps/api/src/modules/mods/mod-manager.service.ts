@@ -131,12 +131,13 @@ export class ModManagerService {
       const clientSelections = input.selections.filter(
         (item) => item.clientMode !== 'none',
       )
-      if (
-        input.selections.some(
-          (item) => item.clientMode === 'none' && item.serverBindingIds.length === 0,
+      const missingDestinations = input.selections.filter(
+        (item) => item.clientMode === 'none' && item.serverBindingIds.length === 0,
+      )
+      if (missingDestinations.length) {
+        throw new Error(
+          `Select an install destination for: ${missingDestinations.map((item) => item.slug).join(', ')}`,
         )
-      ) {
-        throw new Error('Every selected mod must have at least one install destination')
       }
       let requiredClientChanged = false
       const optionalDependencyProjectIds = new Set<string>()

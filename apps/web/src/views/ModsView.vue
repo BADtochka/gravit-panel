@@ -42,7 +42,7 @@
                   <div class="flex items-start gap-3">
                     <Checkbox
                       :model-value="selectedSlugs.includes(item.slug)"
-                      :disabled="!selectedSlugs.includes(item.slug) && installSelectionAtLimit"
+                      :disabled="!selectedSlugs.includes(item.slug) && (installSelectionAtLimit || !hasAvailableDestination(item))"
                       class="mt-1"
                       @click.stop
                       @update:model-value="toggleSelected(item)"
@@ -53,6 +53,9 @@
                       <p class="line-clamp-2 text-xs text-muted-foreground">{{ item.description }}</p>
                       <p class="mt-1 text-xs text-muted-foreground">
                         {{ item.author }} · {{ formatDownloads(item.downloads) }}
+                      </p>
+                      <p v-if="!hasAvailableDestination(item)" class="mt-1 text-xs text-destructive">
+                        No compatible client or managed server destination.
                       </p>
                     </div>
                   </div>
@@ -141,6 +144,14 @@
                 <AlertDescription>
                   At most {{ installSelectionLimit }} mods can be installed in one operation.
                   Remove some selected mods before choosing more.
+                </AlertDescription>
+              </Alert>
+              <Alert v-if="missingDestinationSlugs.length" variant="destructive">
+                <TriangleAlert class="size-4" />
+                <AlertTitle>Install destination required</AlertTitle>
+                <AlertDescription>
+                  Choose Client files or Server files for:
+                  {{ missingDestinationSlugs.join(', ') }}
                 </AlertDescription>
               </Alert>
             </div>
@@ -815,15 +826,22 @@ const defaultTargets = (item: ModrinthProject): ModInstallSelection => ({
 })
 const targetFor = (item: ModrinthProject) =>
   selectionTargets[item.slug] ?? (selectionTargets[item.slug] = defaultTargets(item))
+const hasAvailableDestination = (item: ModrinthProject) =>
+  item.clientSide !== 'unsupported' ||
+  (item.serverSide !== 'unsupported' && managedServers.value.length > 0)
 const installSelectionAtLimit = computed(
   () => selectedSlugs.value.length >= installSelectionLimit,
 )
+const missingDestinationSlugs = computed(() => selectedSlugs.value.filter((slug) => {
+  const target = selectionTargets[slug]
+  return !target || (target.clientMode === 'none' && target.serverBindingIds.length === 0)
+}))
 const toggleSelected = (item: ModrinthProject) => {
   if (selectedSlugs.value.includes(item.slug)) {
     selectedSlugs.value = selectedSlugs.value.filter((slug) => slug !== item.slug)
     delete selectionTargets[item.slug]
   } else {
-    if (installSelectionAtLimit.value) return
+    if (installSelectionAtLimit.value || !hasAvailableDestination(item)) return
     selectedSlugs.value = [...selectedSlugs.value, item.slug]
     selectionTargets[item.slug] = defaultTargets(item)
   }
@@ -841,6 +859,7 @@ const selectedTargetsReady = computed(
   () =>
     selectedSlugs.value.length > 0 &&
     selectedSlugs.value.length <= installSelectionLimit &&
+    missingDestinationSlugs.value.length === 0 &&
     selectedSlugs.value.every((slug) => {
       const target = selectionTargets[slug]
       return Boolean(

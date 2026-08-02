@@ -337,6 +337,27 @@ describe('ModManagerService', () => {
     }
   })
 
+  test('identifies selected mods without an install destination', async () => {
+    const installation = installationFor('/tmp/gravit-mod-destinations')
+    const service = new ModManagerService(
+      {} as ControlFileService,
+      {} as ModrinthService,
+      localVolume,
+      {} as never,
+      {} as never,
+      {} as never,
+    )
+
+    await expect(service.install(installation, {
+      installationId: installation.id,
+      profile: 'main',
+      minecraftVersion: '1.21.1',
+      loader: 'NEOFORGE',
+      slugs: ['melody'],
+      selections: [{ slug: 'melody', clientMode: 'none', serverBindingIds: [] }],
+    }, context)).rejects.toThrow('Select an install destination for: melody')
+  })
+
   test('imports Modrinth packs with optional client files and server overrides', async () => {
     const root = await mkdtemp(join(tmpdir(), 'gravit-modpack-import-'))
     const installation = installationFor(root)
