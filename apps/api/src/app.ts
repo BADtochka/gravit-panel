@@ -13,6 +13,7 @@ import { createPanelAuthGuard, createPanelAuthRoutes } from './modules/panel-aut
 import { panelAuthService } from './modules/panel-auth/panel-auth.runtime'
 import { publicPortalRoutes } from './modules/public-portal/public-portal.routes'
 import { setupRoutes } from './modules/setup/setup.routes'
+import { selfUpdateRoutes } from './modules/self-update/self-update.routes'
 import {
   serverAgentRoutes,
   serverBootstrapRoutes,
@@ -45,6 +46,7 @@ export const app = new Elysia({ prefix: '/api' })
   .use(createPanelAuthRoutes(panelAuthService))
   .use(publicPortalRoutes)
   .use(setupRoutes)
+  .use(selfUpdateRoutes)
   .use(dockerRoutes)
   .use(authRoutes)
   .use(gravitRoutes)

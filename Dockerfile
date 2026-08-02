@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
 
+ARG PANEL_REVISION=unknown
+
 FROM oven/bun:1.2.19-alpine AS dependencies
 WORKDIR /app
 
@@ -43,10 +45,11 @@ COPY --from=launcher-runtime-build /out /
 # the Docker CLI and Compose plugin. It must be given the host Docker socket at
 # runtime; see compose.yaml before exposing this service to the Internet.
 FROM build AS api-runtime
+ARG PANEL_REVISION
 RUN apk add --no-cache docker-cli docker-cli-compose git tar unzip
 COPY --from=launcher-runtime-build /out /opt/gravit-panel/launcher-runtime
 COPY --from=server-agent-build /out /opt/gravit-panel/server-agent
-ENV NODE_ENV=production
+ENV NODE_ENV=production PANEL_REVISION=$PANEL_REVISION
 WORKDIR /app
 EXPOSE 3000
 CMD ["bun", "run", "--filter", "@gravit-panel/api", "start"]

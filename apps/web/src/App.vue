@@ -44,6 +44,7 @@
 
     <main v-else-if="!hasLaunchServer" class="min-h-screen p-4 md:p-8">
       <div class="mx-auto max-w-7xl">
+        <SelfUpdateBanner />
         <RouterView />
       </div>
     </main>
@@ -159,6 +160,7 @@
         </header>
 
         <div class="p-4 md:p-8">
+          <SelfUpdateBanner />
           <RouterView />
         </div>
       </main>
@@ -169,6 +171,7 @@
 <script setup lang="ts">
 import JobNotificationCenter from '@/components/jobs/JobNotificationCenter.vue'
 import ProfileSwitcher from '@/components/layout/ProfileSwitcher.vue'
+import SelfUpdateBanner from '@/components/layout/SelfUpdateBanner.vue'
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import {

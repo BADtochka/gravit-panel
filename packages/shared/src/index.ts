@@ -7,6 +7,22 @@ export interface ApiHealth {
   time: string
 }
 
+export interface PanelUpdateStatus {
+  configured: boolean
+  deployEnabled: boolean
+  currentRevision: string | null
+  latestRevision: string | null
+  updateAvailable: boolean | null
+  checkedAt: string
+  message: string | null
+}
+
+export interface PanelUpdateDeployResult {
+  accepted: true
+  deploymentUuid: string | null
+  message: string
+}
+
 export interface WorkspaceApp {
   name: string
   title: string

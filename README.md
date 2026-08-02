@@ -101,8 +101,13 @@ their `latest` tags by default; set `PANEL_API_IMAGE` / `PANEL_WEB_IMAGE` to
 matching `sha-<commit>` tags for a pinned rollout. If the GHCR packages remain
 private, configure registry credentials on the deployment host or in Coolify.
 To redeploy Coolify only after both images are published, configure the
-`COOLIFY_WEBHOOK` and `COOLIFY_TOKEN` GitHub Actions secrets. Disable Coolify's
-repository push trigger to avoid starting an earlier duplicate deployment.
+`COOLIFY_API_URL`, `COOLIFY_API_TOKEN`, and `COOLIFY_APPLICATION_UUID` GitHub
+Actions secrets. Use a team-scoped token with only `read` and `deploy`
+permissions. Configure the same values as Coolify environment variables to
+enable the authenticated update banner and deploy button inside the panel.
+Disable Coolify's repository push trigger to avoid an earlier duplicate
+deployment. Compose uses `pull_policy: always` for API and web so mutable
+`latest` tags are refreshed before containers restart.
 
 `compose.yaml` exposes the web service as `127.0.0.1:8080` and the LaunchServer
 facade as `127.0.0.1:9274`. Publish them through their respective HTTPS reverse

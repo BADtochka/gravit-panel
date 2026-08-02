@@ -19,6 +19,7 @@ services:
   # ------------------------------------------------------------------
   api:
     image: ${PANEL_API_IMAGE:-ghcr.io/badtochka/gravit-panel-api:latest}
+    pull_policy: always
     restart: unless-stopped
     environment:
       HOST: 0.0.0.0
@@ -43,6 +44,10 @@ services:
       SERVER_PACK_MAX_FILE_BYTES: ${SERVER_PACK_MAX_FILE_BYTES:-268435456}
       SERVER_PACK_MAX_BYTES: ${SERVER_PACK_MAX_BYTES:-4294967296}
       SERVER_AGENT_ARTIFACTS_DIR: /opt/gravit-panel/server-agent
+      COOLIFY_API_URL: ${COOLIFY_API_URL:-}
+      COOLIFY_API_TOKEN: ${COOLIFY_API_TOKEN:-}
+      COOLIFY_APPLICATION_UUID: ${COOLIFY_APPLICATION_UUID:-}
+      PANEL_UPDATE_GITHUB_TOKEN: ${PANEL_UPDATE_GITHUB_TOKEN:-}
     depends_on:
       launchserver:
         condition: service_healthy
@@ -67,6 +72,7 @@ services:
   # ------------------------------------------------------------------
   web:
     image: ${PANEL_WEB_IMAGE:-ghcr.io/badtochka/gravit-panel-web:latest}
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       api:
