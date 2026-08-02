@@ -15,5 +15,5 @@ export const useLogAutoScroll = (eventCount: () => number) => {
     if (enabled) scrollToLatest()
   }, { flush: 'post' })
 
-  return { autoScroll, logContainer }
+  return { autoScroll, logContainer, scrollToLatest }
 }

@@ -78,6 +78,10 @@
         </p>
         <div class="flex items-center gap-3">
           <div class="flex items-center gap-2">
+            <Switch :id="agentLogsId" v-model="showAgentLogs" />
+            <label class="text-xs text-zinc-400" :for="agentLogsId">Agent logs</label>
+          </div>
+          <div class="flex items-center gap-2">
             <Switch :id="autoScrollId" v-model="autoScroll" />
             <label class="text-xs text-zinc-400" :for="autoScrollId">Auto-scroll</label>
           </div>
@@ -88,9 +92,9 @@
         </div>
       </div>
       <div ref="logContainer" class="h-[26rem] overflow-auto p-3 font-mono text-[11px] leading-5 sm:h-[32rem] sm:text-xs">
-        <p v-if="!events.length" class="text-zinc-500">Waiting for server events...</p>
+        <p v-if="!visibleEvents.length" class="text-zinc-500">Waiting for server events...</p>
         <div
-          v-for="event in events"
+          v-for="event in visibleEvents"
           :key="event.sequence"
           class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2 border-b border-zinc-900 py-1 last:border-0 sm:grid-cols-[4.5rem_7rem_minmax(0,1fr)]"
         >
@@ -128,11 +132,17 @@ const props = defineProps<{
 }>()
 const queryClient = useQueryClient()
 const events = ref<ServerRuntimeEvent[]>([])
+const showAgentLogs = ref(false)
+const visibleEvents = computed(() =>
+  showAgentLogs.value ? events.value : events.value.filter((event) => event.type.startsWith('log.')),
+)
 const consoleCommand = ref('')
 const commandHistory = ref<string[]>([])
 const historyIndex = ref(0)
 const streamState = ref<'connecting' | 'live' | 'reconnecting' | 'closed'>('connecting')
-const { autoScroll, logContainer } = useLogAutoScroll(() => events.value.length)
+const { autoScroll, logContainer, scrollToLatest } = useLogAutoScroll(
+  () => visibleEvents.value.at(-1)?.sequence ?? 0,
+)
 let eventSocket: WebSocket | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -187,6 +197,7 @@ const sendCommand = (type: ServerCommandType, payload: Record<string, unknown> =
 const executeConsoleCommand = () => {
   const command = consoleCommand.value.trim()
   if (!command) return
+  scrollToLatest()
   sendCommand('console.execute', { command })
   commandHistory.value = [...commandHistory.value.filter((item) => item !== command), command].slice(-100)
   historyIndex.value = commandHistory.value.length
@@ -334,6 +345,7 @@ const commandPending = computed(() => commandMutation.isPending.value)
 const error = computed(() => (runtimeError.value || commandMutation.error.value) as Error | null)
 const safeBindingId = computed(() => props.bindingId.replace(/[^a-zA-Z0-9_-]/g, '-'))
 const consoleInputId = computed(() => `server-console-command-${safeBindingId.value}`)
+const agentLogsId = computed(() => `server-console-agent-logs-${safeBindingId.value}`)
 const autoScrollId = computed(() => `server-console-auto-scroll-${safeBindingId.value}`)
 const streamStateLabel = computed(() => ({
   connecting: 'Connecting',
