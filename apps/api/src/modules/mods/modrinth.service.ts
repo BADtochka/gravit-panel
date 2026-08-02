@@ -376,6 +376,7 @@ export class ModrinthService {
       const versions = (await versionsResponse.json()) as ModrinthVersion[]
       const version = versions[0]
       if (!version) {
+        if (!root) return
         throw new Error(`${project.slug} has no compatible ${minecraftVersion}/${loader} version`)
       }
       for (const dependency of version.dependencies ?? []) {

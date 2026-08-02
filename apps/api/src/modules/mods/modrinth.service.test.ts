@@ -110,6 +110,13 @@ describe('ModrinthService', () => {
         client_side: 'unsupported',
         server_side: 'required',
       },
+      'fabric-api': {
+        id: 'fabric-api-id',
+        slug: 'fabric-api',
+        title: 'Fabric API',
+        client_side: 'required',
+        server_side: 'required',
+      },
       terrablender: {
         id: 'terrablender-id',
         slug: 'terrablender',
@@ -141,6 +148,11 @@ describe('ModrinthService', () => {
           },
           {
             project_id: 'terrablender',
+            version_id: null,
+            dependency_type: 'required',
+          },
+          {
+            project_id: 'fabric-api',
             version_id: null,
             dependency_type: 'required',
           },
@@ -210,5 +222,23 @@ describe('ModrinthService', () => {
     await expect(
       service.resolveInstall('server-only', '1.21.1', 'NEOFORGE', 'client'),
     ).rejects.toThrow('server-only is marked as unsupported on the client')
+  })
+
+  test('still rejects a directly selected project without a compatible version', async () => {
+    const service = new ModrinthService((async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+      if (url.pathname.endsWith('/version')) return Response.json([])
+      return Response.json({
+        id: 'fabric-api-id',
+        slug: 'fabric-api',
+        title: 'Fabric API',
+        client_side: 'required',
+        server_side: 'required',
+      })
+    }) as typeof fetch)
+
+    await expect(
+      service.resolveInstall('fabric-api', '1.21.1', 'NEOFORGE', 'client'),
+    ).rejects.toThrow('fabric-api has no compatible 1.21.1/NEOFORGE version')
   })
 })
