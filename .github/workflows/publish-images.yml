@@ -14,6 +14,10 @@ permissions:
 env:
   REGISTRY: ghcr.io
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: ${{ matrix.name }} image
@@ -65,3 +69,25 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+
+  deploy:
+    name: Redeploy Coolify
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK }}
+      COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+    steps:
+      - name: Trigger Coolify deployment
+        if: env.COOLIFY_WEBHOOK != '' && env.COOLIFY_TOKEN != ''
+        run: |
+          curl --fail --silent --show-error \
+            --request GET \
+            --header "Authorization: Bearer $COOLIFY_TOKEN" \
+            "$COOLIFY_WEBHOOK"
+
+      - name: Report missing deployment configuration
+        if: env.COOLIFY_WEBHOOK == '' || env.COOLIFY_TOKEN == ''
+        run: echo 'Coolify deployment skipped because COOLIFY_WEBHOOK or COOLIFY_TOKEN is not configured.'

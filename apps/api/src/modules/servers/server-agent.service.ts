@@ -24,6 +24,7 @@ const commandTypes = new Set<ServerCommandType>([
   'service.stop',
   'service.restart',
   'console.execute',
+  'pack.apply',
 ])
 
 export class ServerAgentService {

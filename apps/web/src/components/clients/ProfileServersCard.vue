@@ -250,16 +250,38 @@
                       Prepare an installation bundle for {{ selectedBinding.name }}.
                     </p>
                   </div>
-                  <Button
-                    v-if="!activeDraft"
-                    size="sm"
-                    type="button"
-                    :disabled="pending"
-                    @click="requestPrepare(selectedBinding)"
-                  >
-                    <Terminal class="size-4" />
-                    Prepare install
-                  </Button>
+                  <div class="flex flex-wrap gap-2">
+                    <Button
+                      v-if="activeDraft?.status === 'ready'"
+                      size="sm"
+                      type="button"
+                      :disabled="pending"
+                      @click="issue(activeDraft)"
+                    >
+                      Generate curl command
+                    </Button>
+                    <Button
+                      v-if="packUpdatePending"
+                      size="sm"
+                      type="button"
+                      :disabled="pending || !canApplyPack"
+                      :title="packApplyUnavailableReason"
+                      @click="applyPack"
+                    >
+                      <Rocket class="size-4" />
+                      Apply server pack
+                    </Button>
+                    <Button
+                      v-if="showPrepareInstall"
+                      size="sm"
+                      type="button"
+                      :disabled="pending"
+                      @click="requestPrepare(selectedBinding)"
+                    >
+                      <Terminal class="size-4" />
+                      {{ selectedBinding.updaterInstalledAt ? 'Prepare server update' : 'Prepare install' }}
+                    </Button>
+                  </div>
                 </div>
 
                 <div v-if="activeDraft" class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
@@ -274,15 +296,6 @@
                     </p>
                   </div>
                   <div class="flex gap-2">
-                    <Button
-                      v-if="activeDraft.status === 'ready'"
-                      size="sm"
-                      type="button"
-                      :disabled="pending"
-                      @click="issue(activeDraft)"
-                    >
-                      Generate curl command
-                    </Button>
                     <AlertDialog>
                       <AlertDialogTrigger as-child>
                         <Button size="sm" type="button" variant="outline" :disabled="pending">Revoke</Button>
@@ -478,6 +491,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type {
   AuthConfiguration, ClientProfileDescriptor, JobRecord, ProfileServerBinding,
   ServerBindingDeploymentState, ServerBootstrapDraft, ServerBootstrapIssueResult,
+  ServerCommand, ServerRuntimeState,
 } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
@@ -576,6 +590,14 @@ const { data: selectedDrafts } = useQuery({
   enabled: computed(() => Boolean(selectedManagedId.value)),
   refetchInterval: 5000,
 })
+const { data: selectedRuntime } = useQuery({
+  queryKey: computed(() => ['server-runtime', props.installationId, selectedManagedId.value]),
+  queryFn: () => getJson<ServerRuntimeState>(
+    `/api/servers/bindings/${selectedManagedId.value}/runtime?installationId=${encodeURIComponent(props.installationId)}`,
+  ),
+  enabled: computed(() => Boolean(selectedManagedId.value)),
+  refetchInterval: 5000,
+})
 const activeDraft = computed(
   () => selectedDrafts.value?.items.find(
     (item) => item.bindingId === selectedManagedId.value && ['ready', 'issued', 'claimed'].includes(item.status),
@@ -598,6 +620,27 @@ const packUpdateSummary = computed(() => {
   if (!binding?.updaterInstalledAt) return 'Updater not installed'
   if (!binding.packVersionId) return 'No desired version'
   return binding.appliedPackVersionId === binding.packVersionId ? 'Desired version applied' : 'Update pending'
+})
+const packUpdatePending = computed(() => Boolean(
+  selectedBinding.value?.updaterInstalledAt &&
+  selectedBinding.value.packVersionId &&
+  selectedBinding.value.packVersionId !== selectedBinding.value.appliedPackVersionId,
+))
+const showPrepareInstall = computed(() => Boolean(
+  !activeDraft.value && selectedBinding.value?.managed && (
+    !selectedBinding.value.updaterInstalledAt ||
+    (!packUpdatePending.value && ['requires-update', 'failed'].includes(selectedBinding.value.deploymentState))
+  ),
+))
+const canApplyPack = computed(() => Boolean(
+  selectedRuntime.value?.connected && selectedRuntime.value.capabilities.includes('pack-updater'),
+))
+const packApplyUnavailableReason = computed(() => {
+  if (!selectedRuntime.value?.connected) return 'Host agent is offline.'
+  if (!selectedRuntime.value.capabilities.includes('pack-updater')) {
+    return 'Repeat bootstrap once to upgrade the host agent.'
+  }
+  return ''
 })
 const deploymentDot = (state: ServerBindingDeploymentState) => ({
   pending: 'bg-amber-500', ready: 'bg-sky-500', 'requires-update': 'bg-amber-500',
@@ -643,6 +686,22 @@ const revokeMutation = useMutation({
   onSuccess: () => {
     issuedCommand.value = null
     void queryClient.invalidateQueries({ queryKey: ['server-bootstrap'] })
+  },
+})
+const applyPackMutation = useMutation({
+  mutationFn: () => getJson<ServerCommand>(
+    `/api/servers/bindings/${selectedManagedId.value}/commands`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        installationId: props.installationId,
+        type: 'pack.apply',
+        payload: {},
+      }),
+    },
+  ),
+  onSuccess: () => {
+    void queryClient.invalidateQueries({ queryKey: bindingKey.value })
   },
 })
 const eulaMutation = useMutation({
@@ -745,6 +804,9 @@ const revoke = (draft: ServerBootstrapDraft) => {
   issuedCommand.value = null
   revokeMutation.mutate(draft)
 }
+const applyPack = () => {
+  if (packUpdatePending.value && canApplyPack.value) applyPackMutation.mutate()
+}
 const copyCommand = async () => {
   if (!visibleIssuedCommand.value) return
   try {
@@ -763,10 +825,11 @@ const canSave = computed(() => Boolean(
   /^[1-9][0-9]{0,5}[MG]$/i.test(form.xms) && /^[1-9][0-9]{0,5}[MG]$/i.test(form.xmx),
 ))
 const pending = computed(() => props.disabled || jobMutation.isPending.value || issueMutation.isPending.value ||
-  revokeMutation.isPending.value || eulaMutation.isPending.value)
+  revokeMutation.isPending.value || eulaMutation.isPending.value || applyPackMutation.isPending.value)
 const formError = computed(() => jobMutation.error.value as Error | null)
 const error = computed(() => (
   bindingError.value || jobMutation.error.value || issueMutation.error.value || revokeMutation.error.value ||
+  applyPackMutation.error.value ||
   eulaMutation.error.value || copyError.value
 ) as Error | null)
 </script>

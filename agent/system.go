@@ -23,13 +23,34 @@ func runSystemctl(ctx context.Context, action, unit string) (string, error) {
 	if !validUnitName(unit) {
 		return "", fmt.Errorf("invalid configured unit %q", unit)
 	}
+	return runSystemctlCommand(ctx, action, unit)
+}
+
+func runPackUpdater(ctx context.Context, serverUnit string) (string, error) {
+	unit, err := packUpdaterUnit(serverUnit)
+	if err != nil {
+		return "", err
+	}
+	return runSystemctlCommand(ctx, "start", unit, "--no-block")
+}
+
+func packUpdaterUnit(serverUnit string) (string, error) {
+	if !validUnitName(serverUnit) {
+		return "", fmt.Errorf("invalid configured unit %q", serverUnit)
+	}
+	return strings.TrimSuffix(serverUnit, ".service") + "-pack-update.service", nil
+}
+
+func runSystemctlCommand(ctx context.Context, action, unit string, options ...string) (string, error) {
 	if action != "start" && action != "stop" && action != "restart" {
 		return "", fmt.Errorf("unsupported systemctl action %q", action)
 	}
 	commandCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(commandCtx, "systemctl", action, "--", unit)
+	arguments := append([]string{action}, options...)
+	arguments = append(arguments, "--", unit)
+	cmd := exec.CommandContext(commandCtx, "systemctl", arguments...)
 	output, err := cappedCombinedOutput(cmd, maxOutputBytes)
 	if commandCtx.Err() != nil {
 		return output, fmt.Errorf("systemctl %s timed out", action)

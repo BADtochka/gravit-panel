@@ -65,9 +65,12 @@ test('server binding adopts a legacy server and reconciles the default atomicall
     loaderVersion: null,
     servers,
   })
-  const service = new ServerBindingService(new ServerBindingsStore(db), {
+  let replacements = 0
+  const store = new ServerBindingsStore(db)
+  const service = new ServerBindingService(store, {
     getProfile: async () => descriptor(),
     replaceProfileServers: async (_installation, _profile, next) => {
+      replacements += 1
       servers = next
       return { profile: descriptor(), backupPath: '/tmp/backup.json' }
     },
@@ -97,4 +100,22 @@ test('server binding adopts a legacy server and reconciles the default atomicall
     protocol: -1,
     socketPing: true,
   }])
+  store.setState(result.binding.id!, 'installed')
+  const unchanged = await service.apply(installation, {
+    installationId: installation.id,
+    profileName: 'main',
+    name: 'Legacy',
+    serverAddress: 'play.example.com',
+    serverPort: 25570,
+    isDefault: true,
+    authId: 'std',
+    packVersionId: null,
+    xms: '1G',
+    xmx: '4G',
+    jvmArgs: [],
+    gameArgs: ['nogui'],
+  }, context, result.binding.id!)
+  expect(unchanged.deploymentChanged).toBeFalse()
+  expect(unchanged.binding.deploymentState).toBe('installed')
+  expect(replacements).toBe(1)
 })

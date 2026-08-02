@@ -111,6 +111,28 @@ describe('ServerAgentService', () => {
     expect(service.runtime(bindingId).connected).toBe(false)
   })
 
+  test('delivers an immediate pack updater command to a capable agent', () => {
+    const { bindingId, store, service } = harness()
+    const sent: string[] = []
+    const socket = { send: (message: unknown) => sent.push(String(message)), close: () => {} }
+    service.handle(socket, {
+      type: 'hello',
+      token: 'valid-token',
+      agentVersion: '0.2.0',
+      hostname: 'game-1',
+      capabilities: ['systemd', 'pack-updater'],
+    })
+
+    const command = service.createCommand(bindingId, 'pack.apply', {})
+
+    expect(store.getCommand(command.id)?.status).toBe('delivered')
+    expect(JSON.parse(sent[1]!).command).toMatchObject({
+      bindingId,
+      type: 'pack.apply',
+      payload: {},
+    })
+  })
+
   test('tracks an Elysia connection across wrappers that share one raw socket', () => {
     const { bindingId, service } = harness()
     const raw = {}

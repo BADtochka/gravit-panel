@@ -91,6 +91,37 @@ export class ServerBindingService {
       protocol: -1,
       socketPing: true,
     }
+    const sameArguments = (left: string[], right: string[]) =>
+      left.length === right.length && left.every((item, index) => item === right[index])
+    const profileServer = current
+      ? profile.servers.find((server) => server.name === current.name)
+      : null
+    const profileChanged = !profileServer ||
+      profileServer.name !== nextServer.name ||
+      profileServer.serverAddress !== nextServer.serverAddress ||
+      profileServer.serverPort !== nextServer.serverPort ||
+      profileServer.isDefault !== nextServer.isDefault
+    const bootstrapChanged = !current ||
+      current.name !== input.name ||
+      current.serverAddress !== input.serverAddress ||
+      current.serverPort !== input.serverPort ||
+      current.authId !== input.authId ||
+      current.xms !== input.xms ||
+      current.xmx !== input.xmx ||
+      !sameArguments(current.jvmArgs, input.jvmArgs) ||
+      !sameArguments(current.gameArgs, input.gameArgs)
+    const bindingChanged = !current || bootstrapChanged ||
+      current.isDefault !== nextServer.isDefault ||
+      current.packVersionId !== input.packVersionId
+    if (current && !profileChanged && !bindingChanged) {
+      context.progress(95, `Server ${input.name} configuration is unchanged`)
+      return {
+        binding: current,
+        profile,
+        backupPath: null,
+        deploymentChanged: false,
+      }
+    }
     const remaining = profile.servers
       .filter((server) => server.name !== current?.name && server.name !== input.name)
       .map((server) => nextServer.isDefault ? { ...server, isDefault: false } : server)
@@ -98,18 +129,27 @@ export class ServerBindingService {
       remaining[0] = { ...remaining[0], isDefault: true }
     }
     context.progress(10, `Updating ${input.profileName} server list`)
-    const result = await this.clients.replaceProfileServers(
-      installation,
-      input.profileName,
-      [...remaining, nextServer],
-      context,
-    )
+    const result = profileChanged
+      ? await this.clients.replaceProfileServers(
+          installation,
+          input.profileName,
+          [...remaining, nextServer],
+          context,
+        )
+      : { profile, backupPath: null }
+    const requiresUpdate = bootstrapChanged || current?.packVersionId !== input.packVersionId
     const saved = this.store.save(
       { ...input, isDefault: nextServer.isDefault },
       current?.id ?? undefined,
+      current && !requiresUpdate ? current.deploymentState : undefined,
     )
     context.progress(95, `Server ${input.name} bound to ${input.profileName}`)
-    return { binding: saved, profile: result.profile, backupPath: result.backupPath }
+    return {
+      binding: saved,
+      profile: result.profile,
+      backupPath: result.backupPath,
+      deploymentChanged: bootstrapChanged,
+    }
   }
 
   async remove(

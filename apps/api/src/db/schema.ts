@@ -205,7 +205,7 @@ export const schema = `
     id TEXT PRIMARY KEY,
     binding_id TEXT NOT NULL REFERENCES server_bindings(id) ON DELETE CASCADE,
     type TEXT NOT NULL CHECK (
-      type IN ('service.start', 'service.stop', 'service.restart', 'console.execute')
+      type IN ('service.start', 'service.stop', 'service.restart', 'console.execute', 'pack.apply')
     ),
     payload_json TEXT NOT NULL,
     status TEXT NOT NULL CHECK (

@@ -1,10 +1,28 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
 )
+
+func TestRunPackUpdaterRejectsInvalidServerUnit(t *testing.T) {
+	_, err := runPackUpdater(context.Background(), "../../evil.service")
+	if err == nil {
+		t.Fatal("runPackUpdater() accepted an invalid server unit")
+	}
+}
+
+func TestPackUpdaterUnitIsDerivedFromValidatedServerUnit(t *testing.T) {
+	unit, err := packUpdaterUnit("gravit-deadbeef.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unit != "gravit-deadbeef-pack-update.service" {
+		t.Fatalf("packUpdaterUnit() = %q", unit)
+	}
+}
 
 func TestDeliverJournalLinePersistsOnlyAfterSuccessfulSend(t *testing.T) {
 	message := logMessage{Type: "log", Line: logLine{Cursor: "cursor-1", Message: "hello"}}

@@ -779,6 +779,7 @@ export type ServerCommandType =
   | 'service.stop'
   | 'service.restart'
   | 'console.execute'
+  | 'pack.apply'
 
 export type ServerCommandStatus =
   | 'queued'

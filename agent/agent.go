@@ -96,7 +96,7 @@ func (a *bindingAgent) connect(parent context.Context) error {
 		Token:        a.config.Token,
 		AgentVersion: agentVersion,
 		Hostname:     a.hostname,
-		Capabilities: []string{"systemd", "journald", "rcon"},
+		Capabilities: []string{"systemd", "journald", "rcon", "pack-updater"},
 	}); err != nil {
 		return err
 	}
@@ -228,6 +228,8 @@ func (a *bindingAgent) executeCommand(ctx context.Context, session *connectionSe
 			output, err = runSystemctl(ctx, "stop", a.config.Unit)
 		case "service.restart":
 			output, err = runSystemctl(ctx, "restart", a.config.Unit)
+		case "pack.apply":
+			output, err = runPackUpdater(ctx, a.config.Unit)
 		case "console.execute":
 			if command.Payload.Command == "" {
 				err = errors.New("payload.command is required")

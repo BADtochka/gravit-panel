@@ -2,7 +2,7 @@ package main
 
 import "time"
 
-const agentVersion = "0.1.0"
+const agentVersion = "0.2.0"
 
 type inboundMessage struct {
 	Type    string          `json:"type"`

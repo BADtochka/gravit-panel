@@ -74,3 +74,46 @@ if (jobsTable && !jobsTable.sql.includes("'cancelled'")) {
     database.exec('PRAGMA foreign_keys = ON')
   }
 }
+
+const serverCommandsTable = database
+  .query<{ sql: string }, []>(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'server_commands'",
+  )
+  .get()
+if (serverCommandsTable && !serverCommandsTable.sql.includes("'pack.apply'")) {
+  database.exec('PRAGMA foreign_keys = OFF')
+  try {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE server_commands_with_pack_apply (
+        id TEXT PRIMARY KEY,
+        binding_id TEXT NOT NULL REFERENCES server_bindings(id) ON DELETE CASCADE,
+        type TEXT NOT NULL CHECK (
+          type IN ('service.start', 'service.stop', 'service.restart', 'console.execute', 'pack.apply')
+        ),
+        payload_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (
+          status IN ('queued', 'delivered', 'running', 'succeeded', 'failed')
+        ),
+        output TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        delivered_at TEXT,
+        started_at TEXT,
+        finished_at TEXT
+      );
+      INSERT INTO server_commands_with_pack_apply
+      SELECT * FROM server_commands;
+      DROP TABLE server_commands;
+      ALTER TABLE server_commands_with_pack_apply RENAME TO server_commands;
+      CREATE INDEX server_commands_binding_status_idx
+        ON server_commands (binding_id, status, created_at);
+      COMMIT;
+    `)
+  } catch (error) {
+    if (database.inTransaction) database.exec('ROLLBACK')
+    throw error
+  } finally {
+    database.exec('PRAGMA foreign_keys = ON')
+  }
+}

@@ -107,10 +107,12 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
             context,
             params.bindingId,
           )
-          serverBootstrapStore.invalidateBinding(
-            params.bindingId,
-            'Server binding changed; prepare a new bootstrap bundle',
-          )
+          if (result.deploymentChanged) {
+            serverBootstrapStore.invalidateBinding(
+              params.bindingId,
+              'Server binding changed; prepare a new bootstrap bundle',
+            )
+          }
           return { ...result }
         },
       )
@@ -369,6 +371,21 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
         set.status = 404
         return { message: 'Managed server binding not found.' }
       }
+      if (body.type === 'pack.apply') {
+        const runtime = serverAgentService.runtime(binding.id!)
+        if (!binding.updaterInstalledAt) {
+          set.status = 409
+          return { message: 'Server pack updater is not installed.' }
+        }
+        if (!binding.packVersionId || binding.packVersionId === binding.appliedPackVersionId) {
+          set.status = 409
+          return { message: 'The desired server pack is already applied.' }
+        }
+        if (!runtime.connected || !runtime.capabilities.includes('pack-updater')) {
+          set.status = 409
+          return { message: 'Connected host agent does not support immediate pack updates.' }
+        }
+      }
       try {
         const command = serverAgentService.createCommand(
           binding.id!,
@@ -391,6 +408,7 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
           t.Literal('service.stop'),
           t.Literal('service.restart'),
           t.Literal('console.execute'),
+          t.Literal('pack.apply'),
         ]),
         payload: t.Object({
           command: t.Optional(t.String({ maxLength: 1000 })),

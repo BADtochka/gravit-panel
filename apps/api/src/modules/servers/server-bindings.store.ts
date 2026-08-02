@@ -101,7 +101,7 @@ export class ServerBindingsStore {
   save(
     input: ServerBindingInput,
     id: string = crypto.randomUUID(),
-    state: ServerBindingDeploymentState = 'pending',
+    state?: ServerBindingDeploymentState,
   ): ProfileServerBinding {
     const current = this.get(id)
     const now = new Date().toISOString()
@@ -145,7 +145,7 @@ export class ServerBindingsStore {
         input.xmx,
         JSON.stringify(input.jvmArgs),
         JSON.stringify(input.gameArgs),
-        current ? 'requires-update' : state,
+        state ?? (current ? 'requires-update' : 'pending'),
         current?.updatedAt ?? now,
         now,
       )
