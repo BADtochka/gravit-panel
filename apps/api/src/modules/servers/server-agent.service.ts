@@ -8,6 +8,7 @@ import type { ServerAgentStore } from './server-agent.store'
 interface AgentSocket {
   send(data: unknown): unknown
   close?: () => unknown
+  raw?: object
 }
 
 interface AgentHello {
@@ -40,16 +41,17 @@ export class ServerAgentService {
   }
 
   open(socket: AgentSocket) {
+    const socketKey = this.socketKey(socket)
     if (this.pendingSockets.size >= 100) {
       socket.close?.()
       return
     }
-    this.pendingSockets.add(socket as object)
+    this.pendingSockets.add(socketKey)
     const timer = setTimeout(() => {
-      this.pendingSockets.delete(socket as object)
-      if (!this.bindings.has(socket as object)) socket.close?.()
+      this.pendingSockets.delete(socketKey)
+      if (!this.bindings.has(socketKey)) socket.close?.()
     }, 5000)
-    this.helloTimers.set(socket as object, timer)
+    this.helloTimers.set(socketKey, timer)
   }
 
   isConnected(bindingId: string) {
@@ -87,7 +89,7 @@ export class ServerAgentService {
       this.hello(socket, message as unknown as AgentHello)
       return
     }
-    const bindingId = this.bindings.get(socket as object)
+    const bindingId = this.bindings.get(this.socketKey(socket))
     if (!bindingId) {
       socket.close?.()
       return
@@ -110,14 +112,16 @@ export class ServerAgentService {
   }
 
   close(socket: AgentSocket) {
-    const timer = this.helloTimers.get(socket as object)
+    const socketKey = this.socketKey(socket)
+    const timer = this.helloTimers.get(socketKey)
     if (timer) clearTimeout(timer)
-    this.helloTimers.delete(socket as object)
-    this.pendingSockets.delete(socket as object)
-    const bindingId = this.bindings.get(socket as object)
+    this.helloTimers.delete(socketKey)
+    this.pendingSockets.delete(socketKey)
+    const bindingId = this.bindings.get(socketKey)
     if (!bindingId) return
-    this.bindings.delete(socket as object)
-    if (this.sockets.get(bindingId) !== socket) return
+    this.bindings.delete(socketKey)
+    const activeSocket = this.sockets.get(bindingId)
+    if (!activeSocket || this.socketKey(activeSocket) !== socketKey) return
     this.sockets.delete(bindingId)
     this.store.requeueActive(bindingId)
     this.publish(bindingId, 'agent.disconnected', 'Host agent disconnected')
@@ -139,13 +143,14 @@ export class ServerAgentService {
       return
     }
     const previous = this.sockets.get(binding.id)
-    if (previous && previous !== socket) previous.close?.()
+    if (previous && this.socketKey(previous) !== this.socketKey(socket)) previous.close?.()
     this.sockets.set(binding.id, socket)
-    this.bindings.set(socket as object, binding.id)
-    const timer = this.helloTimers.get(socket as object)
+    const socketKey = this.socketKey(socket)
+    this.bindings.set(socketKey, binding.id)
+    const timer = this.helloTimers.get(socketKey)
     if (timer) clearTimeout(timer)
-    this.helloTimers.delete(socket as object)
-    this.pendingSockets.delete(socket as object)
+    this.helloTimers.delete(socketKey)
+    this.pendingSockets.delete(socketKey)
     this.store.saveAgent(binding.id, {
       agentVersion: message.agentVersion.slice(0, 64),
       hostname: message.hostname.slice(0, 253),
@@ -271,5 +276,9 @@ export class ServerAgentService {
     } catch {
       return null
     }
+  }
+
+  private socketKey(socket: AgentSocket) {
+    return socket.raw ?? socket as object
   }
 }

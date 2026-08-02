@@ -110,4 +110,43 @@ describe('ServerAgentService', () => {
     expect(store.listEvents(bindingId).filter((event) => event.type === 'log.stdout')).toHaveLength(1)
     expect(service.runtime(bindingId).connected).toBe(false)
   })
+
+  test('tracks an Elysia connection across wrappers that share one raw socket', () => {
+    const { bindingId, service } = harness()
+    const raw = {}
+    const sent: string[] = []
+    let closes = 0
+    const wrapper = () => ({
+      raw,
+      send: (message: unknown) => sent.push(String(message)),
+      close: () => { closes += 1 },
+    })
+
+    service.open(wrapper())
+    service.handle(wrapper(), {
+      type: 'hello',
+      token: 'valid-token',
+      agentVersion: '0.1.0',
+      hostname: 'minecraft',
+      capabilities: ['systemd', 'journald', 'rcon'],
+    })
+    service.handle(wrapper(), {
+      type: 'status',
+      runtime: {
+        state: 'active',
+        subState: 'running',
+        mainPid: 49636,
+        updatedAt: new Date().toISOString(),
+      },
+    })
+
+    expect(closes).toBe(0)
+    expect(service.runtime(bindingId)).toMatchObject({
+      connected: true,
+      runtime: { state: 'active', subState: 'running', mainPid: 49636 },
+    })
+
+    service.close(wrapper())
+    expect(service.runtime(bindingId).connected).toBe(false)
+  })
 })
