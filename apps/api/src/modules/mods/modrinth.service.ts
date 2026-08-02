@@ -360,8 +360,7 @@ export class ModrinthService {
       }
       const project = (await projectResponse.json()) as ModrinthProjectDetail
       const side = target === 'server' ? project.server_side : project.client_side
-      if (side === 'unsupported') {
-        if (!root) return
+      if (side === 'unsupported' && root) {
         throw new Error(`${project.slug} is marked as unsupported on the ${target}`)
       }
       const versionsUrl = new URL(

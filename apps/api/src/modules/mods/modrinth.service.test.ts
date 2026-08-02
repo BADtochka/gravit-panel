@@ -94,7 +94,7 @@ describe('ModrinthService', () => {
     expect(downloaded).toEqual(bytes)
   })
 
-  test('skips required dependencies that are unsupported on the install target', async () => {
+  test('uses compatible required dependencies despite inaccurate side metadata', async () => {
     const projects = {
       'dynamic-trees': {
         id: 'dynamic-trees-id',
@@ -158,6 +158,22 @@ describe('ModrinthService', () => {
           },
         ],
       },
+      'lithostitched-id': {
+        id: 'lithostitched-version',
+        project_id: 'lithostitched-id',
+        name: 'Lithostitched',
+        version_number: '1.7.13-neoforge-21.1',
+        loaders: ['neoforge'],
+        game_versions: ['1.21.1'],
+        files: [{
+          hashes: { sha1: 'lithostitched', sha512: 'lithostitched' },
+          url: 'https://cdn.modrinth.com/data/lithostitched.jar',
+          filename: 'lithostitched.jar',
+          primary: true,
+          size: 1,
+        }],
+        dependencies: [],
+      },
       'terrablender-id': {
         id: 'terrablender-version',
         project_id: 'terrablender-id',
@@ -202,10 +218,11 @@ describe('ModrinthService', () => {
     )
 
     expect(resolved.map((item) => item.slug)).toEqual([
+      'lithostitched',
       'terrablender',
       'dynamic-trees',
     ])
-    expect(resolved.map((item) => item.root)).toEqual([false, true])
+    expect(resolved.map((item) => item.root)).toEqual([false, false, true])
   })
 
   test('still rejects a directly selected project unsupported on the target', async () => {
