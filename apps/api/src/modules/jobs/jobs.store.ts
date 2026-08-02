@@ -173,4 +173,21 @@ export class JobsStore {
       .all(jobId, afterSequence)
       .map(toEvent)
   }
+
+  listRecentEvents(jobId: string, limit = 1000): JobEvent[] {
+    return this.db
+      .query<JobEventRow, [string, number]>(`
+        SELECT sequence, job_id, type, message, progress, created_at
+        FROM (
+          SELECT sequence, job_id, type, message, progress, created_at
+          FROM job_events
+          WHERE job_id = ?
+          ORDER BY sequence DESC
+          LIMIT ?
+        )
+        ORDER BY sequence ASC
+      `)
+      .all(jobId, limit)
+      .map(toEvent)
+  }
 }

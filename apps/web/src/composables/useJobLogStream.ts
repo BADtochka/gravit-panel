@@ -1,21 +1,13 @@
 import type { JobEvent, JobRecord } from '@gravit-panel/shared'
-import { panelFetch, panelUrl } from '@/lib/public-path'
+import { connectJobEventSocket, type JobEventConnection } from '@/lib/job-event-socket'
+import { panelFetch } from '@/lib/public-path'
 import { onScopeDispose, ref, watch, type WatchSource } from 'vue'
-
-interface JobEventConnection {
-  close(): void
-  onJob(listener: (event: MessageEvent<string>) => void): void
-}
 
 type ConnectToJobEvents = (jobId: string) => JobEventConnection
 type LoadJob = (jobId: string) => Promise<JobRecord>
 
 const connectToJobEvents: ConnectToJobEvents = (jobId) => {
-  const source = new EventSource(panelUrl(`/api/jobs/${jobId}/events`))
-  return {
-    close: () => source.close(),
-    onJob: (listener) => source.addEventListener('job', listener),
-  }
+  return connectJobEventSocket(jobId)
 }
 
 const loadJob: LoadJob = async (id) => {
@@ -54,18 +46,20 @@ export const useJobLogStream = (
 
       const jobId = nextJobId
       connection = connect(jobId)
-      connection.onJob((rawEvent) => {
-        const event = JSON.parse(rawEvent.data) as JobEvent
-        if (events.value.some((item) => item.sequence === event.sequence)) return
-        events.value.push(event)
-        if (event.progress !== null && currentJob.value) {
-          currentJob.value.progress = event.progress
+      connection.onEvents((batch) => {
+        const additions = batch.filter((event) =>
+          !events.value.some((item) => item.sequence === event.sequence))
+        if (additions.length === 0) return
+        events.value = [...events.value, ...additions]
+          .sort((left, right) => left.sequence - right.sequence)
+          .slice(-1000)
+        const latestProgress = additions.findLast((event) => event.progress !== null)?.progress
+        if (latestProgress !== undefined && latestProgress !== null && currentJob.value) {
+          currentJob.value.progress = latestProgress
         }
-        if (
-          event.type !== 'completed' &&
-          event.type !== 'failed' &&
-          event.type !== 'cancelled'
-        ) return
+        const event = additions.findLast((item) =>
+          item.type === 'completed' || item.type === 'failed' || item.type === 'cancelled')
+        if (!event) return
 
         closeConnection()
         if (currentJob.value?.id === jobId) {

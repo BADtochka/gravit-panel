@@ -12,6 +12,7 @@ import { ServerBootstrapService } from './server-bootstrap.service'
 import { ServerAgentStore } from './server-agent.store'
 import { ServerAgentEventHub } from './server-agent.events'
 import { ServerAgentService } from './server-agent.service'
+import { ServerBrowserEventsService } from './server-browser-events.service'
 
 export const serverBindingsStore = new ServerBindingsStore(database)
 export const serverPackStore = new ServerPackStore(database)
@@ -37,6 +38,10 @@ export const serverBootstrapService = new ServerBootstrapService(
 )
 export const serverAgentStore = new ServerAgentStore(database)
 export const serverAgentEvents = new ServerAgentEventHub()
+export const serverBrowserEventsService = new ServerBrowserEventsService(
+  serverAgentStore,
+  serverAgentEvents,
+)
 export const serverAgentService = new ServerAgentService(
   serverAgentStore,
   serverAgentEvents,

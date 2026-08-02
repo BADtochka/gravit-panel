@@ -156,14 +156,14 @@ Status: completed.
 
 - Add SQLite-backed jobs table.
 - Add in-memory running job registry.
-- Add SSE endpoint for job events.
+- Add WebSocket endpoint for job events.
 - Add example no-op job.
 
 Jobs persist a dedicated `cancelled` terminal state and expose an allowlisted
 cancel endpoint for queued/running work. Cancellation requests abort the runner
 signal and cannot later be overwritten by a successful task return. Operational
 pages discover the active job for the selected installation, reconnect to its
-persisted SSE history after navigation, and share the same cancel control as
+persisted WebSocket history after navigation, and share the same cancel control as
 the Jobs view.
 
 ### Slice 3: Docker Preflight

@@ -5,9 +5,8 @@ import { installationsStore } from '../gravit/gravit.runtime'
 import { activeJobForInstallation, jobsRunner } from '../jobs/jobs.runtime'
 import {
   serverBindingService,
-  serverAgentEvents,
   serverAgentService,
-  serverAgentStore,
+  serverBrowserEventsService,
   serverBindingsStore,
   serverBootstrapService,
   serverBootstrapStore,
@@ -399,27 +398,24 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
       }),
     },
   )
-  .get(
-    '/bindings/:bindingId/events',
-    ({ params, query, headers, set }) => {
-      const installation = findInstallation(query.installationId, set)
-      if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const binding = serverBindingsStore.get(params.bindingId)
-      if (!binding || binding.installationId !== installation.id) {
-        set.status = 404
-        return { message: 'Managed server binding not found.' }
+  .ws('/bindings/:bindingId/events/ws', {
+    idleTimeout: 45,
+    maxPayloadLength: 1024,
+    query: t.Object({ installationId }),
+    params: t.Object({ bindingId }),
+    open: (socket) => {
+      const { bindingId: bindingIdValue } = socket.data.params
+      const installation = installationsStore.get(socket.data.query.installationId)
+      const binding = serverBindingsStore.get(bindingIdValue)
+      if (!installation || !binding || binding.installationId !== installation.id) {
+        socket.close(1008, 'Managed server binding not found')
+        return
       }
-      const afterSequence = Number(headers['last-event-id'] ?? 0)
-      return serverAgentEvents.stream(
-        binding.id!,
-        () => serverAgentStore.listEvents(
-          binding.id!,
-          Number.isSafeInteger(afterSequence) && afterSequence > 0 ? afterSequence : 0,
-        ),
-      )
+      serverBrowserEventsService.open(socket, binding.id!)
     },
-    { params: t.Object({ bindingId }), query: t.Object({ installationId }) },
-  )
+    message: (socket, message) => serverBrowserEventsService.message(socket, message),
+    close: (socket) => serverBrowserEventsService.close(socket),
+  })
 
 export const serverBootstrapRoutes = new Elysia({ prefix: '/server-bootstrap' })
   .get(

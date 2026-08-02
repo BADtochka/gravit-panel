@@ -28,7 +28,7 @@ const event = (sequence: number, type: JobEvent['type']): JobEvent => ({
 test('treats cancellation as terminal and refreshes the final record', async () => {
   const scope = effectScope()
   const jobProp = ref<JobRecord | null>(job('running'))
-  let listener: ((event: MessageEvent<string>) => void) | null = null
+  let listener: ((events: JobEvent[]) => void) | null = null
   let closes = 0
   const finished: JobRecord[] = []
   const state = scope.run(() =>
@@ -37,7 +37,8 @@ test('treats cancellation as terminal and refreshes the final record', async () 
       (record) => finished.push(record),
       () => ({
         close: () => { closes += 1 },
-        onJob: (nextListener) => { listener = nextListener },
+        onEvents: (nextListener) => { listener = nextListener },
+        onState: () => {},
       }),
       async () => ({
         ...job('cancelled'),
@@ -47,9 +48,7 @@ test('treats cancellation as terminal and refreshes the final record', async () 
   )
   if (!state || !listener) throw new Error('Unable to create cancellation log scope')
 
-  ;(listener as (event: MessageEvent<string>) => void)({
-    data: JSON.stringify(event(1, 'cancelled')),
-  } as MessageEvent<string>)
+  ;(listener as (events: JobEvent[]) => void)([event(1, 'cancelled')])
   await Promise.resolve()
   await nextTick()
 
@@ -63,7 +62,7 @@ test('treats cancellation as terminal and refreshes the final record', async () 
 test('terminal parent refresh preserves logs and does not reconnect to the same job', async () => {
   const scope = effectScope()
   const jobProp = ref<JobRecord | null>(job('queued'))
-  const listeners: Array<(event: MessageEvent<string>) => void> = []
+  const listeners: Array<(events: JobEvent[]) => void> = []
   let connections = 0
   let closes = 0
   const finished: JobRecord[] = []
@@ -81,7 +80,8 @@ test('terminal parent refresh preserves logs and does not reconnect to the same 
           close: () => {
             closes += 1
           },
-          onJob: (listener) => listeners.push(listener),
+          onEvents: (listener) => listeners.push(listener),
+          onState: () => {},
         }
       },
       async () => job('succeeded'),
@@ -89,8 +89,8 @@ test('terminal parent refresh preserves logs and does not reconnect to the same 
   )
   if (!state) throw new Error('Unable to create job log scope')
 
-  listeners[0]?.({ data: JSON.stringify(event(1, 'progress')) } as MessageEvent<string>)
-  listeners[0]?.({ data: JSON.stringify(event(2, 'completed')) } as MessageEvent<string>)
+  listeners[0]?.([event(1, 'progress')])
+  listeners[0]?.([event(2, 'completed')])
   await Promise.resolve()
   await nextTick()
 
@@ -107,7 +107,7 @@ test('a different job replaces logs and opens one new connection', async () => {
   const scope = effectScope()
   const jobProp = ref<JobRecord | null>(job('queued'))
   let connections = 0
-  const listeners: Array<(event: MessageEvent<string>) => void> = []
+  const listeners: Array<(events: JobEvent[]) => void> = []
   const state = scope.run(() =>
     useJobLogStream(
       () => jobProp.value,
@@ -116,7 +116,8 @@ test('a different job replaces logs and opens one new connection', async () => {
         connections += 1
         return {
           close: () => {},
-          onJob: (listener) => listeners.push(listener),
+          onEvents: (listener) => listeners.push(listener),
+          onState: () => {},
         }
       },
       async () => job('succeeded'),
@@ -124,7 +125,7 @@ test('a different job replaces logs and opens one new connection', async () => {
   )
   if (!state) throw new Error('Unable to create job log scope')
 
-  listeners[0]?.({ data: JSON.stringify(event(1, 'progress')) } as MessageEvent<string>)
+  listeners[0]?.([event(1, 'progress')])
   jobProp.value = { ...job('queued'), id: 'next-job' }
   await nextTick()
 

@@ -114,7 +114,8 @@ import { Button } from '@/components/ui/button'
 import JobCancelButton from '@/components/jobs/JobCancelButton.vue'
 import { Switch } from '@/components/ui/switch'
 import { useLogAutoScroll } from '@/composables/useLogAutoScroll'
-import { panelFetch, panelUrl } from '@/lib/public-path'
+import { connectJobEventSocket, type JobEventConnection } from '@/lib/job-event-socket'
+import { panelFetch } from '@/lib/public-path'
 import type { JobEvent, JobRecord, JobStatus, JobsResponse } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { Play, RefreshCw } from '@lucide/vue'
@@ -130,7 +131,7 @@ const selectedJobId = ref(routeJobId.value)
 const events = ref<JobEvent[]>([])
 const { autoScroll, logContainer } = useLogAutoScroll(() => events.value.length)
 const streamState = ref<'idle' | 'connecting' | 'live' | 'reconnecting' | 'closed'>('idle')
-let eventSource: EventSource | null = null
+let eventConnection: JobEventConnection | null = null
 
 const getJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> => {
   const response = await panelFetch(input, init)
@@ -161,32 +162,30 @@ const { error: createError, mutate: createJob, isPending } = useMutation({
 const selectedJob = computed(() => jobs.value?.items.find((job) => job.id === selectedJobId.value))
 
 const connectToJob = (jobId: string) => {
-  eventSource?.close()
+  eventConnection?.close()
   events.value = []
   streamState.value = jobId ? 'connecting' : 'idle'
   if (!jobId) return
 
   const seen = new Set<number>()
-  eventSource = new EventSource(panelUrl(`/api/jobs/${jobId}/events`))
-  eventSource.onopen = () => {
-    streamState.value = 'live'
-  }
-  eventSource.onerror = () => {
-    streamState.value = 'reconnecting'
-  }
-  eventSource.addEventListener('job', (rawEvent) => {
-    const event = JSON.parse((rawEvent as MessageEvent<string>).data) as JobEvent
-    if (seen.has(event.sequence)) return
-
-    seen.add(event.sequence)
-    events.value.push(event)
-
-    if (
-      event.type === 'completed' ||
-      event.type === 'failed' ||
-      event.type === 'cancelled'
-    ) {
-      eventSource?.close()
+  eventConnection = connectJobEventSocket(jobId)
+  eventConnection.onState((state) => {
+    streamState.value = state
+  })
+  eventConnection.onEvents((batch) => {
+    const additions = batch.filter((event) => {
+      if (seen.has(event.sequence)) return false
+      seen.add(event.sequence)
+      return true
+    })
+    if (additions.length > 0) {
+      events.value = [...events.value, ...additions]
+        .sort((left, right) => left.sequence - right.sequence)
+        .slice(-1000)
+    }
+    if (additions.some((event) =>
+      event.type === 'completed' || event.type === 'failed' || event.type === 'cancelled')) {
+      eventConnection?.close()
       streamState.value = 'closed'
       void queryClient.invalidateQueries({ queryKey: ['jobs'] })
     }
@@ -211,7 +210,7 @@ watch(
   { immediate: true },
 )
 watch(selectedJobId, connectToJob, { immediate: true })
-onBeforeUnmount(() => eventSource?.close())
+onBeforeUnmount(() => eventConnection?.close())
 
 const statusLabel: Record<JobStatus, string> = {
   queued: 'Queued',

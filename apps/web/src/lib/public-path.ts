@@ -30,6 +30,12 @@ export const panelUrl = (path: string) => {
   return `${panelPublicPath}${path}` || '/'
 }
 
+export const panelWebSocketUrl = (path: string) => {
+  const url = new URL(panelUrl(path), window.location.href)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
+}
+
 export const panelFetch: PanelFetch = (input, init) => {
   if (typeof input === 'string') return fetch(panelUrl(input), init)
   if (input instanceof URL) return fetch(panelUrl(input.toString()), init)

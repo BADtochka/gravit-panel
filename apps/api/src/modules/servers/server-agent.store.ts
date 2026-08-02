@@ -263,12 +263,17 @@ export class ServerAgentStore {
     return event
   }
 
-  listEvents(bindingId: string, afterSequence = 0) {
+  listEvents(bindingId: string, limit = 500) {
     return this.db.query<EventRow, [string, number]>(`
       SELECT sequence, binding_id, command_id, type, message, created_at
-      FROM server_runtime_events
-      WHERE binding_id = ? AND sequence > ?
+      FROM (
+        SELECT sequence, binding_id, command_id, type, message, created_at
+        FROM server_runtime_events
+        WHERE binding_id = ?
+        ORDER BY sequence DESC
+        LIMIT ?
+      )
       ORDER BY sequence ASC
-    `).all(bindingId, afterSequence).map(toEvent)
+    `).all(bindingId, limit).map(toEvent)
   }
 }

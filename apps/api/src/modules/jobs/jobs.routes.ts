@@ -1,10 +1,5 @@
 import { Elysia, t } from 'elysia'
-import { jobsEventHub, jobsRunner, jobsStore } from './jobs.runtime'
-
-const parseSequence = (value: string | undefined) => {
-  const sequence = Number(value ?? 0)
-  return Number.isSafeInteger(sequence) && sequence >= 0 ? sequence : 0
-}
+import { jobsBrowserEventsService, jobsRunner, jobsStore } from './jobs.runtime'
 
 export const jobsRoutes = new Elysia({ prefix: '/jobs' })
   .get(
@@ -56,24 +51,11 @@ export const jobsRoutes = new Elysia({ prefix: '/jobs' })
     set.status = 404
     return { message: 'Job not found' }
   })
-  .get('/:id/events', ({ params, headers, set }) => {
-    const job = jobsStore.get(params.id)
-    if (!job) {
-      set.status = 404
-      return { message: 'Job not found' }
-    }
-
-    const afterSequence = parseSequence(headers['last-event-id'])
-    return jobsEventHub.stream(
-      params.id,
-      () => jobsStore.listEvents(params.id, afterSequence),
-      () => {
-        const current = jobsStore.get(params.id)
-        return (
-          current?.status === 'succeeded' ||
-          current?.status === 'failed' ||
-          current?.status === 'cancelled'
-        )
-      },
-    )
+  .ws('/:id/events/ws', {
+    idleTimeout: 45,
+    maxPayloadLength: 1024,
+    params: t.Object({ id: t.String({ minLength: 1, maxLength: 128 }) }),
+    open: (socket) => jobsBrowserEventsService.open(socket, socket.data.params.id),
+    message: (socket, message) => jobsBrowserEventsService.message(socket, message),
+    close: (socket) => jobsBrowserEventsService.close(socket),
   })

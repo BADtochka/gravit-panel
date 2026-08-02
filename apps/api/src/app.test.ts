@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { app } from './app'
+import { jobsStore } from './modules/jobs/jobs.runtime'
 
 const request = (path: string, init?: RequestInit) =>
   app.handle(new Request(`http://127.0.0.1${path}`, init))
@@ -277,7 +278,7 @@ describe('API smoke routes', () => {
 })
 
 describe('jobs lifecycle', () => {
-  test('persists a demo job and streams its events through SSE', async () => {
+  test('persists a demo job and its events', async () => {
     const createResponse = await request('/api/jobs/demo', { method: 'POST' })
     const createdJob = await createResponse.json()
 
@@ -288,17 +289,12 @@ describe('jobs lifecycle', () => {
       progress: 0,
     })
 
-    const eventsResponse = await request(`/api/jobs/${createdJob.id}/events`)
-    const eventStream = await eventsResponse.text()
-
-    expect(eventsResponse.status).toBe(200)
-    expect(eventsResponse.headers.get('content-type')).toContain('text/event-stream')
-    expect(eventStream).toContain('event: job')
-    expect(eventStream).toContain('"type":"queued"')
-    expect(eventStream).toContain('"type":"completed"')
-
-    const jobResponse = await request(`/api/jobs/${createdJob.id}`)
-    const completedJob = await jobResponse.json()
+    const deadline = Date.now() + 2_000
+    let completedJob = await (await request(`/api/jobs/${createdJob.id}`)).json()
+    while (completedJob.status !== 'succeeded' && Date.now() < deadline) {
+      await Bun.sleep(10)
+      completedJob = await (await request(`/api/jobs/${createdJob.id}`)).json()
+    }
 
     expect(completedJob).toMatchObject({
       id: createdJob.id,
@@ -311,14 +307,13 @@ describe('jobs lifecycle', () => {
     const jobs = await listResponse.json()
     expect(jobs.items.some((job: { id: string }) => job.id === createdJob.id)).toBe(true)
     expect(jobs.runningIds).not.toContain(createdJob.id)
+    const eventTypes = jobsStore.listEvents(createdJob.id).map((event) => event.type)
+    expect(eventTypes.slice(0, 2)).toEqual(['queued', 'started'])
+    expect(eventTypes).toContain('progress')
+    expect(eventTypes.at(-1)).toBe('completed')
   })
 
-  test('returns 404 for an unknown job stream', async () => {
-    const response = await request('/api/jobs/missing/events')
-    expect(response.status).toBe(404)
-  })
-
-  test('cancels a running job and closes its SSE lifecycle', async () => {
+  test('cancels a running job and persists its terminal event', async () => {
     const createResponse = await request('/api/jobs/demo', { method: 'POST' })
     const createdJob = await createResponse.json()
     const cancelResponse = await request(`/api/jobs/${createdJob.id}/cancel`, {
@@ -338,8 +333,7 @@ describe('jobs lifecycle', () => {
       error: null,
     })
 
-    const eventsResponse = await request(`/api/jobs/${createdJob.id}/events`)
-    expect(await eventsResponse.text()).toContain('"type":"cancelled"')
+    expect(jobsStore.listEvents(createdJob.id).some((event) => event.type === 'cancelled')).toBe(true)
     const duplicateCancel = await request(`/api/jobs/${createdJob.id}/cancel`, {
       method: 'POST',
     })

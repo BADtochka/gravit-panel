@@ -110,7 +110,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { useLogAutoScroll } from '@/composables/useLogAutoScroll'
-import { panelFetch, panelUrl } from '@/lib/public-path'
+import { panelFetch, panelWebSocketUrl } from '@/lib/public-path'
 import type {
   ServerCommandType,
   ServerRuntimeEvent,
@@ -133,7 +133,13 @@ const commandHistory = ref<string[]>([])
 const historyIndex = ref(0)
 const streamState = ref<'connecting' | 'live' | 'reconnecting' | 'closed'>('connecting')
 const { autoScroll, logContainer } = useLogAutoScroll(() => events.value.length)
-let eventSource: EventSource | null = null
+let eventSocket: WebSocket | null = null
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let reconnectAttempt = 0
+let connectionGeneration = 0
+let flushFrame: number | null = null
+let pendingEvents: ServerRuntimeEvent[] = []
 let seenSequences = new Set<number>()
 
 const getJson = async <T>(path: string): Promise<T> => {
@@ -197,33 +203,98 @@ const showNewerCommand = () => {
   consoleCommand.value = commandHistory.value[historyIndex.value] ?? ''
 }
 
+const applyHistory = (history: ServerRuntimeEvent[]) => {
+  const next = history
+    .filter((event) => event.bindingId === props.bindingId)
+    .sort((left, right) => left.sequence - right.sequence)
+    .slice(-500)
+  events.value = next
+  seenSequences = new Set(next.map((event) => event.sequence))
+}
+
+const flushPendingEvents = () => {
+  flushFrame = null
+  if (!pendingEvents.length) return
+  events.value = [...events.value, ...pendingEvents]
+    .sort((left, right) => left.sequence - right.sequence)
+    .slice(-500)
+  pendingEvents = []
+  seenSequences = new Set(events.value.map((event) => event.sequence))
+}
+
+const enqueueEvent = (event: ServerRuntimeEvent) => {
+  if (event.bindingId !== props.bindingId || seenSequences.has(event.sequence)) return
+  seenSequences.add(event.sequence)
+  pendingEvents.push(event)
+  if (flushFrame === null) flushFrame = requestAnimationFrame(flushPendingEvents)
+}
+
+const clearSocket = () => {
+  if (heartbeatTimer) clearInterval(heartbeatTimer)
+  if (reconnectTimer) clearTimeout(reconnectTimer)
+  heartbeatTimer = null
+  reconnectTimer = null
+  const socket = eventSocket
+  eventSocket = null
+  if (socket && socket.readyState < WebSocket.CLOSING) socket.close(1000, 'Console hidden')
+}
+
 const connect = () => {
-  eventSource?.close()
+  connectionGeneration += 1
+  const generation = connectionGeneration
+  clearSocket()
   events.value = []
+  pendingEvents = []
   seenSequences = new Set<number>()
   streamState.value = 'connecting'
   const query = `installationId=${encodeURIComponent(props.installationId)}`
-  eventSource = new EventSource(panelUrl(`/api/servers/bindings/${props.bindingId}/events?${query}`))
-  eventSource.onopen = () => {
+  const socket = new WebSocket(panelWebSocketUrl(
+    `/api/servers/bindings/${props.bindingId}/events/ws?${query}`,
+  ))
+  eventSocket = socket
+  socket.onopen = () => {
+    if (generation !== connectionGeneration) return
+    reconnectAttempt = 0
     streamState.value = 'live'
+    heartbeatTimer = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'ping' }))
+    }, 20_000)
   }
-  eventSource.onerror = () => {
-    streamState.value = 'reconnecting'
-  }
-  eventSource.addEventListener('server', (rawEvent) => {
-    const event = JSON.parse((rawEvent as MessageEvent<string>).data) as ServerRuntimeEvent
-    if (event.bindingId !== props.bindingId || seenSequences.has(event.sequence)) return
-    seenSequences.add(event.sequence)
-    events.value = [...events.value, event].slice(-2_000)
-    if (seenSequences.size > 4_000) {
-      seenSequences = new Set(events.value.map((item) => item.sequence))
+  socket.onmessage = (rawEvent) => {
+    if (generation !== connectionGeneration || typeof rawEvent.data !== 'string') return
+    try {
+      const message = JSON.parse(rawEvent.data) as {
+        type?: string
+        events?: ServerRuntimeEvent[]
+        event?: ServerRuntimeEvent
+      }
+      if (message.type === 'history' && Array.isArray(message.events)) {
+        applyHistory(message.events)
+      } else if (message.type === 'event' && message.event) {
+        enqueueEvent(message.event)
+      }
+    } catch {
+      // Ignore malformed frames without tearing down the console.
     }
-  })
+  }
+  socket.onerror = () => socket.close()
+  socket.onclose = () => {
+    if (generation !== connectionGeneration || !props.active) return
+    if (heartbeatTimer) clearInterval(heartbeatTimer)
+    heartbeatTimer = null
+    streamState.value = 'reconnecting'
+    const delay = Math.min(15_000, 1000 * 2 ** reconnectAttempt)
+    reconnectAttempt += 1
+    reconnectTimer = setTimeout(connect, delay)
+  }
 }
 
 const disconnect = () => {
-  eventSource?.close()
-  eventSource = null
+  connectionGeneration += 1
+  clearSocket()
+  if (flushFrame !== null) cancelAnimationFrame(flushFrame)
+  flushFrame = null
+  pendingEvents = []
   streamState.value = 'closed'
 }
 
