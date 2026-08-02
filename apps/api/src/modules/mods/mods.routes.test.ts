@@ -318,6 +318,37 @@ describe('mod management API', () => {
     expect(await waitForTerminalJob(jobsStore, queued.id)).toMatchObject({ status: 'succeeded' })
   })
 
+  test('accepts a unified install containing 96 selected mods', async () => {
+    const slugs = Array.from({ length: 96 }, (_, index) => `selected-mod-${index + 1}`)
+    const { request, jobsStore } = createHarness({
+      install: async (_installation, input) => ({
+        installationId: installation.id,
+        profile: input.profile,
+        selections: input.selections ?? [],
+        source: modrinthSource,
+      }),
+    })
+    const response = await request('/api/mods/install', post({
+      installationId: installation.id,
+      profile: 'fabric',
+      minecraftVersion: '1.21.4',
+      loader: 'FABRIC',
+      slugs,
+      selections: slugs.map((slug) => ({
+        slug,
+        clientMode: 'required',
+        serverBindingIds: [],
+      })),
+    }))
+    const queued = await response.json()
+
+    expect(response.status).toBe(202)
+    expect(await waitForTerminalJob(jobsStore, queued.id)).toMatchObject({
+      status: 'succeeded',
+      input: { slugs },
+    })
+  })
+
   test('normalizes the simple server install payload into a persisted job', async () => {
     let received: unknown = null
     const { request, jobsStore } = createHarness({
@@ -355,7 +386,7 @@ describe('mod management API', () => {
     expect(received).toMatchObject(completed?.input ?? {})
   })
 
-  test('accepts server bulk installs larger than the client search limit', async () => {
+  test('accepts server bulk installs larger than the old client limit', async () => {
     const slugs = [
       'create-steam-n-rails-1.21.1',
       ...Array.from({ length: 64 }, (_, index) => `server-mod-${index + 1}`),

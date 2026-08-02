@@ -42,6 +42,7 @@
                   <div class="flex items-start gap-3">
                     <Checkbox
                       :model-value="selectedSlugs.includes(item.slug)"
+                      :disabled="!selectedSlugs.includes(item.slug) && installSelectionAtLimit"
                       class="mt-1"
                       @click.stop
                       @update:model-value="toggleSelected(item)"
@@ -134,14 +135,37 @@
               <p v-else class="py-8 text-center text-sm text-muted-foreground">
                 Search for mods to install from Modrinth.
               </p>
+              <Alert v-if="installSelectionAtLimit" variant="destructive">
+                <TriangleAlert class="size-4" />
+                <AlertTitle>Selection limit reached</AlertTitle>
+                <AlertDescription>
+                  At most {{ installSelectionLimit }} mods can be installed in one operation.
+                  Remove some selected mods before choosing more.
+                </AlertDescription>
+              </Alert>
             </div>
-            <DialogFooter>
-              <Button
-                :disabled="!selectedSlugs.length || !selectedTargetsReady"
-                @click="installSelected"
-              >
-                <Download /> Install selected ({{ selectedSlugs.length }})
-              </Button>
+            <DialogFooter class="items-center sm:justify-between">
+              <p class="text-xs" :class="installSelectionAtLimit ? 'text-destructive' : 'text-muted-foreground'">
+                {{ selectedSlugs.length }} / {{ installSelectionLimit }} selected
+              </p>
+              <div class="flex flex-wrap justify-end gap-2">
+                <Button
+                  v-if="selectedSlugs.length"
+                  type="button"
+                  variant="outline"
+                  @click="copyInstallSelection"
+                >
+                  <Check v-if="selectionCopied" />
+                  <Copy v-else />
+                  {{ selectionCopied ? 'Copied' : 'Copy list' }}
+                </Button>
+                <Button
+                  :disabled="!selectedSlugs.length || !selectedTargetsReady"
+                  @click="installSelected"
+                >
+                  <Download /> Install selected ({{ selectedSlugs.length }})
+                </Button>
+              </div>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -546,12 +570,14 @@ import type {
 } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
-  Download, Lock, Power, RefreshCw, Search, ServerCog, Settings, Trash2, TriangleAlert, Unlock,
+  Check, Copy, Download, Lock, Power, RefreshCw, Search, ServerCog, Settings, Trash2,
+  TriangleAlert, Unlock,
 } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { computed, reactive, ref, watch } from 'vue'
 
 const loaders = ['VANILLA', 'FABRIC', 'FORGE', 'NEOFORGE', 'QUILT'] as const
+const installSelectionLimit = 200
 const queryClient = useQueryClient()
 const { launchServerId: installationId } = storeToRefs(useLaunchServerStore())
 const { selectedProfileName: profile } = storeToRefs(useProfilesStore())
@@ -561,6 +587,7 @@ const constraintsLocked = ref(true)
 const searchText = ref('')
 const installedSearch = ref('')
 const selectedSlugs = ref<string[]>([])
+const selectionCopied = ref(false)
 const selectedInstalledFilenames = ref<string[]>([])
 const childError = ref<Error | null>(null)
 const installDialogOpen = ref(false)
@@ -578,6 +605,7 @@ const optionalForm = reactive({
   enabledByDefault: false,
 })
 const selectionTargets = reactive<Record<string, ModInstallSelection>>({})
+let selectionCopiedTimer: ReturnType<typeof setTimeout> | null = null
 const {
   activeJob,
   activeJobError,
@@ -648,6 +676,43 @@ watch(profile, () => {
   Object.keys(selectionTargets).forEach((key) => delete selectionTargets[key])
   if (constraintsLocked.value) applyProfileParameters()
 })
+const selectionStorageKey = computed(
+  () => `gravit-panel:mods:selection:${installationId.value}:${profile.value}`,
+)
+const restoreInstallSelection = () => {
+  selectedSlugs.value = []
+  Object.keys(selectionTargets).forEach((key) => delete selectionTargets[key])
+  try {
+    const raw = localStorage.getItem(selectionStorageKey.value)
+    if (!raw) return
+    const stored = JSON.parse(raw) as {
+      slugs?: unknown
+      targets?: Record<string, ModInstallSelection>
+    }
+    if (!Array.isArray(stored.slugs)) return
+    selectedSlugs.value = [...new Set(stored.slugs.filter(
+      (slug): slug is string => typeof slug === 'string',
+    ))]
+    for (const slug of selectedSlugs.value) {
+      const target = stored.targets?.[slug]
+      if (target) selectionTargets[slug] = target
+    }
+  } catch {
+    localStorage.removeItem(selectionStorageKey.value)
+  }
+}
+watch([installationId, profile], restoreInstallSelection, { immediate: true })
+watch([selectedSlugs, selectionTargets], () => {
+  const targets = Object.fromEntries(
+    selectedSlugs.value.flatMap((slug) => selectionTargets[slug]
+      ? [[slug, selectionTargets[slug]]]
+      : []),
+  )
+  localStorage.setItem(selectionStorageKey.value, JSON.stringify({
+    slugs: selectedSlugs.value,
+    targets,
+  }))
+}, { deep: true })
 watch(constraintsLocked, (locked) => {
   if (locked) applyProfileParameters()
 })
@@ -750,11 +815,15 @@ const defaultTargets = (item: ModrinthProject): ModInstallSelection => ({
 })
 const targetFor = (item: ModrinthProject) =>
   selectionTargets[item.slug] ?? (selectionTargets[item.slug] = defaultTargets(item))
+const installSelectionAtLimit = computed(
+  () => selectedSlugs.value.length >= installSelectionLimit,
+)
 const toggleSelected = (item: ModrinthProject) => {
   if (selectedSlugs.value.includes(item.slug)) {
     selectedSlugs.value = selectedSlugs.value.filter((slug) => slug !== item.slug)
     delete selectionTargets[item.slug]
   } else {
+    if (installSelectionAtLimit.value) return
     selectedSlugs.value = [...selectedSlugs.value, item.slug]
     selectionTargets[item.slug] = defaultTargets(item)
   }
@@ -771,6 +840,7 @@ const toggleServerTarget = (item: ModrinthProject, bindingId: string) => {
 const selectedTargetsReady = computed(
   () =>
     selectedSlugs.value.length > 0 &&
+    selectedSlugs.value.length <= installSelectionLimit &&
     selectedSlugs.value.every((slug) => {
       const target = selectionTargets[slug]
       return Boolean(
@@ -779,6 +849,24 @@ const selectedTargetsReady = computed(
       )
     }),
 )
+const copyInstallSelection = async () => {
+  const targets = Object.fromEntries(
+    selectedSlugs.value.flatMap((slug) => selectionTargets[slug]
+      ? [[slug, selectionTargets[slug]]]
+      : []),
+  )
+  try {
+    await navigator.clipboard.writeText(JSON.stringify({
+      slugs: selectedSlugs.value,
+      targets,
+    }, null, 2))
+    selectionCopied.value = true
+    if (selectionCopiedTimer) clearTimeout(selectionCopiedTimer)
+    selectionCopiedTimer = setTimeout(() => { selectionCopied.value = false }, 2_000)
+  } catch {
+    childError.value = new Error('Unable to copy the selected mod list.')
+  }
+}
 
 const {
   mutate: runOperation, error: operationError,

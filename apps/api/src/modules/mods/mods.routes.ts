@@ -59,7 +59,7 @@ const modInstallBody = t.Object({
   profile,
   minecraftVersion,
   loader,
-  slugs: t.Array(slug, { minItems: 1, maxItems: 64 }),
+  slugs: t.Array(slug, { minItems: 1, maxItems: 200 }),
   selections: t.Optional(t.Array(t.Object({
     slug,
     clientMode: t.Union([
@@ -71,7 +71,7 @@ const modInstallBody = t.Object({
     optionalName: t.Optional(t.String({ minLength: 1, maxLength: 80 })),
     optionalDescription: t.Optional(t.String({ maxLength: 500 })),
     serverBindingIds: t.Array(t.String({ format: 'uuid' }), { maxItems: 32 }),
-  }), { minItems: 1, maxItems: 64 })),
+  }), { minItems: 1, maxItems: 200 })),
 })
 const serverModInstallBody = t.Object({
   installationId,
