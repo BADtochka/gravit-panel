@@ -36,9 +36,10 @@
 <script setup lang="ts">
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { usePanelSelfUpdate } from '@/composables/usePanelSelfUpdate'
 import { panelFetch } from '@/lib/public-path'
-import type { PanelUpdateDeployResult, PanelUpdateStatus } from '@gravit-panel/shared'
-import { useMutation, useQuery } from '@tanstack/vue-query'
+import type { PanelUpdateDeployResult } from '@gravit-panel/shared'
+import { useMutation } from '@tanstack/vue-query'
 import { CloudDownload, LoaderCircle } from '@lucide/vue'
 import { computed } from 'vue'
 
@@ -55,12 +56,7 @@ const request = async <T>(path: string, init?: RequestInit) => {
   return body as T
 }
 
-const { data: status } = useQuery({
-  queryKey: ['panel-self-update'],
-  queryFn: () => request<PanelUpdateStatus>('/api/self-update'),
-  staleTime: 5 * 60_000,
-  refetchInterval: 10 * 60_000,
-})
+const { data: status } = usePanelSelfUpdate()
 const mutation = useMutation({
   mutationFn: () => request<PanelUpdateDeployResult>('/api/self-update/deploy', { method: 'POST' }),
 })
