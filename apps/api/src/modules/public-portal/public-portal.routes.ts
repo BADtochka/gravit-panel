@@ -77,3 +77,7 @@ export const publicPortalRoutes = new Elysia({ prefix: '/public' })
     set.headers.etag = `"${skin.sha256}"`
     return skin.image
   }, { params: t.Object({ filename: t.String({ minLength: 6, maxLength: 20, pattern: '^[A-Za-z0-9_]{2,16}\\.png$' }) }) })
+  .get('/cloaks/:filename', ({ set }) => {
+    set.status = 404
+    return { message: 'Cloak not found.' }
+  }, { params: t.Object({ filename: t.String({ minLength: 6, maxLength: 20, pattern: '^[A-Za-z0-9_]{2,16}\\.png$' }) }) })

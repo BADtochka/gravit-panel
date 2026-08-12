@@ -398,6 +398,7 @@ export class AuthProviderService {
           ? ({
               type: 'request',
               skinURL: `${env.PANEL_PUBLIC_URL.replace(/\/$/, '')}/api/public/skins/%username%.png`,
+              cloakURL: `${env.PANEL_PUBLIC_URL.replace(/\/$/, '')}/api/public/cloaks/%username%.png`,
             } satisfies AuthTextureProviderConfig)
           : ({ type: 'void' } satisfies AuthTextureProviderConfig))
       : (input.textureProvider ??

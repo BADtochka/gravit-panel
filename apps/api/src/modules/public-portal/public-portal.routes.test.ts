@@ -17,3 +17,12 @@ test('rejects malformed skin filenames', async () => {
 
   expect(response.status).toBe(422)
 })
+
+test('returns a stable not-found response for a valid cloak filename', async () => {
+  const response = await publicPortalRoutes.handle(new Request(
+    'https://panel.example.com/public/cloaks/formallybad.png',
+  ))
+
+  expect(response.status).toBe(404)
+  expect(await response.json()).toEqual({ message: 'Cloak not found.' })
+})
