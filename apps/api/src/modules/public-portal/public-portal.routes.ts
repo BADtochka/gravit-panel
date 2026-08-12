@@ -68,11 +68,12 @@ export const publicPortalRoutes = new Elysia({ prefix: '/public' })
     try { return { item: portal.setSkin(player, new Uint8Array(await body.file.arrayBuffer())) } }
     catch (error) { set.status = 400; return { message: error instanceof Error ? error.message : 'Skin upload failed.' } }
   }, { body: t.Object({ file: t.File({ type: 'image/png', maxSize: 1024 * 1024 }) }) })
-  .get('/skins/:username.png', ({ params, set }) => {
-    const skin = portal.skinForUsername(params.username)
+  .get('/skins/:filename', ({ params, set }) => {
+    const username = params.filename.slice(0, -4)
+    const skin = portal.skinForUsername(username)
     if (!skin) { set.status = 404; return { message: 'Skin not found.' } }
     set.headers['content-type'] = 'image/png'
     set.headers['cache-control'] = 'public, max-age=300'
     set.headers.etag = `"${skin.sha256}"`
     return skin.image
-  }, { params: t.Object({ username: t.String({ minLength: 2, maxLength: 16, pattern: '^[A-Za-z0-9_]+$' }) }) })
+  }, { params: t.Object({ filename: t.String({ minLength: 6, maxLength: 20, pattern: '^[A-Za-z0-9_]{2,16}\\.png$' }) }) })
