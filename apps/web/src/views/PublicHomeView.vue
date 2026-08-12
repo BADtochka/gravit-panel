@@ -1,23 +1,50 @@
 <template>
-  <main class="mx-auto min-h-screen max-w-5xl px-4 py-16 md:px-6">
-    <div class="mb-10 flex justify-end">
-      <RouterLink to="/account" class="inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium hover:bg-accent">
-        {{ player ? `Кабинет: ${player.username}` : 'Войти через Discord' }}
+  <main class="mx-auto flex min-h-screen max-w-5xl flex-col px-4 py-8 md:px-6 md:py-12">
+    <header class="flex items-center justify-between gap-4">
+      <span class="text-sm font-semibold tracking-wide">
+        {{ page?.title || currentInstallation?.projectName || 'Лаунчер' }}
+      </span>
+      <RouterLink
+        v-if="player"
+        to="/account"
+        class="flex items-center gap-2 rounded-full border bg-card py-1 pl-1 pr-3 text-sm font-medium transition-colors hover:bg-accent"
+      >
+        <img
+          :src="discordAvatarUrl(player.discordId)"
+          :alt="`Аватар ${player.username}`"
+          class="size-8 rounded-full bg-muted object-cover"
+        />
+        <span class="max-w-32 truncate">{{ player.username }}</span>
+        <UserRound class="size-4 text-muted-foreground" />
       </RouterLink>
-    </div>
-    <section class="max-w-2xl">
-      <h1 class="text-4xl font-semibold tracking-tight">{{ page?.title || currentInstallation?.projectName || 'Лаунчер' }}</h1>
-      <p v-if="page?.description" class="mt-4 text-base leading-7 text-muted-foreground">{{ page.description }}</p>
-    </section>
-    <section class="mt-12">
-      <div v-if="artifactsLoading" class="text-sm text-muted-foreground">Загрузка доступных лаунчеров...</div>
-      <div v-else-if="visibleArtifacts.length" class="grid gap-4 md:grid-cols-2">
-        <Card v-for="artifact in visibleArtifacts" :key="artifact.variant">
-          <CardHeader><CardTitle>{{ artifact.variant === 'windows-x64' ? 'Windows launcher' : 'Java launcher' }}</CardTitle><CardDescription>{{ artifact.filename }} · {{ formatBytes(artifact.size) }}</CardDescription></CardHeader>
-          <CardFooter><Button v-if="player" as="a" :href="panelUrl(artifact.downloadPath)"><Download />Скачать</Button><Button v-else @click="login"><LogIn />Войти, чтобы скачать</Button></CardFooter>
-        </Card>
+      <Button v-else size="sm" @click="login"><LogIn />Войти</Button>
+    </header>
+
+    <section class="my-auto grid gap-10 py-20 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-center">
+      <div class="max-w-2xl">
+        <p class="mb-4 text-sm font-medium text-primary">Игровой сервер</p>
+        <h1 class="text-4xl font-semibold tracking-tight sm:text-6xl">
+          {{ page?.title || currentInstallation?.projectName || 'Лаунчер' }}
+        </h1>
+        <p class="mt-6 max-w-xl text-base leading-7 text-muted-foreground sm:text-lg">
+          {{ page?.description || 'Войдите в личный кабинет, чтобы скачать лаунчер и управлять игровым профилем.' }}
+        </p>
       </div>
-      <p v-else class="text-sm text-muted-foreground">Доступных для скачивания лаунчеров пока нет.</p>
+
+      <Card class="border-primary/20 shadow-lg shadow-primary/5">
+        <CardHeader>
+          <CardTitle>{{ player ? `С возвращением, ${player.username}` : 'Начать играть' }}</CardTitle>
+          <CardDescription>
+            {{ player ? 'Лаунчер и настройки профиля доступны в личном кабинете.' : 'Авторизуйтесь через Discord, чтобы открыть личный кабинет и скачать лаунчер.' }}
+          </CardDescription>
+        </CardHeader>
+        <CardFooter>
+          <Button v-if="player" as-child class="w-full">
+            <RouterLink to="/account"><UserRound />Открыть кабинет</RouterLink>
+          </Button>
+          <Button v-else class="w-full" @click="login"><LogIn />Войти через Discord</Button>
+        </CardFooter>
+      </Card>
     </section>
   </main>
 </template>
@@ -26,26 +53,29 @@
 import { computed, watchEffect } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { storeToRefs } from 'pinia'
-import { Download, LogIn } from '@lucide/vue'
+import { LogIn, UserRound } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { panelFetch, panelUrl } from '@/lib/public-path'
 import { useLaunchServerStore } from '@/stores/launchserver'
 import type { GravitInstallation } from '@gravit-panel/shared'
 
-interface Page { title: string; description: string; hiddenLauncherVariants: string[] }
-interface Artifact { variant: 'jar' | 'windows-x64'; filename: string; size: number; downloadPath: string }
-interface Player { username: string }
+interface Page { title: string; description: string }
+interface Player { username: string; discordId: string }
+
 const { launchServer: installation } = storeToRefs(useLaunchServerStore())
-const getJson = async <T>(url: string) => { const response = await panelFetch(url); if (!response.ok) throw new Error(`Request failed with status ${response.status}`); return response.json() as Promise<T> }
+const getJson = async <T>(url: string) => {
+  const response = await panelFetch(url)
+  if (!response.ok) throw new Error(`Request failed with status ${response.status}`)
+  return response.json() as Promise<T>
+}
 const { data: publicInstallation } = useQuery({ queryKey: ['public-launchserver'], queryFn: () => getJson<{ item: GravitInstallation | null }>('/api/docker/launchserver') })
 const currentInstallation = computed(() => publicInstallation.value?.item ?? installation.value)
 const { data: page } = useQuery({ queryKey: ['public-page'], queryFn: () => getJson<Page>('/api/public/page') })
 const { data: session } = useQuery({ queryKey: ['player-session'], queryFn: () => getJson<{ player: Player | null }>('/api/public/session') })
 const player = computed(() => session.value?.player ?? null)
-const { data: artifacts, isLoading: artifactsLoading } = useQuery({ queryKey: computed(() => ['public-artifacts', currentInstallation.value?.id]), queryFn: () => getJson<{ items: Artifact[] }>(`/api/clients/launcher/artifacts?installationId=${encodeURIComponent(currentInstallation.value!.id)}`), enabled: computed(() => Boolean(currentInstallation.value?.id)), retry: false })
-const visibleArtifacts = computed(() => artifacts.value?.items.filter((item) => !page.value?.hiddenLauncherVariants.includes(item.variant)) ?? [])
-const formatBytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
+const discordAvatarUrl = (discordId: string) =>
+  `https://cdn.discordapp.com/embed/avatars/${Number(BigInt(discordId) >> 22n) % 6}.png`
 const login = () => window.location.assign(panelUrl('/api/public/auth/login'))
 
 watchEffect(() => {

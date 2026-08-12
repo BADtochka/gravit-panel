@@ -65,19 +65,19 @@ const { error, isFetching } = useClientProfiles()
 const selectId = `profile-switcher-${crypto.randomUUID()}`
 
 const profileSelected = () => {
-  if (route.path === '/clients' && route.query.new) {
-    void router.replace('/clients')
+  if (route.path === '/panel/clients' && route.query.new) {
+    void router.replace('/panel/clients')
   }
   emit('selected')
 }
 
 const addProfile = () => {
   emit('selected')
-  void router.push({ path: '/clients', query: { new: crypto.randomUUID() } })
+  void router.push({ path: '/panel/clients', query: { new: crypto.randomUUID() } })
 }
 
 const manageProfile = () => {
   emit('selected')
-  void router.push('/clients')
+  void router.push('/panel/clients')
 }
 </script>

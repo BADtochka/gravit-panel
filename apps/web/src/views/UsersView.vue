@@ -52,7 +52,7 @@
           <AlertDescription>{{ users.reason }}</AlertDescription>
         </Alert>
         <Button as-child variant="outline">
-          <RouterLink to="/auth">Open Auth configuration</RouterLink>
+          <RouterLink to="/panel/auth">Open Auth configuration</RouterLink>
         </Button>
       </CardContent>
     </Card>

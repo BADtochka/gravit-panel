@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { resolveLaunchServerRedirect } from '../src/lib/launchserver-routing'
 
 describe('LaunchServer-aware routing', () => {
-  test.each(['/clients', '/servers', '/launcher', '/mods', '/modules', '/auth', '/jobs'])(
+  test.each(['/panel/clients', '/panel/servers', '/panel/launcher', '/panel/mods', '/panel/modules', '/panel/auth', '/panel/jobs'])(
     'preserves %s after LaunchServer loads during a page reload',
     (path) => {
       expect(resolveLaunchServerRedirect(path, true)).toBeNull()
@@ -13,8 +13,13 @@ describe('LaunchServer-aware routing', () => {
     expect(resolveLaunchServerRedirect('/', true)).toBeNull()
   })
 
-  test('returns the empty setup route to the public page', () => {
-    expect(resolveLaunchServerRedirect('/setup', false)).toBe('/')
+  test('sends protected panel routes to setup when no server exists', () => {
+    expect(resolveLaunchServerRedirect('/panel/status', false)).toBe('/panel/setup')
+    expect(resolveLaunchServerRedirect('/panel/setup', false)).toBeNull()
     expect(resolveLaunchServerRedirect('/', false)).toBeNull()
+  })
+
+  test('returns setup to panel status after installation', () => {
+    expect(resolveLaunchServerRedirect('/panel/setup', true)).toBe('/panel/status')
   })
 })

@@ -89,7 +89,7 @@ const openLogs = () => {
 const openJobs = () => {
   const jobId = currentJob.value?.id
   void router.push({
-    path: '/jobs',
+    path: '/panel/jobs',
     query: jobId ? { job: jobId } : undefined,
   })
 }

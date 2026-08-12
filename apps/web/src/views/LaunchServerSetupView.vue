@@ -1,5 +1,5 @@
 <template>
-  <LaunchServerSetupWizard @installed="router.replace('/status')" />
+  <LaunchServerSetupWizard @installed="router.replace('/panel/status')" />
 </template>
 
 <script setup lang="ts">

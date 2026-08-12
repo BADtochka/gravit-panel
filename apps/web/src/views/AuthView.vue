@@ -81,6 +81,27 @@
             </div>
           </div>
 
+          <div class="space-y-4 rounded-md border bg-muted/20 p-4">
+            <div>
+              <p class="text-sm font-medium">Player textures</p>
+              <p class="text-xs text-muted-foreground">Configure skin and cloak URLs for this auth provider.</p>
+            </div>
+            <Select v-model="textureType">
+              <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="void">Disabled</SelectItem>
+                <SelectItem value="request">Load from URLs</SelectItem>
+              </SelectContent>
+            </Select>
+            <div v-if="textureType === 'request'" class="grid gap-3">
+              <Input v-model="textureSkinUrl" class="font-mono text-xs" placeholder="https://example.com/skins/%username%.png" />
+              <Input v-model="textureCloakUrl" class="font-mono text-xs" placeholder="https://example.com/cloaks/%username%.png (optional)" />
+              <p v-if="recipeId === 'discord'" class="text-xs text-muted-foreground">
+                Leave the skin URL empty to use skins uploaded in the player cabinet.
+              </p>
+            </div>
+          </div>
+
           <template v-if="recipeId === 'sql'">
             <div class="grid gap-4 sm:grid-cols-2">
               <div>
@@ -452,6 +473,7 @@ import type {
   AuthCoreRecipeId,
   AuthDiscordCoreConfig,
   AuthProviderDetail,
+  AuthTextureProviderConfig,
   AuthSqlDriverPreset,
   AuthPasswordVerifierType,
   FileAuthModuleConfig,
@@ -471,6 +493,9 @@ const recipeId = ref<AuthCoreRecipeId>('file')
 const displayName = ref('Default')
 const isDefault = ref(true)
 const visible = ref(true)
+const textureType = ref<AuthTextureProviderConfig['type']>('void')
+const textureSkinUrl = ref('')
+const textureCloakUrl = ref('')
 const sqlDriver = ref<AuthSqlDriverPreset>('postgresql')
 const sqlVerifier = ref<AuthPasswordVerifierType>('bcrypt')
 const sqlJdbcUrl = ref('jdbc:postgresql://localhost:5432/database')
@@ -576,6 +601,9 @@ watch(
     displayName.value = value.displayName
     isDefault.value = value.isDefault
     visible.value = value.visible
+    textureType.value = value.textureProvider?.type ?? 'void'
+    textureSkinUrl.value = value.textureProvider?.skinURL ?? ''
+    textureCloakUrl.value = value.textureProvider?.cloakURL ?? ''
     const matched = configuration.value?.recipes.find((recipe) => recipe.coreType === value.coreType)
     if (matched) recipeId.value = matched.id
     if (value.sql) {
@@ -714,6 +742,13 @@ const {
       displayName: displayName.value,
       isDefault: isDefault.value,
       visible: visible.value,
+      textureProvider: textureType.value === 'request'
+        ? {
+            type: 'request',
+            ...(textureSkinUrl.value.trim() ? { skinURL: textureSkinUrl.value.trim() } : {}),
+            ...(textureCloakUrl.value.trim() ? { cloakURL: textureCloakUrl.value.trim() } : {}),
+          }
+        : { type: 'void' },
       confirmConfigWrite: true,
     }
     if (recipeId.value === 'sql') {

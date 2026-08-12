@@ -10,19 +10,20 @@ import { playerSessionForRequest } from '../public-portal/public-portal.routes'
 const sessionCookie = 'gravit_panel_session'
 const stateCookie = 'gravit_panel_oauth_state'
 const returnToCookie = 'gravit_panel_oauth_return_to'
-const defaultAdminPath = '/status'
+const defaultAdminPath = '/panel/status'
 const adminPaths = new Set([
-  '/setup',
-  '/status',
-  '/jobs',
-  '/modules',
-  '/auth',
-  '/users',
-  '/launcher',
-  '/clients',
-  '/mods',
-  '/servers',
-  '/public-settings',
+  '/panel',
+  '/panel/setup',
+  '/panel/status',
+  '/panel/jobs',
+  '/panel/modules',
+  '/panel/auth',
+  '/panel/users',
+  '/panel/launcher',
+  '/panel/clients',
+  '/panel/mods',
+  '/panel/servers',
+  '/panel/public-settings',
 ])
 
 const redirect = (location: string, cookies: string[] = []) => {
@@ -47,8 +48,15 @@ const safeReturnTo = (value: unknown) => {
   }
 }
 
-const panelLocation = (service: PanelAuthService, request: Request, returnTo: string) =>
-  `${service.publicUrl ?? new URL(request.url).origin}${safeReturnTo(returnTo)}`
+const panelLocation = (service: PanelAuthService, request: Request, returnTo: string) => {
+  const base = service.publicUrl ?? new URL(request.url).origin
+  const target = safeReturnTo(returnTo)
+  const publicPath = service.publicPath === '/' ? '' : service.publicPath
+  const relativeTarget = publicPath && target.startsWith(`${publicPath}/`)
+    ? target.slice(publicPath.length)
+    : target
+  return `${base}${relativeTarget}`
+}
 
 const withAuthError = (returnTo: string, error: string) => {
   const url = new URL(safeReturnTo(returnTo), 'https://panel.invalid')

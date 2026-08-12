@@ -2,6 +2,9 @@ export const resolveLaunchServerRedirect = (
   currentPath: string,
   hasLaunchServer: boolean,
 ) => {
-  if (!hasLaunchServer) return currentPath === '/setup' ? '/' : null
+  if (!hasLaunchServer && currentPath.startsWith('/panel') && currentPath !== '/panel/setup') {
+    return '/panel/setup'
+  }
+  if (hasLaunchServer && currentPath === '/panel/setup') return '/panel/status'
   return null
 }

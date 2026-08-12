@@ -32,7 +32,7 @@ describe('panel auth redirects', () => {
   test('returns an authenticated user to the requested admin route', async () => {
     const app = createHarness()
     const login = await app.handle(new Request(
-      'https://internal/panel-auth/login?returnTo=%2Fservers%3Fserver%3Dabc',
+      'https://internal/panel-auth/login?returnTo=%2Fpanel%2Fservers%3Fserver%3Dabc',
     ))
     const authorizationUrl = new URL(login.headers.get('location')!)
     const state = authorizationUrl.searchParams.get('state')!

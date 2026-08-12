@@ -288,15 +288,15 @@ watch(
 const hasLaunchServer = computed(() => Boolean(launchServer.value))
 
 const navItems = [
-  { to: '/status', label: 'Status', icon: Activity },
-  { to: '/jobs', label: 'Jobs', icon: ListChecks },
-  { to: '/modules', label: 'Modules', icon: Blocks },
-  { to: '/auth', label: 'Auth', icon: KeyRound },
-  { to: '/users', label: 'Users', icon: Users },
-  { to: '/launcher', label: 'Launcher', icon: Rocket },
-  { to: '/clients', label: 'Clients', icon: Boxes },
-  { to: '/servers', label: 'Servers', icon: ServerCog },
-  { to: '/mods', label: 'Mods', icon: PackageSearch },
-  { to: '/public-settings', label: 'Public page', icon: FilePenLine },
+  { to: '/panel/status', label: 'Status', icon: Activity },
+  { to: '/panel/jobs', label: 'Jobs', icon: ListChecks },
+  { to: '/panel/modules', label: 'Modules', icon: Blocks },
+  { to: '/panel/auth', label: 'Auth', icon: KeyRound },
+  { to: '/panel/users', label: 'Users', icon: Users },
+  { to: '/panel/launcher', label: 'Launcher', icon: Rocket },
+  { to: '/panel/clients', label: 'Clients', icon: Boxes },
+  { to: '/panel/servers', label: 'Servers', icon: ServerCog },
+  { to: '/panel/mods', label: 'Mods', icon: PackageSearch },
+  { to: '/panel/public-settings', label: 'Public page', icon: FilePenLine },
 ]
 </script>

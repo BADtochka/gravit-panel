@@ -41,7 +41,12 @@ export class PublicPortalService {
       hiddenLauncherVariantsJson: string
       updatedAt: string
     }, []>(`SELECT title, description, hidden_launcher_variants_json AS hiddenLauncherVariantsJson, updated_at AS updatedAt FROM public_page_settings WHERE id = 1`).get()
-    return item ? { ...item, hiddenLauncherVariants: this.parseVariants(item.hiddenLauncherVariantsJson) } : { title: '', description: '', hiddenLauncherVariants: [], updatedAt: '' }
+    return item ? { ...item, hiddenLauncherVariants: this.parseVariants(item.hiddenLauncherVariantsJson) } : {
+      title: 'Наш сервер',
+      description: 'Войдите через Discord, чтобы скачать лаунчер и начать играть.',
+      hiddenLauncherVariants: [],
+      updatedAt: '',
+    }
   }
 
   updateSettings(input: Pick<PublicPageSettings, 'title' | 'description' | 'hiddenLauncherVariants'>) {

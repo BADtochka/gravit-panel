@@ -553,7 +553,7 @@ const jobFinished = async (job: JobRecord) => {
     typeof job.input.name === 'string'
   ) {
     selectedProfileName.value = job.input.name
-    await router.replace('/clients')
+    await router.replace('/panel/clients')
   }
 }
 </script>
