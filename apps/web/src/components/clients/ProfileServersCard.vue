@@ -233,6 +233,45 @@
             </TabsContent>
 
             <TabsContent value="deployment" class="m-0 space-y-4">
+              <div
+                v-if="selectedBinding.managed && selectedBinding.id && selectedBinding.updaterInstalledAt"
+                class="rounded-lg border p-4"
+                :class="packUpdatePending ? 'border-sky-500/40 bg-sky-500/5' : 'bg-muted/35'"
+              >
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-semibold">Server pack deployment</p>
+                    <p class="mt-1 text-xs text-muted-foreground">
+                      {{ packUpdatePending
+                        ? 'A published pack is waiting to be redeployed to this server.'
+                        : 'The desired server pack is currently applied.' }}
+                    </p>
+                    <p v-if="packUpdatePending && !canApplyPack" class="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                      {{ packApplyUnavailableReason }}
+                    </p>
+                  </div>
+                  <Button
+                    v-if="packUpdatePending"
+                    type="button"
+                    :disabled="pending || !canApplyPack"
+                    @click="applyPack"
+                  >
+                    <Rocket class="size-4" /> Redeploy server pack
+                  </Button>
+                </div>
+                <div
+                  v-if="successfulPackDeploy"
+                  class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-emerald-500/30 pt-4"
+                >
+                  <p class="text-sm text-emerald-700 dark:text-emerald-300">
+                    Server pack redeployed successfully. Restart to load updated mods and configuration.
+                  </p>
+                  <Button type="button" variant="outline" :disabled="pending || !selectedRuntime?.connected" @click="restartServer">
+                    <RefreshCw class="size-4" /> Restart server
+                  </Button>
+                </div>
+              </div>
+
               <Alert variant="destructive">
                 <ShieldAlert class="size-4" />
                 <AlertTitle>Native LaunchServer token cannot be revoked separately</AlertTitle>
@@ -259,17 +298,6 @@
                       @click="issue(activeDraft)"
                     >
                       Generate curl command
-                    </Button>
-                    <Button
-                      v-if="packUpdatePending"
-                      size="sm"
-                      type="button"
-                      :disabled="pending || !canApplyPack"
-                      :title="packApplyUnavailableReason"
-                      @click="applyPack"
-                    >
-                      <Rocket class="size-4" />
-                      Apply server pack
                     </Button>
                     <Button
                       v-if="showPrepareInstall"
@@ -504,6 +532,7 @@ const props = defineProps<{
   installationId: string
   profile: ClientProfileDescriptor
   disabled: boolean
+  finishedJob?: JobRecord | null
 }>()
 const emit = defineEmits<{ job: [job: JobRecord] }>()
 const queryClient = useQueryClient()
@@ -689,19 +718,16 @@ const revokeMutation = useMutation({
   },
 })
 const applyPackMutation = useMutation({
-  mutationFn: () => getJson<ServerCommand>(
-    `/api/servers/bindings/${selectedManagedId.value}/commands`, {
+  mutationFn: () => getJson<JobRecord>(
+    `/api/servers/bindings/${selectedManagedId.value}/pack/deploy`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        installationId: props.installationId,
-        type: 'pack.apply',
-        payload: {},
-      }),
+      body: JSON.stringify({ installationId: props.installationId }),
     },
   ),
-  onSuccess: () => {
-    void queryClient.invalidateQueries({ queryKey: bindingKey.value })
+  onSuccess: (job) => {
+    emit('job', job)
+    activeTab.value = 'deployment'
   },
 })
 const eulaMutation = useMutation({
@@ -806,6 +832,25 @@ const revoke = (draft: ServerBootstrapDraft) => {
 }
 const applyPack = () => {
   if (packUpdatePending.value && canApplyPack.value) applyPackMutation.mutate()
+}
+const successfulPackDeploy = computed(() => Boolean(
+  props.finishedJob?.type === 'gravit.server-pack.deploy' &&
+  props.finishedJob.status === 'succeeded' &&
+  props.finishedJob.input.bindingId === selectedManagedId.value,
+))
+const restartServer = () => {
+  if (!selectedManagedId.value) return
+  void getJson<ServerCommand>(`/api/servers/bindings/${selectedManagedId.value}/commands`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      installationId: props.installationId,
+      type: 'service.restart',
+      payload: {},
+    }),
+  }).catch((cause) => {
+    copyError.value = cause instanceof Error ? cause : new Error(String(cause))
+  })
 }
 const copyCommand = async () => {
   if (!visibleIssuedCommand.value) return

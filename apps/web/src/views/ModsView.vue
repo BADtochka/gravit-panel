@@ -574,6 +574,7 @@ import { useInstallationJob } from '@/composables/useInstallationJob'
 import { useClientProfiles } from '@/composables/useClientProfiles'
 import { useLaunchServerStore } from '@/stores/launchserver'
 import { useProfilesStore } from '@/stores/profiles'
+import { registerJobNotification } from '@/stores/job-notifications'
 import type {
   ClientModMode, InstalledMod, JobRecord, MinecraftLoader,
   MinecraftVersionCatalog, ModInstallSelection, ModrinthProject,
@@ -898,6 +899,7 @@ const commonBody = () => ({
   profile: profile.value,
 })
 const installSelected = () => {
+  const storageKey = selectionStorageKey.value
   runOperation({
     url: '/api/mods/install',
     body: {
@@ -906,6 +908,12 @@ const installSelected = () => {
       loader: loader.value,
       slugs: selectedSlugs.value,
       selections: selectedSlugs.value.map((slug) => selectionTargets[slug]!),
+    },
+  }, {
+    onSuccess: (job) => {
+      registerJobNotification(job, 'Mod installation', (finished) => {
+        if (finished.status === 'succeeded') localStorage.removeItem(storageKey)
+      })
     },
   })
   installDialogOpen.value = false
@@ -1013,10 +1021,12 @@ const runBulk = (action: 'enable' | 'disable' | 'update' | 'remove') => {
 }
 const jobFinished = async (job: JobRecord) => {
   await finishJob(job)
-  if (job.status === 'succeeded') {
+  if (job.status === 'succeeded' && job.type === 'gravit.mods.install') {
     selectedSlugs.value = []
-    selectedInstalledFilenames.value = []
+    Object.keys(selectionTargets).forEach((key) => delete selectionTargets[key])
+    localStorage.removeItem(selectionStorageKey.value)
   }
+  if (job.status === 'succeeded') selectedInstalledFilenames.value = []
   await queryClient.invalidateQueries({
     queryKey: ['installed-mods', installationId.value, profile.value],
   })

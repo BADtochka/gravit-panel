@@ -20,6 +20,7 @@
       :disabled="operationPending"
       :installation-id="installationId"
       :profile="selectedProfile"
+      :finished-job="finishedJob"
       @job="attachJob"
     />
 
@@ -40,7 +41,7 @@ import type { JobRecord } from '@gravit-panel/shared'
 import { useQueryClient } from '@tanstack/vue-query'
 import { TriangleAlert } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 const queryClient = useQueryClient()
 const { launchServerId: installationId } = storeToRefs(useLaunchServerStore())
@@ -49,6 +50,7 @@ const { data: profiles, error: profilesError } = useClientProfiles()
 const selectedProfile = computed(
   () => profiles.value?.items.find((item) => item.name === selectedProfileName.value) ?? null,
 )
+const finishedJob = ref<JobRecord | null>(null)
 const {
   activeJob,
   activeJobError,
@@ -61,6 +63,7 @@ const {
     'gravit.server.binding.remove',
     'gravit.server-pack.modify',
     'gravit.server-pack.publish',
+    'gravit.server-pack.deploy',
     'gravit.server-bootstrap.prepare',
   ],
 )
@@ -68,6 +71,7 @@ const operationPending = computed(
   () => activeJob.value?.status === 'queued' || activeJob.value?.status === 'running',
 )
 const jobFinished = async (job: JobRecord) => {
+  finishedJob.value = job
   await finishJob(job)
   await Promise.all([
     queryClient.invalidateQueries({

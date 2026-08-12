@@ -63,6 +63,7 @@ export type JobType =
   | 'gravit.server.binding.remove'
   | 'gravit.server-pack.modify'
   | 'gravit.server-pack.publish'
+  | 'gravit.server-pack.deploy'
   | 'gravit.server-bootstrap.prepare'
   | 'gravit.mods.install'
   | 'gravit.mods.server.install'

@@ -11,6 +11,7 @@ import {
   serverBootstrapService,
   serverBootstrapStore,
   serverPackService,
+  serverPackDeployService,
 } from './servers.runtime'
 
 const installationId = t.String({ format: 'uuid' })
@@ -362,6 +363,43 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
     { params: t.Object({ bindingId }), query: t.Object({ installationId }) },
   )
   .post(
+    '/bindings/:bindingId/pack/deploy',
+    ({ params, body, set }) => {
+      const installation = findInstallation(body.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = conflictFor(installation.id, set)
+      if (conflict) return { message: 'Another server operation is active.', jobId: conflict.id }
+      const binding = serverBindingsStore.get(params.bindingId)
+      if (!binding || binding.installationId !== installation.id) {
+        set.status = 404
+        return { message: 'Managed server binding not found.' }
+      }
+      try {
+        const packVersionId = serverPackDeployService.validate(binding)
+        const job = jobsRunner.create(
+          'gravit.server-pack.deploy',
+          { installationId: installation.id, bindingId: binding.id, packVersionId },
+          `${binding.name} server pack redeploy queued`,
+          async (context) => serverPackDeployService.deploy(
+            binding.id!,
+            packVersionId,
+            context.signal,
+            context.progress,
+          ),
+        )
+        set.status = 202
+        return job
+      } catch (error) {
+        set.status = 409
+        return { message: error instanceof Error ? error.message : String(error) }
+      }
+    },
+    {
+      params: t.Object({ bindingId }),
+      body: t.Object({ installationId }),
+    },
+  )
+  .post(
     '/bindings/:bindingId/commands',
     ({ params, body, set }) => {
       const installation = findInstallation(body.installationId, set)
@@ -370,21 +408,6 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
       if (!binding || binding.installationId !== installation.id) {
         set.status = 404
         return { message: 'Managed server binding not found.' }
-      }
-      if (body.type === 'pack.apply') {
-        const runtime = serverAgentService.runtime(binding.id!)
-        if (!binding.updaterInstalledAt) {
-          set.status = 409
-          return { message: 'Server pack updater is not installed.' }
-        }
-        if (!binding.packVersionId || binding.packVersionId === binding.appliedPackVersionId) {
-          set.status = 409
-          return { message: 'The desired server pack is already applied.' }
-        }
-        if (!runtime.connected || !runtime.capabilities.includes('pack-updater')) {
-          set.status = 409
-          return { message: 'Connected host agent does not support immediate pack updates.' }
-        }
       }
       try {
         const command = serverAgentService.createCommand(
@@ -408,7 +431,6 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
           t.Literal('service.stop'),
           t.Literal('service.restart'),
           t.Literal('console.execute'),
-          t.Literal('pack.apply'),
         ]),
         payload: t.Object({
           command: t.Optional(t.String({ maxLength: 1000 })),
