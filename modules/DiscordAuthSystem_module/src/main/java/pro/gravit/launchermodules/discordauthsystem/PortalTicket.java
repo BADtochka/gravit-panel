@@ -11,11 +11,14 @@ final class PortalTicket {
     private PortalTicket() {
     }
 
-    static String create(DiscordUser user, String secret, long expiresAtSeconds, String nonce) {
+    static String create(DiscordUser user, String avatarHash, String secret, long expiresAtSeconds, String nonce) {
         JsonObject payload = new JsonObject();
         payload.addProperty("uuid", user.getUUID().toString());
         payload.addProperty("username", user.getUsername());
         payload.addProperty("discordId", user.getDiscordId());
+        if (avatarHash != null && !avatarHash.isBlank()) {
+            payload.addProperty("avatarHash", avatarHash);
+        }
         payload.addProperty("exp", expiresAtSeconds);
         payload.addProperty("nonce", nonce);
         String encodedPayload = Base64.getUrlEncoder().withoutPadding().encodeToString(

@@ -8,6 +8,7 @@ export interface PortalTicket {
   uuid: string
   username: string
   discordId: string
+  avatarHash?: string
   exp: number
   nonce: string
 }
@@ -22,6 +23,7 @@ export interface PublicPageSettings {
 export interface PublicPlayerSession {
   playerUuid: string
   discordId: string
+  avatarHash: string | null
   username: string
   expiresAt: string
 }
@@ -62,14 +64,15 @@ export class PublicPortalService {
     if (consumed.changes !== 1) throw new Error('The authorization ticket has already been used.')
     const session = randomToken()
     const expiresAt = new Date(Date.now() + playerSessionLifetimeMs).toISOString()
-    this.database.query('INSERT INTO public_player_sessions (session_hash, player_uuid, discord_id, username, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(hash(session), payload.uuid, payload.discordId, payload.username, expiresAt, now())
-    return { session, player: { playerUuid: payload.uuid, discordId: payload.discordId, username: payload.username, expiresAt } }
+    const avatarHash = this.validAvatarHash(payload.avatarHash) ? payload.avatarHash : null
+    this.database.query('INSERT INTO public_player_sessions (session_hash, player_uuid, discord_id, discord_avatar_hash, username, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(hash(session), payload.uuid, payload.discordId, avatarHash, payload.username, expiresAt, now())
+    return { session, player: { playerUuid: payload.uuid, discordId: payload.discordId, avatarHash, username: payload.username, expiresAt } }
   }
 
   session(token?: string): PublicPlayerSession | null {
     if (!token) return null
     this.cleanup()
-    return this.database.query<PublicPlayerSession, [string]>('SELECT player_uuid AS playerUuid, discord_id AS discordId, username, expires_at AS expiresAt FROM public_player_sessions WHERE session_hash = ?').get(hash(token)) ?? null
+    return this.database.query<PublicPlayerSession, [string]>('SELECT player_uuid AS playerUuid, discord_id AS discordId, discord_avatar_hash AS avatarHash, username, expires_at AS expiresAt FROM public_player_sessions WHERE session_hash = ?').get(hash(token)) ?? null
   }
 
   revokeSession(token?: string) { if (token) this.database.query('DELETE FROM public_player_sessions WHERE session_hash = ?').run(hash(token)) }
@@ -111,5 +114,6 @@ export class PublicPortalService {
   }
 
   private parseVariants(value: string) { try { const items = JSON.parse(value); return Array.isArray(items) && items.every((item) => item === 'jar' || item === 'windows-x64') ? items : [] } catch { return [] } }
+  private validAvatarHash(value: unknown): value is string { return typeof value === 'string' && /^[A-Za-z0-9_]{2,128}$/.test(value) }
   private cleanup() { const time = now(); this.database.query('DELETE FROM public_player_ticket_nonces WHERE expires_at <= ?').run(time); this.database.query('DELETE FROM public_player_sessions WHERE expires_at <= ?').run(time) }
 }

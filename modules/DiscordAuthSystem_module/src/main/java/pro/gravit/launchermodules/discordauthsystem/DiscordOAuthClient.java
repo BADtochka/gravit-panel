@@ -98,7 +98,8 @@ public class DiscordOAuthClient {
             getString(json, "id"),
             getString(json, "username"),
             getString(json, "global_name"),
-            getString(json, "discriminator")
+            getString(json, "discriminator"),
+            getString(json, "avatar")
         );
     }
 
@@ -165,12 +166,14 @@ public class DiscordOAuthClient {
         public final String username;
         public final String globalName;
         public final String discriminator;
+        public final String avatar;
 
-        public DiscordUserInfo(String id, String username, String globalName, String discriminator) {
+        public DiscordUserInfo(String id, String username, String globalName, String discriminator, String avatar) {
             this.id = id;
             this.username = username;
             this.globalName = globalName;
             this.discriminator = discriminator;
+            this.avatar = avatar;
         }
 
         public String displayName() {
@@ -184,7 +187,7 @@ public class DiscordOAuthClient {
         }
 
         public DiscordUserInfo withUsername(String username) {
-            return new DiscordUserInfo(id, username, globalName, discriminator);
+            return new DiscordUserInfo(id, username, globalName, discriminator, avatar);
         }
     }
 

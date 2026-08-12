@@ -393,15 +393,16 @@ export class AuthProviderService {
     input: AuthProviderApplyInput,
     existing: LaunchServerAuthPair,
   ): LaunchServerAuthPair {
-    const textureProvider =
-      input.textureProvider ??
-      (existing.textureProvider as AuthTextureProviderConfig | undefined) ??
-      (input.recipeId === 'discord' && env.PANEL_PUBLIC_URL
-        ? ({
-            type: 'request',
-            skinURL: `${env.PANEL_PUBLIC_URL.replace(/\/$/, '')}/api/public/skins/%username%.png`,
-          } satisfies AuthTextureProviderConfig)
-        : ({ type: 'void' } satisfies AuthTextureProviderConfig))
+    const textureProvider = input.textureProvider?.type === 'request' && input.recipeId === 'discord'
+      ? (env.PANEL_PUBLIC_URL
+          ? ({
+              type: 'request',
+              skinURL: `${env.PANEL_PUBLIC_URL.replace(/\/$/, '')}/api/public/skins/%username%.png`,
+            } satisfies AuthTextureProviderConfig)
+          : ({ type: 'void' } satisfies AuthTextureProviderConfig))
+      : (input.textureProvider ??
+        (existing.textureProvider as AuthTextureProviderConfig | undefined) ??
+        ({ type: 'void' } satisfies AuthTextureProviderConfig))
 
     return {
       isDefault: input.isDefault,
@@ -416,8 +417,8 @@ export class AuthProviderService {
     if (config.type === 'void') return { type: 'void' }
     return {
       type: 'request',
-      skinURL: config.skinURL ?? 'http://example.com/skins/%username%.png',
-      cloakURL: config.cloakURL ?? 'http://example.com/cloaks/%username%.png',
+      ...(config.skinURL ? { skinURL: config.skinURL } : {}),
+      ...(config.cloakURL ? { cloakURL: config.cloakURL } : {}),
     }
   }
 

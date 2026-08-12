@@ -21,6 +21,7 @@ const ensureColumn = (table: string, column: string, declaration: string) => {
 }
 
 ensureColumn('server_bindings', 'eula_accepted_at', 'TEXT')
+ensureColumn('public_player_sessions', 'discord_avatar_hash', 'TEXT')
 ensureColumn('server_bindings', 'applied_pack_version_id', 'TEXT')
 ensureColumn('server_bindings', 'updater_token_hash', 'TEXT')
 ensureColumn('server_bindings', 'updater_installed_at', 'TEXT')

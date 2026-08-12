@@ -62,6 +62,7 @@ export const schema = `
   CREATE TABLE IF NOT EXISTS panel_sessions (
     session_hash TEXT PRIMARY KEY,
     discord_id TEXT NOT NULL,
+    discord_avatar_hash TEXT,
     username TEXT NOT NULL,
     global_name TEXT,
     avatar_hash TEXT,

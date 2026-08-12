@@ -22,7 +22,7 @@ class PortalTicketTest {
             "1531370122256711680", "formallybad", ClientPermissions.DEFAULT
         );
         String secret = "0123456789abcdef0123456789abcdef";
-        String ticket = PortalTicket.create(user, secret, 1_800_000_000L, "ticket-nonce");
+        String ticket = PortalTicket.create(user, "avatar-hash", secret, 1_800_000_000L, "ticket-nonce");
         String[] parts = ticket.split("\\.");
 
         assertEquals(2, parts.length);
@@ -32,6 +32,7 @@ class PortalTicketTest {
         assertEquals(user.getUUID().toString(), payload.get("uuid").getAsString());
         assertEquals(user.getUsername(), payload.get("username").getAsString());
         assertEquals(user.getDiscordId(), payload.get("discordId").getAsString());
+        assertEquals("avatar-hash", payload.get("avatarHash").getAsString());
         assertEquals(1_800_000_000L, payload.get("exp").getAsLong());
         assertEquals("ticket-nonce", payload.get("nonce").getAsString());
         assertFalse(payload.has("accessToken"));

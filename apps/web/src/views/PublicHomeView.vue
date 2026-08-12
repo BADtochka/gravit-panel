@@ -10,9 +10,10 @@
         class="flex items-center gap-2 rounded-full border bg-card py-1 pl-1 pr-3 text-sm font-medium transition-colors hover:bg-accent"
       >
         <img
-          :src="discordAvatarUrl(player.discordId)"
+          :src="discordAvatarUrl(player)"
           :alt="`Аватар ${player.username}`"
           class="size-8 rounded-full bg-muted object-cover"
+          @error="useAvatarFallback"
         />
         <span class="max-w-32 truncate">{{ player.username }}</span>
         <UserRound class="size-4 text-muted-foreground" />
@@ -61,7 +62,7 @@ import { useLaunchServerStore } from '@/stores/launchserver'
 import type { GravitInstallation } from '@gravit-panel/shared'
 
 interface Page { title: string; description: string }
-interface Player { username: string; discordId: string }
+interface Player { username: string; discordId: string; avatarHash: string | null }
 
 const { launchServer: installation } = storeToRefs(useLaunchServerStore())
 const getJson = async <T>(url: string) => {
@@ -74,8 +75,11 @@ const currentInstallation = computed(() => publicInstallation.value?.item ?? ins
 const { data: page } = useQuery({ queryKey: ['public-page'], queryFn: () => getJson<Page>('/api/public/page') })
 const { data: session } = useQuery({ queryKey: ['player-session'], queryFn: () => getJson<{ player: Player | null }>('/api/public/session') })
 const player = computed(() => session.value?.player ?? null)
-const discordAvatarUrl = (discordId: string) =>
-  `https://cdn.discordapp.com/embed/avatars/${Number(BigInt(discordId) >> 22n) % 6}.png`
+const avatarFallback = panelUrl('/avatar-placeholder.svg')
+const discordAvatarUrl = (value: Player) => value.avatarHash
+  ? `https://cdn.discordapp.com/avatars/${value.discordId}/${value.avatarHash}.${value.avatarHash.startsWith('a_') ? 'gif' : 'png'}?size=64`
+  : avatarFallback
+const useAvatarFallback = (event: Event) => { (event.currentTarget as HTMLImageElement).src = avatarFallback }
 const login = () => window.location.assign(panelUrl('/api/public/auth/login'))
 
 watchEffect(() => {

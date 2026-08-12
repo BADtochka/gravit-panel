@@ -54,7 +54,9 @@
           <CardHeader><CardTitle>Скин</CardTitle><CardDescription>PNG 64×64 или 64×32.</CardDescription></CardHeader>
           <CardContent class="space-y-5">
             <p class="text-sm text-muted-foreground">{{ skin ? `${skin.width}×${skin.height}, обновлён ${new Date(skin.updatedAt).toLocaleString()}` : 'Скин не загружен' }}</p>
-            <img v-if="skin" :src="panelUrl(`/api/public/skins/${player.username}.png`)" alt="Текущий скин" class="size-32 rounded border object-cover [image-rendering:pixelated]" />
+            <div v-if="skin" class="flex justify-center rounded-lg border bg-muted/30 p-4">
+              <SkinPreview :src="skinUrl" />
+            </div>
             <label class="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-accent"><Upload />Загрузить PNG<input class="hidden" type="file" accept="image/png" @change="upload" /></label>
             <p v-if="message" class="text-sm text-muted-foreground">{{ message }}</p>
           </CardContent>
@@ -69,11 +71,12 @@ import { computed, ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ArrowLeft, Download, LogIn, Upload } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import SkinPreview from '@/components/public/SkinPreview.vue'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { panelFetch, panelUrl } from '@/lib/public-path'
 import type { GravitInstallation } from '@gravit-panel/shared'
 
-interface Player { playerUuid: string; username: string }
+interface Player { playerUuid: string; username: string; discordId: string; avatarHash: string | null }
 interface Skin { width: number; height: number; updatedAt: string }
 interface Page { hiddenLauncherVariants: string[] }
 interface Artifact { variant: 'jar' | 'windows-x64'; filename: string; size: number; downloadPath: string }
@@ -94,6 +97,7 @@ const { data: artifacts, isLoading: artifactsLoading } = useQuery({ queryKey: co
 const visibleArtifacts = computed(() => artifacts.value?.items.filter((item) => !page.value?.hiddenLauncherVariants.includes(item.variant)) ?? [])
 const windowsArtifact = computed(() => visibleArtifacts.value.find((item) => item.variant === 'windows-x64'))
 const javaArtifact = computed(() => visibleArtifacts.value.find((item) => item.variant === 'jar'))
+const skinUrl = computed(() => panelUrl(`/api/public/skins/${player.value!.username}.png?v=${skin.value?.updatedAt ?? ''}`))
 const formatBytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
 const login = () => window.location.assign(panelUrl('/api/public/auth/login'))
 const logout = async () => { await panelFetch('/api/public/logout', { method: 'POST' }); await queryClient.invalidateQueries({ queryKey: ['player-session'] }) }

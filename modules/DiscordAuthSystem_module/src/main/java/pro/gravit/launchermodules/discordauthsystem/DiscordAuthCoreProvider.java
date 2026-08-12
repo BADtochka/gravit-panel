@@ -40,6 +40,7 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
 
     private transient final ConcurrentMap<String, PendingAuthState> pendingStates = new ConcurrentHashMap<>();
     private transient final ConcurrentMap<String, PendingPortalState> pendingPortalStates = new ConcurrentHashMap<>();
+    private transient final ConcurrentMap<String, String> portalAvatarHashes = new ConcurrentHashMap<>();
     private transient final ConcurrentMap<Client, CompletedAuth> completedAuth = new ConcurrentHashMap<>();
     private transient final ConcurrentMap<String, CompletedAuth> completedAuthByState = new ConcurrentHashMap<>();
 
@@ -97,7 +98,7 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
         ensureInitialized();
         validatePortalConfiguration();
         long expiresAt = (System.currentTimeMillis() / 1000L) + config.portalTicketTtlSeconds;
-        return PortalTicket.create(user, config.portalHmacSecret, expiresAt, SecurityHelper.randomStringToken());
+        return PortalTicket.create(user, portalAvatarHashes.remove(user.getDiscordId()), config.portalHmacSecret, expiresAt, SecurityHelper.randomStringToken());
     }
 
     public boolean consumePendingState(String state, Client client) {
@@ -344,6 +345,9 @@ public class DiscordAuthCoreProvider extends AuthCoreProvider {
         long expireIn = tokens.expiresIn > 0 ? tokens.expiresIn : 0;
 
         user.updateOAuth(accessToken, refreshToken, expireIn);
+        if (userInfo.avatar != null && !userInfo.avatar.isBlank()) {
+            portalAvatarHashes.put(user.getDiscordId(), userInfo.avatar);
+        }
         storage.save();
 
         return user;
