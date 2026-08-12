@@ -134,6 +134,18 @@
           </div>
           <div class="flex shrink-0 items-center gap-2">
             <Button
+              v-if="panelUpdate?.configured"
+              variant="outline"
+              size="icon"
+              type="button"
+              title="Check for panel updates"
+              aria-label="Check for panel updates"
+              :disabled="checkingPanelUpdate"
+              @click="checkPanelUpdate"
+            >
+              <RefreshCw class="size-4" :class="{ 'animate-spin': checkingPanelUpdate }" aria-hidden="true" />
+            </Button>
+            <Button
               variant="outline"
               size="icon"
               type="button"
@@ -173,6 +185,7 @@ import JobNotificationCenter from '@/components/jobs/JobNotificationCenter.vue'
 import ProfileSwitcher from '@/components/layout/ProfileSwitcher.vue'
 import SelfUpdateBanner from '@/components/layout/SelfUpdateBanner.vue'
 import { Button } from '@/components/ui/button'
+import { usePanelSelfUpdate } from '@/composables/usePanelSelfUpdate'
 import { Toaster } from '@/components/ui/sonner'
 import {
   Sheet,
@@ -200,6 +213,7 @@ import {
   PackageSearch,
   FilePenLine,
   Rocket,
+  RefreshCw,
   ServerCog,
   Sun,
   Users,
@@ -231,6 +245,8 @@ const { launchServer } = storeToRefs(launchServerStore)
 const mobileNavOpen = ref(false)
 const route = useRoute()
 const router = useRouter()
+const { data: panelUpdate, isFetching: checkingPanelUpdate, refetch: refetchPanelUpdate } = usePanelSelfUpdate()
+const checkPanelUpdate = () => void refetchPanelUpdate()
 
 const getPanelAuthSession = async () => {
   const response = await panelFetch('/api/panel-auth/session')
