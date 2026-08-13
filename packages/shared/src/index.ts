@@ -64,6 +64,7 @@ export type JobType =
   | 'gravit.server-pack.modify'
   | 'gravit.server-pack.publish'
   | 'gravit.server-pack.deploy'
+  | 'gravit.server.service'
   | 'gravit.server-bootstrap.prepare'
   | 'gravit.mods.install'
   | 'gravit.mods.server.install'
@@ -343,6 +344,11 @@ export interface AuthProviderApplyResult {
   configBackupPath: string | null
   restarted: boolean
   source: SourcePin
+}
+
+export interface AuthModuleArtifactsCleanupResult {
+  removedFiles: string[]
+  removedBytes: number
 }
 
 export interface FileAuthInstallInput {
@@ -745,6 +751,21 @@ export interface ServerPackFile {
   size: number
   sha256: string
   modifiedAt: string
+}
+
+export interface ServerPackEntry {
+  path: string
+  type: 'file' | 'directory'
+  size: number | null
+  sha256: string | null
+  modifiedAt: string
+}
+
+export interface ServerPackTextFile {
+  path: string
+  content: string
+  size: number
+  sha256: string
 }
 
 export interface ServerPackVersion {

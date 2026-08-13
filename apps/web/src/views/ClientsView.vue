@@ -234,7 +234,6 @@ import {
 } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { computed, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
 
 interface Configuration {
   loaders: MinecraftLoader[]
@@ -248,10 +247,9 @@ interface LoaderVersionCatalog {
 }
 
 const queryClient = useQueryClient()
-const route = useRoute()
-const router = useRouter()
 const { launchServerId: installationId } = storeToRefs(useLaunchServerStore())
-const { selectedProfileName } = storeToRefs(useProfilesStore())
+const profilesStore = useProfilesStore()
+const { selectedProfileName, createRequestedAt } = storeToRefs(profilesStore)
 const { data: profiles } = useClientProfiles()
 const {
   activeJob,
@@ -280,10 +278,7 @@ const profileTitle = ref('')
 const profileDescription = ref('')
 const profileSortIndex = ref(0)
 const childError = ref<Error | null>(null)
-const newProfileToken = computed(() =>
-  typeof route.query.new === 'string' ? route.query.new : '',
-)
-const creatingProfile = computed(() => Boolean(newProfileToken.value))
+const creatingProfile = computed(() => Boolean(createRequestedAt.value))
 watch(activeJob, (job) => {
   if (!job || job.type !== 'gravit.client.build') return
   if (typeof job.input.name === 'string') clientName.value = job.input.name
@@ -357,7 +352,7 @@ watch(
 )
 let appliedDraftKey = ''
 watch(
-  [selectedProfileName, selectedProfile, newProfileToken],
+  [selectedProfileName, selectedProfile, createRequestedAt],
   ([name, selected, createToken]) => {
     const draftKey = createToken
       ? `new:${createToken}`
@@ -553,7 +548,7 @@ const jobFinished = async (job: JobRecord) => {
     typeof job.input.name === 'string'
   ) {
     selectedProfileName.value = job.input.name
-    await router.replace('/panel/clients')
+    profilesStore.consumeCreateRequest()
   }
 }
 </script>

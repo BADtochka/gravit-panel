@@ -12,5 +12,4 @@ export const usePanelSelfUpdate = () => useQuery({
   queryKey: ['panel-self-update'],
   queryFn: getStatus,
   staleTime: 5 * 60_000,
-  refetchInterval: 10 * 60_000,
 })

@@ -7,6 +7,7 @@ export default defineConfig({
   base: './',
   plugins: [vue(), tailwindcss()],
   resolve: {
+    dedupe: ['vue', 'pinia'],
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
@@ -14,8 +15,13 @@ export default defineConfig({
   server: {
     host: process.env.WEB_HOST ?? '127.0.0.1',
     port: 5173,
+    strictPort: true,
     proxy: {
-      '/api': 'http://localhost:3000',
+      '/api': {
+        target: 'http://127.0.0.1:3000',
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
 })
