@@ -90,6 +90,13 @@ export interface VolumeFileOperations {
   ): Promise<string | null>
 }
 
+export interface VolumeEntry {
+  path: string
+  type: 'file' | 'directory'
+  size: number | null
+  modifiedAt: string
+}
+
 export class ContainerVolumeService implements VolumeFileOperations {
   constructor(private readonly runner: ContainerCommandRunner = runContainerCommand) {}
 
@@ -131,6 +138,51 @@ export class ContainerVolumeService implements VolumeFileOperations {
       .filter(Boolean)
       .map((path) => posix.basename(path))
       .sort((left, right) => left.localeCompare(right))
+  }
+
+  async listEntries(installation: GravitInstallation, relativeDirectory: string) {
+    const absolute = relativeDirectory ? this.absolute(relativeDirectory) : '/app/data'
+    const result = await this.runner(installation.path, [
+      'find', absolute, '-mindepth', '1', '-maxdepth', '1', '-printf', '%f\t%y\t%s\t%T@\n',
+    ])
+    if (result.exitCode !== 0) throw this.commandError('list volume directory', result)
+    return result.stdout.split(/\r?\n/).filter(Boolean).flatMap((line): VolumeEntry[] => {
+      const [name, kind, size, modified] = line.split('\t')
+      if (!name || !kind || !size || !modified || name.includes('/') || name.includes('\\')) {
+        throw new Error('Container returned an invalid directory entry')
+      }
+      if (kind !== 'f' && kind !== 'd') return []
+      return [{
+        path: relativeDirectory ? `${relativeDirectory}/${name}` : name,
+        type: kind === 'd' ? 'directory' : 'file',
+        size: kind === 'd' ? null : Number(size),
+        modifiedAt: new Date(Number.parseFloat(modified) * 1000).toISOString(),
+      }]
+    })
+  }
+
+  async readFileBytes(installation: GravitInstallation, relativePath: string, maximumBytes: number) {
+    const path = this.absolute(relativePath)
+    const result = await this.runner(installation.path, [
+      'sh', '-c',
+      'size=$(wc -c < "$1") || exit 1; [ "$size" -le "$2" ] || exit 42; base64 < "$1"',
+      'gravit-panel', path, String(maximumBytes),
+    ])
+    if (result.exitCode === 42) throw new Error(`File exceeds ${maximumBytes} bytes`)
+    if (result.exitCode !== 0) throw this.commandError('read volume file', result)
+    return new Uint8Array(Buffer.from(result.stdout.replace(/\s/g, ''), 'base64'))
+  }
+
+  async assertNoSymlinks(installation: GravitInstallation, relativePath: string, includeLeaf = true) {
+    const normalized = this.relative(relativePath)
+    const parts = normalized.split('/')
+    if (!includeLeaf) parts.pop()
+    let current = '/app/data'
+    for (const part of parts) {
+      current = posix.join(current, part)
+      const result = await this.runner(installation.path, ['test', '!', '-L', current])
+      if (result.exitCode !== 0) throw new Error('Symbolic links are unavailable in the file browser')
+    }
   }
 
   async sha256(installation: GravitInstallation, relativePath: string) {

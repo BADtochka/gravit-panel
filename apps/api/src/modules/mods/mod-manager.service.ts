@@ -45,9 +45,9 @@ export class ModManagerService {
     >,
     private readonly serverPacks?: Pick<
       ServerPackService,
-      'installMods' | 'putFile' | 'publish'
+      'installMods' | 'putFile' | 'publish' | 'removeMod'
     >,
-    private readonly serverBindings?: Pick<ServerBindingsStore, 'get' | 'setDesiredPack'>,
+    private readonly serverBindings?: Pick<ServerBindingsStore, 'get' | 'list' | 'setDesiredPack'>,
   ) {}
 
   async list(installation: GravitInstallation, profile: string) {
@@ -555,6 +555,8 @@ export class ModManagerService {
       action: 'enable' | 'disable' | 'update' | 'remove'
       minecraftVersion?: string
       loader?: string
+      removeFromServer?: boolean
+      removeUnusedDependencies?: boolean
     },
     context: JobTaskContext,
   ) {
@@ -600,6 +602,10 @@ export class ModManagerService {
           input.profile,
           filename,
           scopedContext,
+          {
+            removeFromServer: input.removeFromServer,
+            removeUnusedDependencies: input.removeUnusedDependencies,
+          },
         ))
       }
     }
@@ -618,12 +624,38 @@ export class ModManagerService {
     profile: string,
     filename: string,
     context: JobTaskContext,
+    options: { removeFromServer?: boolean; removeUnusedDependencies?: boolean } = {},
   ) {
     const directory = this.modsDirectory(installation, profile)
     const relativeDirectory = this.modsRelativeDirectory(profile)
     const safeName = this.safeFilename(filename)
     const sourcePath = join(directory, safeName)
     await this.assertRegularMod(sourcePath)
+    let installed: InstalledMod | undefined
+    if (options.removeFromServer) {
+      installed = (await this.list(installation, profile)).items.find((item) => item.filename === safeName)
+      if (!installed?.projectId || !installed.slug) {
+        throw new Error('Server removal requires a mod recognized by Modrinth')
+      }
+      if (!this.serverPacks || !this.serverBindings) {
+        throw new Error('Server mod removal is unavailable')
+      }
+    }
+    if (installed?.projectId && installed.slug && this.serverPacks && this.serverBindings) {
+      for (const binding of this.serverBindings.list(installation.id, profile)) {
+        if (!binding.id) continue
+        const result = await this.serverPacks.removeMod(
+          installation,
+          binding.id,
+          { projectId: installed.projectId, slug: installed.slug, filename: safeName },
+          options.removeUnusedDependencies === true,
+        )
+        if (!result.removed.length) continue
+        const published = await this.serverPacks.publish(installation, binding.id, context)
+        this.serverBindings.setDesiredPack(binding.id, published.version.id)
+        context.log(`Removed ${result.removed.length} server pack file(s) from ${binding.name}`)
+      }
+    }
     await this.volume.remove(installation, posix.join(relativeDirectory, safeName))
     context.log(`Deleted ${safeName} permanently`)
     context.progress(95, 'Mod deleted from profile')

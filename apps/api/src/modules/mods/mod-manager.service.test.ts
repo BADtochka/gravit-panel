@@ -205,6 +205,60 @@ describe('ModManagerService', () => {
     }
   })
 
+  test('removes a recognized client mod from every managed server pack', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gravit-mod-server-remove-'))
+    const directory = join(root, 'launcher', 'updates', 'fabric', 'mods')
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'sodium.jar'), 'mod')
+    const installation = installationFor(root)
+    const bindingIds = [crypto.randomUUID(), crypto.randomUUID()]
+    const removed: Array<{ bindingId: string; cleanup: boolean }> = []
+    const desired: string[] = []
+    const service = new ModManagerService(
+      {} as ControlFileService,
+      {
+        versionsFromHashes: async (hashes: string[]) => ({
+          [hashes[0]!]: { id: 'version', project_id: 'sodium-id', version_number: '1.0' },
+        }),
+        projectsByIds: async () => ({
+          'sodium-id': { id: 'sodium-id', slug: 'sodium', title: 'Sodium', description: '' },
+        }),
+      } as unknown as ModrinthService,
+      localVolume,
+      undefined,
+      {
+        removeMod: async (
+          _installation: GravitInstallation,
+          bindingId: string,
+          _mod: { projectId: string; slug: string; filename: string },
+          cleanup: boolean,
+        ) => {
+          removed.push({ bindingId, cleanup })
+          return { removed: ['mods/sodium.jar'] }
+        },
+        publish: async (_installation: GravitInstallation, bindingId: string) => ({
+          version: { id: `version-${bindingId}` },
+        }),
+      } as never,
+      {
+        list: () => bindingIds.map((id, index) => ({ id, name: `server-${index}` })),
+        setDesiredPack: (bindingId: string) => desired.push(bindingId),
+      } as never,
+    )
+
+    try {
+      await service.remove(installation, 'fabric', 'sodium.jar', context, {
+        removeFromServer: true,
+        removeUnusedDependencies: true,
+      })
+      expect(removed).toEqual(bindingIds.map((bindingId) => ({ bindingId, cleanup: true })))
+      expect(desired).toEqual(bindingIds)
+      await expect(access(join(directory, 'sodium.jar'))).rejects.toThrow()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('installs selected client files and publishes each server pack only once', async () => {
     const root = await mkdtemp(join(tmpdir(), 'gravit-mod-targets-'))
     const installation = installationFor(root)

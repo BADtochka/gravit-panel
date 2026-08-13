@@ -24,44 +24,7 @@
       <AlertDescription>{{ error.message }}</AlertDescription>
     </Alert>
 
-    <div
-      v-if="bindings?.items.length"
-      class="grid min-h-[38rem] lg:grid-cols-[17.5rem_minmax(0,1fr)]"
-    >
-      <aside class="border-b bg-muted/20 lg:border-b-0 lg:border-r">
-        <div class="flex gap-2 overflow-x-auto p-3 lg:max-h-[calc(100vh-11rem)] lg:flex-col lg:overflow-y-auto">
-          <button
-            v-for="binding in bindings.items"
-            :key="bindingKeyFor(binding)"
-            type="button"
-            class="min-w-[15rem] rounded-lg px-3 py-3 text-left transition-colors hover:bg-background lg:min-w-0 lg:w-full"
-            :class="selectedBindingKey === bindingKeyFor(binding)
-              ? 'bg-background shadow-sm ring-1 ring-border'
-              : 'text-muted-foreground'"
-            @click="selectBinding(binding)"
-          >
-            <span class="flex items-start justify-between gap-2">
-              <span class="min-w-0">
-                <span class="block truncate text-sm font-medium text-foreground">{{ binding.name }}</span>
-                <span class="mt-1 block truncate font-mono text-[11px]">
-                  {{ binding.serverAddress }}:{{ binding.serverPort }}
-                </span>
-              </span>
-              <span
-                class="mt-1 size-2 shrink-0 rounded-full"
-                :class="binding.managed ? deploymentDot(binding.deploymentState) : 'bg-destructive'"
-              />
-            </span>
-            <span class="mt-2 flex flex-wrap gap-1.5">
-              <Badge v-if="binding.isDefault" variant="secondary">Default</Badge>
-              <Badge :variant="binding.managed ? 'outline' : 'destructive'">
-                {{ binding.managed ? binding.deploymentState : 'Legacy' }}
-              </Badge>
-            </span>
-          </button>
-        </div>
-      </aside>
-
+    <div v-if="bindings?.items.length" class="min-h-[38rem]">
       <main v-if="selectedBinding" class="min-w-0">
         <div class="flex flex-wrap items-start justify-between gap-4 border-b px-4 py-5 sm:px-6">
           <div class="min-w-0">
@@ -127,15 +90,6 @@
         </div>
 
         <Tabs v-model="activeTab" class="gap-0">
-          <div class="overflow-x-auto border-b px-4 sm:px-6">
-            <TabsList class="h-11 w-max justify-start rounded-none bg-transparent p-0">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="console">Console</TabsTrigger>
-              <TabsTrigger value="files">Mods &amp; files</TabsTrigger>
-              <TabsTrigger value="deployment">Deployment</TabsTrigger>
-            </TabsList>
-          </div>
-
           <div class="p-4 sm:p-6">
             <TabsContent value="overview" class="m-0 space-y-5">
               <Alert v-if="!selectedBinding.managed">
@@ -176,7 +130,7 @@
                   <p class="mt-3 text-sm font-medium">
                     {{ selectedBinding.packVersionId ? 'Version assigned' : 'No version assigned' }}
                   </p>
-                  <Button class="mt-3 px-0" size="sm" variant="link" @click="activeTab = 'files'">
+                    <Button class="mt-3 px-0" size="sm" variant="link" @click="selectSection('files')">
                     Manage mods &amp; files <ArrowRight class="size-3.5" />
                   </Button>
                 </div>
@@ -196,7 +150,7 @@
                   <p class="mt-3 text-sm font-medium">
                     {{ selectedBinding.managed ? selectedBinding.deploymentState : 'Not managed' }}
                   </p>
-                  <Button class="mt-3 px-0" size="sm" variant="link" @click="activeTab = 'deployment'">
+                    <Button class="mt-3 px-0" size="sm" variant="link" @click="selectSection('deployment')">
                     Open deployment <ArrowRight class="size-3.5" />
                   </Button>
                 </div>
@@ -215,6 +169,7 @@
                 :binding-id="selectedBinding.id"
                 :disabled="pending"
                 :installation-id="installationId"
+                @job="emit('job', $event)"
               />
               <UnavailableWorkspace v-else title="Console unavailable" />
             </TabsContent>
@@ -227,9 +182,8 @@
                 :disabled="pending"
                 :installation-id="installationId"
                 :server-name="selectedBinding.name"
-                @job="emit('job', $event)"
               />
-              <UnavailableWorkspace v-else title="Mods and files unavailable" />
+              <UnavailableWorkspace v-else title="Files & Mods unavailable" />
             </TabsContent>
 
             <TabsContent value="deployment" class="m-0 space-y-4">
@@ -515,18 +469,22 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
 import type {
   AuthConfiguration, ClientProfileDescriptor, JobRecord, ProfileServerBinding,
-  ServerBindingDeploymentState, ServerBootstrapDraft, ServerBootstrapIssueResult,
+  ServerBootstrapDraft, ServerBootstrapIssueResult,
   ServerCommand, ServerRuntimeState,
 } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
   ArrowRight, Check, Copy, KeyRound, MemoryStick, Network, PackageOpen, Pencil, Plus,
-  RefreshCw, Rocket, Save, Server, ShieldAlert, Terminal, Trash2, TriangleAlert,
+  RefreshCw, Rocket, Save, Server, ShieldAlert,
+  Terminal, Trash2, TriangleAlert,
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { serverBindingKey, useServersStore } from '@/stores/servers'
+import { storeToRefs } from 'pinia'
 
 const props = defineProps<{
   installationId: string
@@ -536,10 +494,17 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ job: [job: JobRecord] }>()
 const queryClient = useQueryClient()
+const route = useRoute()
+const router = useRouter()
 const editing = ref<'new' | string | null>(null)
 const formOpen = ref(false)
-const selectedBindingKey = ref('')
+const serversStore = useServersStore()
+const { selectedBindingKey, dialogAction } = storeToRefs(serversStore)
 const activeTab = ref('overview')
+const serverSections = ['overview', 'console', 'files', 'deployment'] as const
+const selectSection = (section: string) => {
+  void router.push(`/panel/server/${section}`)
+}
 const issuedCommand = ref<{
   bindingId: string
   draftId: string
@@ -576,7 +541,6 @@ const { data: bindings, error: bindingError } = useQuery({
   queryFn: () => getJson<{ items: ProfileServerBinding[] }>(
     `/api/servers/profiles/${encodeURIComponent(props.profile.name)}/bindings?installationId=${encodeURIComponent(props.installationId)}`,
   ),
-  refetchInterval: 5000,
 })
 const { data: auth } = useQuery({
   queryKey: computed(() => ['auth-configuration', props.installationId]),
@@ -587,24 +551,19 @@ const { data: auth } = useQuery({
 watch(auth, (value) => {
   if (!form.authId) form.authId = value?.providers.find((item) => item.isDefault)?.id ?? value?.providers[0]?.id ?? ''
 }, { immediate: true })
-const bindingKeyFor = (binding: ProfileServerBinding) =>
-  binding.id ?? `legacy:${binding.name}:${binding.serverAddress}:${binding.serverPort}`
 const selectedBinding = computed(
-  () => bindings.value?.items.find((binding) => bindingKeyFor(binding) === selectedBindingKey.value) ?? null,
+  () => bindings.value?.items.find((binding) => serverBindingKey(binding) === selectedBindingKey.value) ?? null,
 )
 watch(() => bindings.value?.items, (items) => {
-  if (!items?.length) {
-    selectedBindingKey.value = ''
-    return
-  }
-  if (!items.some((binding) => bindingKeyFor(binding) === selectedBindingKey.value)) {
-    selectedBindingKey.value = bindingKeyFor(items[0])
-  }
+  if (items) serversStore.setBindings(items)
+}, { immediate: true })
+watch(() => route.meta.serverSection, (section) => {
+  if (typeof section === 'string' && serverSections.includes(section as typeof serverSections[number])) activeTab.value = section
 }, { immediate: true })
 watch(
   () => [selectedBindingKey.value, props.profile.name, props.installationId],
   () => {
-    activeTab.value = 'overview'
+    if (!serverSections.includes(route.meta.serverSection as typeof serverSections[number])) activeTab.value = 'overview'
     issuedCommand.value = null
     copied.value = false
     copyError.value = null
@@ -617,7 +576,6 @@ const { data: selectedDrafts } = useQuery({
     `/api/servers/bindings/${selectedManagedId.value}/bootstrap?installationId=${encodeURIComponent(props.installationId)}`,
   ),
   enabled: computed(() => Boolean(selectedManagedId.value)),
-  refetchInterval: 5000,
 })
 const { data: selectedRuntime } = useQuery({
   queryKey: computed(() => ['server-runtime', props.installationId, selectedManagedId.value]),
@@ -625,7 +583,6 @@ const { data: selectedRuntime } = useQuery({
     `/api/servers/bindings/${selectedManagedId.value}/runtime?installationId=${encodeURIComponent(props.installationId)}`,
   ),
   enabled: computed(() => Boolean(selectedManagedId.value)),
-  refetchInterval: 5000,
 })
 const activeDraft = computed(
   () => selectedDrafts.value?.items.find(
@@ -671,15 +628,6 @@ const packApplyUnavailableReason = computed(() => {
   }
   return ''
 })
-const deploymentDot = (state: ServerBindingDeploymentState) => ({
-  pending: 'bg-amber-500', ready: 'bg-sky-500', 'requires-update': 'bg-amber-500',
-  installed: 'bg-emerald-500', failed: 'bg-destructive',
-})[state]
-const selectBinding = (binding: ProfileServerBinding) => {
-  selectedBindingKey.value = bindingKeyFor(binding)
-  activeTab.value = 'overview'
-}
-
 const jobMutation = useMutation({
   mutationFn: (request: { path: string; body: Record<string, unknown>; nestedJob?: boolean }) =>
     getJson<JobRecord | { job: JobRecord }>(request.path, {
@@ -703,7 +651,7 @@ const issueMutation = useMutation({
       bindingId: result.draft.bindingId, draftId: result.draft.id,
       command: result.command, expiresAt: result.expiresAt,
     }
-    activeTab.value = 'deployment'
+    void router.push('/panel/server/deployment')
     void queryClient.invalidateQueries({ queryKey: ['server-bootstrap'] })
   },
 })
@@ -727,7 +675,7 @@ const applyPackMutation = useMutation({
   ),
   onSuccess: (job) => {
     emit('job', job)
-    activeTab.value = 'deployment'
+    void router.push('/panel/server/deployment')
   },
 })
 const eulaMutation = useMutation({
@@ -759,7 +707,7 @@ const startCreate = () => {
 const edit = (binding: ProfileServerBinding) => {
   jobMutation.reset()
   issuedCommand.value = null
-  selectedBindingKey.value = bindingKeyFor(binding)
+  selectedBindingKey.value = serverBindingKey(binding)
   editing.value = binding.id
   Object.assign(form, {
     name: binding.name, serverAddress: binding.serverAddress, serverPort: binding.serverPort,
@@ -771,6 +719,22 @@ const edit = (binding: ProfileServerBinding) => {
   gameArgs.value = binding.gameArgs.join(' ')
   formOpen.value = true
 }
+watch(
+  [dialogAction, () => bindings.value?.items],
+  ([action, items]) => {
+    if (action === 'create') {
+      startCreate()
+      serversStore.consumeDialogAction()
+      return
+    }
+    if (action === 'edit' && items) {
+      const binding = items.find((item) => serverBindingKey(item) === selectedBindingKey.value)
+      if (binding?.managed) edit(binding)
+      serversStore.consumeDialogAction()
+    }
+  },
+  { immediate: true },
+)
 const adopt = (binding: ProfileServerBinding) => {
   edit({
     ...binding, id: null,
@@ -801,7 +765,7 @@ const remove = (binding: ProfileServerBinding) => {
 const prepare = (binding: ProfileServerBinding) => {
   if (!binding.id) return
   issuedCommand.value = null
-  activeTab.value = 'deployment'
+  void router.push('/panel/server/deployment')
   jobMutation.mutate({
     path: `/api/servers/bindings/${binding.id}/bootstrap/prepare`,
     body: { installationId: props.installationId }, nestedJob: true,
@@ -809,7 +773,7 @@ const prepare = (binding: ProfileServerBinding) => {
 }
 const requestPrepare = (binding: ProfileServerBinding) => {
   issuedCommand.value = null
-  activeTab.value = 'deployment'
+  void router.push('/panel/server/deployment')
   if (binding.eulaAcceptedAt) {
     prepare(binding)
     return
@@ -823,7 +787,7 @@ const acceptEulaAndPrepare = () => {
 }
 const issue = (draft: ServerBootstrapDraft) => {
   issuedCommand.value = null
-  activeTab.value = 'deployment'
+  void router.push('/panel/server/deployment')
   issueMutation.mutate(draft)
 }
 const revoke = (draft: ServerBootstrapDraft) => {
