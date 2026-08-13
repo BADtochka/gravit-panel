@@ -245,6 +245,35 @@ describe('mod management API', () => {
     expect(calls).toBe(1)
   })
 
+  test('passes server and unused dependency removal options to the manager', async () => {
+    let options: unknown
+    const { request, jobsStore } = createHarness({
+      remove: async (_installation, _profile, _filename, _context, value) => {
+        options = value
+        return {}
+      },
+    } as Partial<ModManagerService>)
+
+    const response = await request('/api/mods/remove', post({
+      installationId: installation.id,
+      profile: 'fabric',
+      filename: 'sodium.jar',
+      confirmRemoval: true,
+      removeFromServer: true,
+      removeUnusedDependencies: true,
+    }))
+    const queued = await response.json()
+    const completed = await waitForTerminalJob(jobsStore, queued.id)
+
+    expect(response.status).toBe(202)
+    expect(completed?.status).toBe('succeeded')
+    expect(options).toEqual({ removeFromServer: true, removeUnusedDependencies: true })
+    expect(completed?.input).toMatchObject({
+      removeFromServer: true,
+      removeUnusedDependencies: true,
+    })
+  })
+
   test('serves provider, search, and installed-mod read APIs', async () => {
     const { request } = createHarness(
       {

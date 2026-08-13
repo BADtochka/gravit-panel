@@ -8,6 +8,7 @@ import { LaunchServerTransportService } from './launchserver-transport.service'
 import { RemoteControlHttpService } from './remote-control-http.service'
 import { RemoteControlSetupService } from './remote-control-setup.service'
 import { RemoteControlStore } from './remote-control.store'
+import { LaunchServerFilesService } from './launchserver-files.service'
 
 export const installationsStore = new InstallationsStore(database)
 export const credentialCipher = new CredentialCipher()
@@ -18,6 +19,7 @@ export const credentialKeyService = new CredentialKeyService(
 )
 export const remoteControlStore = new RemoteControlStore(database, credentialCipher)
 export const controlFileService = new ControlFileService()
+export const launchServerFilesService = new LaunchServerFilesService()
 export const remoteControlHttpService = new RemoteControlHttpService()
 export const launchServerTransport = new LaunchServerTransportService(
   controlFileService,

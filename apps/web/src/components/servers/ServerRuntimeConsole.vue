@@ -116,6 +116,8 @@ import { Switch } from '@/components/ui/switch'
 import { useLogAutoScroll } from '@/composables/useLogAutoScroll'
 import { panelFetch, panelWebSocketUrl } from '@/lib/public-path'
 import type {
+  JobRecord,
+  ServerCommand,
   ServerCommandType,
   ServerRuntimeEvent,
   ServerRuntimeState,
@@ -130,6 +132,7 @@ const props = defineProps<{
   disabled: boolean
   active: boolean
 }>()
+const emit = defineEmits<{ job: [job: JobRecord] }>()
 const queryClient = useQueryClient()
 const events = ref<ServerRuntimeEvent[]>([])
 const showAgentLogs = ref(false)
@@ -188,7 +191,11 @@ const {
     `/api/servers/bindings/${props.bindingId}/runtime?installationId=${encodeURIComponent(props.installationId)}`,
   ),
   enabled: computed(() => props.active),
-  refetchInterval: 5_000,
+  refetchInterval: computed(() =>
+    props.active && (streamState.value === 'reconnecting' || streamState.value === 'closed')
+      ? 5_000
+      : false,
+  ),
 })
 
 const commandMutation = useMutation({
@@ -202,8 +209,13 @@ const commandMutation = useMutation({
       const body = (await response.json().catch(() => null)) as { message?: string } | null
       throw new Error(body?.message ?? `Request failed with status ${response.status}`)
     }
+    return response.json() as Promise<JobRecord | ServerCommand>
   },
-  onSuccess: () => queryClient.invalidateQueries({ queryKey: runtimeQueryKey.value }),
+  onSuccess: (result, variables) => {
+    if ('progress' in result) emit('job', result)
+    if (variables.type === 'console.execute') consoleCommand.value = ''
+    void queryClient.invalidateQueries({ queryKey: runtimeQueryKey.value })
+  },
 })
 
 const sendCommand = (type: ServerCommandType, payload: Record<string, unknown> = {}) => {
@@ -216,7 +228,6 @@ const executeConsoleCommand = () => {
   sendCommand('console.execute', { command })
   commandHistory.value = [...commandHistory.value.filter((item) => item !== command), command].slice(-100)
   historyIndex.value = commandHistory.value.length
-  consoleCommand.value = ''
 }
 const showOlderCommand = () => {
   if (!commandHistory.value.length) return
