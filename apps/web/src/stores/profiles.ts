@@ -17,6 +17,9 @@ export const useProfilesStore = defineStore('profiles', () => {
   const selectedProfileName = ref(
     typeof window === 'undefined' ? '' : window.localStorage.getItem(storageKey) ?? '',
   )
+  const createRequestedAt = ref(0)
+  const requestCreate = () => { createRequestedAt.value = Date.now() }
+  const consumeCreateRequest = () => { createRequestedAt.value = 0 }
 
   const setProfiles = (items: ClientProfileDescriptor[]) => {
     const uniqueItems = [...new Map(items.map((item) => [item.name, item])).values()]
@@ -45,6 +48,9 @@ export const useProfilesStore = defineStore('profiles', () => {
   return {
     profiles,
     selectedProfileName,
+    createRequestedAt,
+    requestCreate,
+    consumeCreateRequest,
     setProfiles,
     clearProfiles,
     clearProfileCatalog,

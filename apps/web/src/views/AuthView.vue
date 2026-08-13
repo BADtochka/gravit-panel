@@ -393,6 +393,39 @@
             </Button>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle class="text-base">Build artifacts</CardTitle>
+            <CardDescription>
+              Remove cached authentication module builds. Modules already installed in LaunchServer are not affected.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p v-if="cleanupResult" class="mb-3 text-xs text-muted-foreground">
+              Removed {{ cleanupResult.removedFiles.length }} file(s), {{ formatBytes(cleanupResult.removedBytes) }} freed.
+            </p>
+            <AlertDialog>
+              <AlertDialogTrigger as-child>
+                <Button class="w-full" size="sm" type="button" variant="destructive" :disabled="operationPending || cleanupPending">
+                  <Trash2 />Clear auth module artifacts
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Clear authentication build artifacts?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Cached module JARs and incomplete builds will be deleted. Installed LaunchServer modules remain active; the next provider apply may rebuild its module.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction @click="cleanupArtifacts">Clear artifacts</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </CardContent>
+        </Card>
       </div>
     </div>
 
@@ -460,13 +493,14 @@ import type {
   AuthCoreRecipeId,
   AuthDiscordCoreConfig,
   AuthProviderDetail,
+  AuthModuleArtifactsCleanupResult,
   AuthSqlDriverPreset,
   AuthPasswordVerifierType,
   FileAuthModuleConfig,
   JobRecord,
 } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { KeyRound, TriangleAlert } from '@lucide/vue'
+import { KeyRound, Trash2, TriangleAlert } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { computed, reactive, ref, watch } from 'vue'
 
@@ -777,6 +811,7 @@ const pageError = computed(
   () =>
     (configurationError.value ||
       mutationError.value ||
+      cleanupError.value ||
       fileAuthConfigQueryError.value ||
       fileAuthConfigError.value ||
       activeJobError.value) as Error | null,
@@ -813,6 +848,22 @@ const fileAuthConfigJobPending = computed(
     activeJob.value?.status === 'running',
 )
 const applyFileAuthConfig = () => mutateFileAuthConfig()
+
+const {
+  data: cleanupResult,
+  error: cleanupError,
+  isPending: cleanupPending,
+  mutate: cleanupArtifacts,
+} = useMutation({
+  mutationFn: () => getJson<AuthModuleArtifactsCleanupResult>('/api/auth/module-artifacts/cleanup', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ confirmCleanup: true }),
+  }),
+})
+const formatBytes = (bytes: number) => bytes < 1024 * 1024
+  ? `${(bytes / 1024).toFixed(1)} KB`
+  : `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
 const jobFinished = async (job: JobRecord) => {
   await finishJob(job)

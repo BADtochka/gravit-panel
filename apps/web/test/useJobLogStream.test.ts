@@ -134,3 +134,38 @@ test('a different job replaces logs and opens one new connection', async () => {
 
   scope.stop()
 })
+
+test('polling reports a fast failure when the socket delivers no events', async () => {
+  const scope = effectScope()
+  const jobProp = ref<JobRecord | null>(job('running'))
+  const finished: JobRecord[] = []
+  const failed = {
+    ...job('failed'),
+    error: 'Server agent artifact is missing',
+    finishedAt: '2026-07-27T12:00:02.000Z',
+  }
+  let stateListener: ((state: 'connecting' | 'live' | 'reconnecting' | 'closed') => void) | null = null
+  const state = scope.run(() => useJobLogStream(
+    () => jobProp.value,
+    (record) => finished.push(record),
+    () => ({
+      close: () => {},
+      onEvents: () => {},
+      onState: (listener) => { stateListener = listener },
+    }),
+    async () => failed,
+    1,
+  ))
+  if (!state) throw new Error('Unable to create polling log scope')
+
+  ;(stateListener as ((state: 'reconnecting') => void) | null)?.('reconnecting')
+  await Bun.sleep(10)
+  await nextTick()
+
+  expect(state.currentJob.value).toMatchObject({ status: 'failed', error: failed.error })
+  expect(state.events.value).toHaveLength(1)
+  expect(state.events.value[0]).toMatchObject({ type: 'failed', message: failed.error })
+  expect(finished).toHaveLength(1)
+
+  scope.stop()
+})

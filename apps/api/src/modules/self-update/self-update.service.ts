@@ -42,6 +42,17 @@ export class SelfUpdateService {
   async status(): Promise<PanelUpdateStatus> {
     const currentRevision = this.revision(this.config.currentRevision)
     const configured = this.deployConfigured()
+    if (!this.config.githubToken) {
+      return {
+        configured,
+        deployEnabled: false,
+        currentRevision,
+        latestRevision: null,
+        updateAvailable: null,
+        checkedAt: new Date().toISOString(),
+        message: 'GitHub update checks are not configured.',
+      }
+    }
     try {
       const latestRevision = await this.latestRevision()
       return {
@@ -111,9 +122,7 @@ export class SelfUpdateService {
         headers: {
           accept: 'application/vnd.github+json',
           'user-agent': 'GravitPanel/0.1 self-update',
-          ...(this.config.githubToken
-            ? { authorization: `Bearer ${this.config.githubToken}` }
-            : {}),
+          authorization: `Bearer ${this.config.githubToken}`,
         },
       },
     )

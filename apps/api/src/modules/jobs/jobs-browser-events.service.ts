@@ -53,7 +53,8 @@ export class JobsBrowserEventsService {
       socket.close(1011, 'Unable to deliver job history')
       return
     }
-    if (terminalStatuses.has(job.status)) socket.close(1000, 'Job complete')
+    // Let the client close after receiving terminal history. Closing here can race
+    // the WebSocket transport and discard the history frame for very fast jobs.
   }
 
   message(socket: JobEventSocket, raw: unknown) {

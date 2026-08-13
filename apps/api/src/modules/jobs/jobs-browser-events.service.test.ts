@@ -79,3 +79,17 @@ test('answers heartbeats and rejects unknown jobs', () => {
   activeService.message(active.socket, JSON.stringify({ type: 'ping' }))
   expect(JSON.parse(active.sent[0]!).type).toBe('pong')
 })
+
+test('sends terminal history without racing it with a server-side close', () => {
+  const failedJob = { ...job, status: 'failed' as const, error: 'artifact missing' }
+  const service = new JobsBrowserEventsService({
+    get: () => failedJob,
+    listRecentEvents: () => [event(1, 'failed')],
+  }, new JobsEventHub())
+  const { socket, sent, closed } = createSocket()
+
+  service.open(socket, failedJob.id)
+
+  expect(JSON.parse(sent[0]!)).toMatchObject({ type: 'history', terminal: true })
+  expect(closed).toEqual([])
+})

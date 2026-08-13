@@ -324,7 +324,6 @@ const {
     ),
   enabled: stateEnabled,
   retry: false,
-  refetchInterval: (query) => query.state.data?.busy ? 2_000 : false,
 })
 
 const runtimeFor = (moduleId: string) =>

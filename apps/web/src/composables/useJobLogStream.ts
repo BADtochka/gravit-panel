@@ -21,11 +21,41 @@ export const useJobLogStream = (
   onFinished: (job: JobRecord) => void,
   connect: ConnectToJobEvents = connectToJobEvents,
   getJob: LoadJob = loadJob,
+  pollIntervalMs = 1_000,
 ) => {
   const currentJob = ref<JobRecord | null>(null)
   const events = ref<JobEvent[]>([])
   let connectedJobId: string | null = null
   let connection: JobEventConnection | null = null
+  let pollTimer: ReturnType<typeof setInterval> | null = null
+  const finishedJobs = new Set<string>()
+
+  const isTerminal = (record: JobRecord) =>
+    record.status === 'succeeded' || record.status === 'failed' || record.status === 'cancelled'
+
+  const stopPolling = () => {
+    if (pollTimer) clearInterval(pollTimer)
+    pollTimer = null
+  }
+
+  const finish = (record: JobRecord) => {
+    if (finishedJobs.has(record.id)) return
+    finishedJobs.add(record.id)
+    stopPolling()
+    closeConnection()
+    currentJob.value = record
+    if (!events.value.some((event) => event.type === 'completed' || event.type === 'failed' || event.type === 'cancelled')) {
+      events.value = [...events.value, {
+        sequence: -1,
+        jobId: record.id,
+        type: record.status === 'succeeded' ? 'completed' : record.status === 'cancelled' ? 'cancelled' : 'failed',
+        message: record.error ?? (record.status === 'succeeded' ? 'Job completed successfully' : 'Job cancelled by user'),
+        progress: record.progress,
+        createdAt: record.finishedAt ?? new Date().toISOString(),
+      }]
+    }
+    onFinished(record)
+  }
 
   const closeConnection = () => {
     connection?.close()
@@ -40,12 +70,31 @@ export const useJobLogStream = (
       if (nextJobId === connectedJobId) return
 
       closeConnection()
+      stopPolling()
       connectedJobId = nextJobId
       events.value = []
       if (!nextJobId) return
 
       const jobId = nextJobId
+      const refreshJob = () => void getJob(jobId).then((record) => {
+        if (connectedJobId !== jobId) return
+        currentJob.value = record
+        if (isTerminal(record)) finish(record)
+      }).catch(() => {})
+      const startPolling = () => {
+        if (pollTimer || finishedJobs.has(jobId)) return
+        refreshJob()
+        pollTimer = setInterval(refreshJob, pollIntervalMs)
+      }
       connection = connect(jobId)
+      connection.onState((state) => {
+        if (connectedJobId !== jobId) return
+        if (state === 'live') {
+          stopPolling()
+          return
+        }
+        if (state === 'reconnecting' || state === 'closed') startPolling()
+      })
       connection.onEvents((batch) => {
         const additions = batch.filter((event) =>
           !events.value.some((item) => item.sequence === event.sequence))
@@ -73,8 +122,7 @@ export const useJobLogStream = (
         void getJob(jobId)
           .then((record) => {
             if (connectedJobId !== jobId) return
-            currentJob.value = record
-            onFinished(record)
+            finish(record)
           })
           .catch(() => {
             // The terminal event remains visible even if the final record refresh fails.
@@ -84,7 +132,10 @@ export const useJobLogStream = (
     { immediate: true },
   )
 
-  onScopeDispose(closeConnection)
+  onScopeDispose(() => {
+    stopPolling()
+    closeConnection()
+  })
 
   return { currentJob, events }
 }

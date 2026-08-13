@@ -1,4 +1,5 @@
 import type { JobRecord, JobType } from '@gravit-panel/shared'
+import { panelFetch } from '@/lib/public-path'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, toValue, watch, type WatchSource } from 'vue'
 
@@ -7,7 +8,7 @@ interface ActiveJobResponse {
 }
 
 const getActiveJob = async (installationId: string) => {
-  const response = await fetch(
+  const response = await panelFetch(
     `/api/jobs/active?installationId=${encodeURIComponent(installationId)}`,
   )
   if (!response.ok) throw new Error(`Active job request failed with status ${response.status}`)
@@ -27,7 +28,7 @@ export const useInstallationJob = (
     queryKey,
     queryFn: () => getActiveJob(currentInstallationId.value),
     enabled: computed(() => Boolean(currentInstallationId.value)),
-    refetchInterval: 1_000,
+    refetchOnWindowFocus: false,
   })
 
   watch(currentInstallationId, () => {
@@ -37,7 +38,12 @@ export const useInstallationJob = (
     data,
     (response) => {
       const active = response?.job
-      job.value = active && supported.has(active.type) ? active : null
+      if (active && supported.has(active.type)) {
+        job.value = active
+        return
+      }
+      if (job.value?.status === 'queued' || job.value?.status === 'running') return
+      job.value = null
     },
     { immediate: true },
   )
