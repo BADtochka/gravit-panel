@@ -51,6 +51,27 @@ const conflictFor = (
   return conflict
 }
 
+const liveBinding = (
+  installationIdValue: string,
+  bindingIdValue: string,
+  set: { status?: number | string },
+) => {
+  const installation = findInstallation(installationIdValue, set)
+  if (!installation) return null
+  const binding = serverBindingsStore.get(bindingIdValue)
+  if (!binding || binding.installationId !== installation.id) {
+    set.status = 404
+    return null
+  }
+  return { installation, binding }
+}
+
+const liveFileError = (set: { status?: number | string }, error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error)
+  set.status = message.includes('offline') || message.includes('does not support') ? 409 : 422
+  return { message }
+}
+
 export const serversRoutes = new Elysia({ prefix: '/servers' })
   .get(
     '/profiles/:profile/bindings',
@@ -58,6 +79,40 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
       const installation = findInstallation(query.installationId, set)
       if (!installation) return { message: 'LauncherDockered installation not found.' }
       return serverBindingService.list(installation, params.profile)
+    },
+    { params: t.Object({ profile }), query: t.Object({ installationId }) },
+  )
+  .get(
+    '/profiles/:profile/mods',
+    async ({ params, query, set }) => {
+      const installation = findInstallation(query.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const bindings = serverBindingsStore.list(installation.id, params.profile)
+        .filter((binding) => binding.managed && binding.id)
+      const items = await Promise.all(bindings.map(async (binding) => {
+        try {
+          const result = await serverAgentService.requestFilesystem(binding.id!, 'list', {
+            path: 'mods',
+          }) as { entries?: Array<{ path: string; type: string; size: number | null; modifiedAt: string }> }
+          return {
+            bindingId: binding.id!,
+            serverName: binding.name,
+            connected: true,
+            error: null,
+            items: (result.entries ?? []).filter((entry) =>
+              entry.type === 'file' && entry.path.toLowerCase().endsWith('.jar')),
+          }
+        } catch (error) {
+          return {
+            bindingId: binding.id!,
+            serverName: binding.name,
+            connected: false,
+            error: error instanceof Error ? error.message : String(error),
+            items: [],
+          }
+        }
+      }))
+      return { items }
     },
     { params: t.Object({ profile }), query: t.Object({ installationId }) },
   )
@@ -83,6 +138,137 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
       return job
     },
     { params: t.Object({ profile }), body: bindingBody },
+  )
+  .get(
+    '/bindings/:bindingId/files',
+    async ({ params, query, set }) => {
+      const target = liveBinding(query.installationId, params.bindingId, set)
+      if (!target) return { message: 'Managed server binding not found.' }
+      try {
+        return await serverAgentService.requestFilesystem(params.bindingId, 'list', {
+          path: query.path ?? '',
+        })
+      } catch (error) {
+        return liveFileError(set, error)
+      }
+    },
+    {
+      params: t.Object({ bindingId }),
+      query: t.Object({ installationId, path: t.Optional(t.String({ maxLength: 512 })) }),
+    },
+  )
+  .get(
+    '/bindings/:bindingId/files/file',
+    async ({ params, query, set }) => {
+      const target = liveBinding(query.installationId, params.bindingId, set)
+      if (!target) return { message: 'Managed server binding not found.' }
+      try {
+        const result = await serverAgentService.requestFilesystem(params.bindingId, 'read', {
+          path: query.path,
+        }) as { data: string; [key: string]: unknown }
+        const bytes = Buffer.from(result.data, 'base64')
+        if (bytes.includes(0)) throw new Error('Binary files cannot be opened in the text editor')
+        return { ...result, content: new TextDecoder('utf-8', { fatal: true }).decode(bytes), data: undefined }
+      } catch (error) {
+        return liveFileError(set, error)
+      }
+    },
+    {
+      params: t.Object({ bindingId }),
+      query: t.Object({ installationId, path: t.String({ minLength: 1, maxLength: 512 }) }),
+    },
+  )
+  .post(
+    '/bindings/:bindingId/files/file',
+    async ({ params, body, set }) => {
+      const target = liveBinding(body.installationId, params.bindingId, set)
+      if (!target) return { message: 'Managed server binding not found.' }
+      const bytes = new TextEncoder().encode(body.content)
+      if (bytes.length > 512 * 1024) {
+        set.status = 422
+        return { message: 'Live editor supports files up to 512 KiB.' }
+      }
+      try {
+        return await serverAgentService.requestFilesystem(params.bindingId, 'write', {
+          path: body.path,
+          data: Buffer.from(bytes).toString('base64'),
+          overwrite: body.overwrite,
+        })
+      } catch (error) {
+        return liveFileError(set, error)
+      }
+    },
+    {
+      params: t.Object({ bindingId }),
+      body: t.Object({
+        installationId,
+        path: t.String({ minLength: 1, maxLength: 512 }),
+        content: t.String({ maxLength: 512 * 1024 }),
+        overwrite: t.Boolean(),
+      }),
+    },
+  )
+  .post(
+    '/bindings/:bindingId/files/upload',
+    async ({ params, body, set }) => {
+      const target = liveBinding(body.installationId, params.bindingId, set)
+      if (!target) return { message: 'Managed server binding not found.' }
+      const bytes = new Uint8Array(await body.file.arrayBuffer())
+      if (bytes.length > 512 * 1024) {
+        set.status = 422
+        return { message: 'Live uploads currently support files up to 512 KiB.' }
+      }
+      try {
+        return await serverAgentService.requestFilesystem(params.bindingId, 'write', {
+          path: body.path,
+          data: Buffer.from(bytes).toString('base64'),
+          overwrite: body.overwrite === 'true',
+        })
+      } catch (error) {
+        return liveFileError(set, error)
+      }
+    },
+    {
+      params: t.Object({ bindingId }),
+      body: t.Object({
+        installationId,
+        path: t.String({ minLength: 1, maxLength: 512 }),
+        overwrite: t.String(),
+        file: t.File({ maxSize: 512 * 1024 }),
+      }),
+    },
+  )
+  .post(
+    '/bindings/:bindingId/files/operations',
+    async ({ params, body, set }) => {
+      const target = liveBinding(body.installationId, params.bindingId, set)
+      if (!target) return { message: 'Managed server binding not found.' }
+      try {
+        if (body.action === 'mkdir') {
+          return await serverAgentService.requestFilesystem(params.bindingId, 'mkdir', { path: body.path })
+        }
+        if (body.action === 'move') {
+          return await serverAgentService.requestFilesystem(params.bindingId, 'move', {
+            sourcePath: body.sourcePath,
+            destinationPath: body.destinationPath,
+          })
+        }
+        return await serverAgentService.requestFilesystem(params.bindingId, 'delete', {
+          paths: body.paths,
+          confirm: true,
+        })
+      } catch (error) {
+        return liveFileError(set, error)
+      }
+    },
+    {
+      params: t.Object({ bindingId }),
+      body: t.Union([
+        t.Object({ installationId, action: t.Literal('mkdir'), path: t.String({ minLength: 1, maxLength: 512 }) }),
+        t.Object({ installationId, action: t.Literal('move'), sourcePath: t.String({ minLength: 1, maxLength: 512 }), destinationPath: t.String({ minLength: 1, maxLength: 512 }) }),
+        t.Object({ installationId, action: t.Literal('delete'), paths: t.Array(t.String({ minLength: 1, maxLength: 512 }), { minItems: 1, maxItems: 100, uniqueItems: true }), confirmRemove: t.Literal(true) }),
+      ]),
+    },
   )
   .post(
     '/bindings/:bindingId/update',
@@ -150,7 +336,7 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
     ({ params, query, set }) => {
       const installation = findInstallation(query.installationId, set)
       if (!installation) return { message: 'LauncherDockered installation not found.' }
-      return serverPackService.listFiles(installation, params.bindingId)
+      return serverPackService.listEntries(installation, params.bindingId)
     },
     { params: t.Object({ bindingId }), query: t.Object({ installationId }) },
   )
@@ -186,6 +372,126 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
         installationId,
         path: t.String({ minLength: 1, maxLength: 512 }),
         file: t.File({ maxSize: 256 * 1024 * 1024 }),
+      }),
+    },
+  )
+  .post(
+    '/bindings/:bindingId/pack/operations',
+    ({ params, body, set }) => {
+      const installation = findInstallation(body.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = conflictFor(installation.id, set)
+      if (conflict) return { message: 'Another server pack operation is active.', jobId: conflict.id }
+      const input = { ...body, bindingId: params.bindingId }
+      const job = jobsRunner.create(
+        'gravit.server-pack.modify',
+        input,
+        `Server pack ${body.action} queued`,
+        async (context) => {
+          if (body.action === 'mkdir') {
+            await serverPackService.createDirectory(installation, params.bindingId, body.path)
+          } else if (body.action === 'create-file') {
+            await serverPackService.createTextFile(
+              installation,
+              params.bindingId,
+              body.path,
+              body.content ?? '',
+            )
+          } else if (body.action === 'move') {
+            await serverPackService.moveEntry(
+              installation,
+              params.bindingId,
+              body.sourcePath,
+              body.destinationPath,
+            )
+          } else {
+            await serverPackService.removeEntries(installation, params.bindingId, body.paths)
+          }
+          const result = await serverPackService.publish(installation, params.bindingId, context)
+          serverBindingsStore.setDesiredPack(params.bindingId, result.version.id)
+          return result
+        },
+      )
+      set.status = 202
+      return job
+    },
+    {
+      params: t.Object({ bindingId }),
+      body: t.Union([
+        t.Object({
+          installationId,
+          action: t.Literal('mkdir'),
+          path: t.String({ minLength: 1, maxLength: 512 }),
+        }),
+        t.Object({
+          installationId,
+          action: t.Literal('create-file'),
+          path: t.String({ minLength: 1, maxLength: 512 }),
+          content: t.Optional(t.String({ maxLength: 1024 * 1024 })),
+        }),
+        t.Object({
+          installationId,
+          action: t.Literal('move'),
+          sourcePath: t.String({ minLength: 1, maxLength: 512 }),
+          destinationPath: t.String({ minLength: 1, maxLength: 512 }),
+        }),
+        t.Object({
+          installationId,
+          action: t.Literal('delete'),
+          paths: t.Array(t.String({ minLength: 1, maxLength: 512 }), {
+            minItems: 1,
+            maxItems: 200,
+            uniqueItems: true,
+          }),
+          confirmRemove: t.Literal(true),
+        }),
+      ]),
+    },
+  )
+  .get(
+    '/bindings/:bindingId/pack/file',
+    async ({ params, query, set }) => {
+      const installation = findInstallation(query.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      try {
+        return await serverPackService.readTextFile(installation, params.bindingId, query.path)
+      } catch (error) {
+        set.status = 422
+        return { message: error instanceof Error ? error.message : String(error) }
+      }
+    },
+    {
+      params: t.Object({ bindingId }),
+      query: t.Object({ installationId, path: t.String({ minLength: 1, maxLength: 512 }) }),
+    },
+  )
+  .post(
+    '/bindings/:bindingId/pack/file',
+    ({ params, body, set }) => {
+      const installation = findInstallation(body.installationId, set)
+      if (!installation) return { message: 'LauncherDockered installation not found.' }
+      const conflict = conflictFor(installation.id, set)
+      if (conflict) return { message: 'Another server pack operation is active.', jobId: conflict.id }
+      const job = jobsRunner.create(
+        'gravit.server-pack.modify',
+        { installationId: installation.id, bindingId: params.bindingId, path: body.path },
+        'Server pack text file save queued',
+        async (context) => {
+          await serverPackService.putTextFile(installation, params.bindingId, body.path, body.content)
+          const result = await serverPackService.publish(installation, params.bindingId, context)
+          serverBindingsStore.setDesiredPack(params.bindingId, result.version.id)
+          return result
+        },
+      )
+      set.status = 202
+      return job
+    },
+    {
+      params: t.Object({ bindingId }),
+      body: t.Object({
+        installationId,
+        path: t.String({ minLength: 1, maxLength: 512 }),
+        content: t.String({ maxLength: 1024 * 1024 }),
       }),
     },
   )
@@ -281,11 +587,16 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
   )
   .post(
     '/bindings/:bindingId/bootstrap/prepare',
-    ({ params, body, set }) => {
+    async ({ params, body, set }) => {
       const installation = findInstallation(body.installationId, set)
       if (!installation) return { message: 'LauncherDockered installation not found.' }
       const conflict = conflictFor(installation.id, set)
       if (conflict) return { message: 'Another server operation is active.', jobId: conflict.id }
+      const artifacts = await serverBootstrapService.agentArtifactsReadiness()
+      if (!artifacts.ready) {
+        set.status = 409
+        return { message: artifacts.message }
+      }
       const draft = serverBootstrapService.createDraft(installation, params.bindingId)
       const job = jobsRunner.create(
         'gravit.server-bootstrap.prepare',
@@ -410,13 +721,34 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
         return { message: 'Managed server binding not found.' }
       }
       try {
-        const command = serverAgentService.createCommand(
-          binding.id!,
-          body.type as ServerCommandType,
-          body.payload,
+        const type = body.type as ServerCommandType
+        if (type === 'console.execute') {
+          const command = serverAgentService.createCommand(binding.id!, type, body.payload)
+          set.status = 202
+          return command
+        }
+        if (!serverAgentService.isConnected(binding.id!)) {
+          set.status = 409
+          return { message: 'Host agent is offline.' }
+        }
+        const conflict = conflictFor(installation.id, set)
+        if (conflict) return { message: 'Another server operation is active.', jobId: conflict.id }
+        const action = type.slice('service.'.length)
+        const job = jobsRunner.create(
+          'gravit.server.service',
+          { installationId: installation.id, bindingId: binding.id!, type },
+          `${binding.name} ${action} queued`,
+          async (context) => {
+            context.progress(10, `Requesting server ${action}`)
+            const command = serverAgentService.createCommand(binding.id!, type, {})
+            context.progress(40, 'Waiting for host agent')
+            const completed = await serverAgentService.waitForCommand(command.id, context.signal)
+            context.progress(95, `Server ${action} completed`)
+            return { bindingId: binding.id!, commandId: completed.id, type }
+          },
         )
         set.status = 202
-        return command
+        return job
       } catch (error) {
         set.status = 422
         return { message: error instanceof Error ? error.message : String(error) }

@@ -7,6 +7,34 @@ const agentVersion = "0.2.0"
 type inboundMessage struct {
 	Type    string          `json:"type"`
 	Command commandEnvelope `json:"command"`
+	Cursor  string          `json:"cursor"`
+	Request filesystemRequest `json:"request"`
+}
+
+type filesystemRequest struct {
+	ID              string   `json:"id"`
+	BindingID       string   `json:"bindingId"`
+	Operation       string   `json:"operation"`
+	Path            string   `json:"path,omitempty"`
+	SourcePath      string   `json:"sourcePath,omitempty"`
+	DestinationPath string   `json:"destinationPath,omitempty"`
+	Paths           []string `json:"paths,omitempty"`
+	Data            string   `json:"data,omitempty"`
+	Overwrite       bool     `json:"overwrite,omitempty"`
+	Confirm         bool     `json:"confirm,omitempty"`
+}
+
+type filesystemResponse struct {
+	Type      string            `json:"type"`
+	RequestID string            `json:"requestId"`
+	OK        bool              `json:"ok"`
+	Result    any               `json:"result,omitempty"`
+	Error     *filesystemError  `json:"error,omitempty"`
+}
+
+type filesystemError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 type commandEnvelope struct {

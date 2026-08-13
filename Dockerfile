@@ -24,6 +24,9 @@ RUN mkdir -p /out \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/gravit-agent-amd64 . \
     && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o /out/gravit-agent-arm64 .
 
+FROM scratch AS server-agent-artifact
+COPY --from=server-agent-build /out /
+
 FROM gradle:8.10.2-jdk21-alpine AS launcher-runtime-build
 RUN apk add --no-cache git
 WORKDIR /src

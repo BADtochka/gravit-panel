@@ -9,10 +9,12 @@ Production-conscious MVP host agent for connecting systemd-managed Minecraft ser
 - Network access to the panel and configured RCON listeners
 - A service account authorized to control and read the configured units
 
-The agent never invokes a shell. It executes fixed `systemctl` and `journalctl` programs with argument arrays, and accepts only these unit formats:
+The agent never invokes a shell. It executes fixed `systemctl` and `journalctl` programs with argument arrays, and accepts only server units using a safe lowercase slug:
 
-- `gravit-server-[0-9a-f-]{36}.service`
-- `gravit-[0-9a-f]{8}.service`
+- `gravit-main.service`
+- `gravit-glavniy.service`
+
+Legacy UUID-based `gravit-*` service names remain valid.
 
 ## Configuration
 

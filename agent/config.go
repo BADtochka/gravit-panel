@@ -17,8 +17,7 @@ import (
 )
 
 var (
-	serverUnitPattern = regexp.MustCompile(`^gravit-server-[0-9a-f-]{36}\.service$`)
-	legacyUnitPattern = regexp.MustCompile(`^gravit-[0-9a-f]{8}\.service$`)
+	serverUnitPattern = regexp.MustCompile(`^gravit-[a-z0-9]+(?:-[a-z0-9]+)*\.service$`)
 )
 
 type Config struct {
@@ -33,6 +32,7 @@ type BindingConfig struct {
 	ID    string     `json:"id"`
 	Token string     `json:"token"`
 	Unit  string     `json:"unit"`
+	Root  string     `json:"root,omitempty"`
 	RCON  RCONConfig `json:"rcon"`
 }
 
@@ -115,6 +115,9 @@ func (c Config) validate() error {
 		}
 		if !validUnitName(binding.Unit) {
 			return fmt.Errorf("%s.unit %q is invalid", prefix, binding.Unit)
+		}
+		if binding.Root != "" && !filepath.IsAbs(binding.Root) {
+			return fmt.Errorf("%s.root must be absolute", prefix)
 		}
 		if strings.TrimSpace(binding.RCON.Address) == "" {
 			return fmt.Errorf("%s.rcon.address is required", prefix)
@@ -226,7 +229,7 @@ func decodeStrictJSON(data []byte, target any) error {
 }
 
 func validUnitName(unit string) bool {
-	return serverUnitPattern.MatchString(unit) || legacyUnitPattern.MatchString(unit)
+	return len(unit) <= len("gravit-")+64+len(".service") && serverUnitPattern.MatchString(unit)
 }
 
 func (c Config) websocketURL() (string, error) {
