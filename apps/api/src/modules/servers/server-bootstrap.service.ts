@@ -81,6 +81,27 @@ const sha1 = (bytes: Uint8Array) =>
   createHash('sha1').update(bytes).digest('hex')
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`
 
+const cyrillicTransliteration: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'yo', ж: 'zh', з: 'z',
+  и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r',
+  с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh',
+  щ: 'shch', ъ: '', ы: 'i', ь: '', э: 'e', ю: 'yu', я: 'ya',
+}
+
+export const serverServiceSlug = (name: string, bindingId: string) => {
+  const transliterated = [...name.toLocaleLowerCase('ru-RU')]
+    .map((character) => cyrillicTransliteration[character] ?? character)
+    .join('')
+  const slug = transliterated
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+    .replace(/-+$/g, '')
+  return slug || `server-${bindingId.slice(0, 8).toLowerCase()}`
+}
+
 const fetchBytes = async (url: string, maximumBytes = 512 * 1024 * 1024) => {
   const response = await fetch(url, {
     redirect: 'follow',
@@ -129,7 +150,26 @@ export class ServerBootstrapService {
     private readonly control: Pick<ControlFileService, 'createServerToken'>,
     private readonly publicUrl: string | undefined,
     private readonly launchServerPublicUrl: string,
+    private readonly agentArtifactsDir = env.SERVER_AGENT_ARTIFACTS_DIR,
   ) {}
+
+  async agentArtifactsReadiness() {
+    const required = ['gravit-agent-amd64', 'gravit-agent-arm64']
+    for (const filename of required) {
+      const path = join(this.agentArtifactsDir, filename)
+      try {
+        if (!(await stat(path)).isFile()) {
+          return { ready: false, message: `Server agent artifact is not a file: ${path}` }
+        }
+      } catch (error) {
+        const reason = (error as NodeJS.ErrnoException).code === 'ENOENT'
+          ? 'is missing'
+          : `cannot be accessed: ${error instanceof Error ? error.message : String(error)}`
+        return { ready: false, message: `Server agent artifact ${reason}: ${path}` }
+      }
+    }
+    return { ready: true, message: null }
+  }
 
   list(bindingId: string) {
     return { items: this.drafts.list(bindingId) }
@@ -240,10 +280,20 @@ export class ServerBootstrapService {
           writeFile(join(staging, 'ServerWrapperInline.jar'), inline),
           writeFile(join(staging, config.coreFile), core.bytes),
         ])
-        const [agentAmd64, agentArm64] = await Promise.all([
-          readFile(join(env.SERVER_AGENT_ARTIFACTS_DIR, 'gravit-agent-amd64')),
-          readFile(join(env.SERVER_AGENT_ARTIFACTS_DIR, 'gravit-agent-arm64')),
-        ])
+        const agentPaths = [
+          join(this.agentArtifactsDir, 'gravit-agent-amd64'),
+          join(this.agentArtifactsDir, 'gravit-agent-arm64'),
+        ]
+        const [agentAmd64, agentArm64] = await Promise.all(agentPaths.map(async (path) => {
+          try {
+            return await readFile(path)
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+              throw new Error(`Server agent artifact is missing from the API image: ${path}. Pull and redeploy the current gravit-panel-api image.`)
+            }
+            throw error
+          }
+        }))
         await Promise.all([
           writeFile(join(staging, 'gravit-agent-amd64'), agentAmd64),
           writeFile(join(staging, 'gravit-agent-arm64'), agentArm64),
@@ -688,8 +738,12 @@ curl -fsS -X POST -H "authorization: Bearer $UPDATER_TOKEN" \
       '-Dlauncher.authlib.inlineClass=pro.gravit.launcher.server.ServerWrapperInlineInitializer',
       '-Dlauncher.useSlf4j=true',
     ].join(' ')
-    const serviceName = `gravit-${config.binding.id!.slice(0, 8)}`
+    const serviceName = `gravit-${serverServiceSlug(config.binding.name, config.binding.id!)}`
     const updaterServiceName = `${serviceName}-pack-update`
+    const legacyServiceNames = [
+      `gravit-${config.binding.id!.slice(0, 8)}`,
+      `gravit-server-${config.binding.id!}`,
+    ]
     const rconPort = 26_000 + (Number.parseInt(config.binding.id!.slice(0, 4), 16) % 10_000)
     const updaterUrl = `${publicUrl}/api/server-agent/update`
     const packCommand = config.hasServerPack
@@ -766,7 +820,9 @@ printf '%s\\n' ${shellQuote(config.binding.id!)} > "$MARKER"
 
 mkdir -p "$WORKDIR/.gravit-panel/download" "$WORKDIR/.gravit-panel/jre"
 if [[ "$UPDATE" == true ]]; then
-  systemctl stop ${serviceName}.service >/dev/null 2>&1 || true
+  for SERVER_SERVICE in ${[serviceName, ...legacyServiceNames].map(shellQuote).join(' ')}; do
+    systemctl stop "$SERVER_SERVICE.service" >/dev/null 2>&1 || true
+  done
   mkdir -p "$WORKDIR/.gravit-panel/backups"
   BACKUP="$WORKDIR/.gravit-panel/backups/$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
   (
@@ -866,6 +922,10 @@ nft list set inet gravit_panel_agent rcon_ports >/dev/null 2>&1 || \
   nft 'add set inet gravit_panel_agent rcon_ports { type inet_service; }'
 nft list chain inet gravit_panel_agent input >/dev/null 2>&1 || \
   nft 'add chain inet gravit_panel_agent input { type filter hook input priority 0; policy accept; }'
+nft list chain inet gravit_panel_agent input | grep -Fq 'ip saddr 127.0.0.0/8 tcp dport @rcon_ports accept' || \
+  nft insert rule inet gravit_panel_agent input ip saddr 127.0.0.0/8 tcp dport @rcon_ports accept
+nft list chain inet gravit_panel_agent input | grep -Fq 'ip6 saddr ::1 tcp dport @rcon_ports accept' || \
+  nft insert rule inet gravit_panel_agent input ip6 saddr ::1 tcp dport @rcon_ports accept
 nft list chain inet gravit_panel_agent input | grep -Fq 'tcp dport @rcon_ports drop' || \
   nft add rule inet gravit_panel_agent input iifname != lo tcp dport @rcon_ports drop
 nft add element inet gravit_panel_agent rcon_ports "{ $PORT }" 2>/dev/null || true
@@ -921,6 +981,7 @@ AGENT_CONFIG
   "id": ${JSON.stringify(config.binding.id!)},
   "token": "$UPDATER_TOKEN",
   "unit": ${JSON.stringify(`${serviceName}.service`)},
+  "root": ${JSON.stringify(`/var/lib/gravit-panel/servers/${config.binding.id!}`)},
   "rcon": {
     "address": "127.0.0.1:$RCON_PORT",
     "password": "$RCON_PASSWORD",
@@ -943,7 +1004,7 @@ Restart=always
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectHome=true
+ProtectHome=false
 
 [Install]
 WantedBy=multi-user.target
@@ -1008,6 +1069,14 @@ if [[ -n "$AGENT_UNIT_TMP" ]]; then
 fi
 rm -rf "$UNIT_TMP_DIR"
 UNIT_TMP_DIR=
+systemctl daemon-reload
+for LEGACY_SERVICE in ${legacyServiceNames.map(shellQuote).join(' ')}; do
+  [[ "$LEGACY_SERVICE" == ${shellQuote(serviceName)} ]] && continue
+  systemctl disable --now "$LEGACY_SERVICE.service" "$LEGACY_SERVICE-pack-update.timer" >/dev/null 2>&1 || true
+  rm -f "/etc/systemd/system/$LEGACY_SERVICE.service" \
+    "/etc/systemd/system/$LEGACY_SERVICE-pack-update.service" \
+    "/etc/systemd/system/$LEGACY_SERVICE-pack-update.timer"
+done
 systemctl daemon-reload
 systemctl enable --now ${serviceName}.service
 systemctl enable --now ${updaterServiceName}.timer

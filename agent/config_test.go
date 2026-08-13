@@ -236,12 +236,16 @@ func TestValidUnitName(t *testing.T) {
 	valid := []string{
 		"gravit-server-12345678-1234-1234-1234-123456789abc.service",
 		"gravit-deadbeef.service",
+		"gravit-main.service",
+		"gravit-glavniy.service",
 	}
 	invalid := []string{
 		"minecraft.service",
 		"gravit-DEADBEEF.service",
 		"gravit-deadbeef.service --now",
-		"gravit-server-1234.service",
+		"gravit--main.service",
+		"gravit-main-.service",
+		"gravit-.service",
 	}
 	for _, unit := range valid {
 		if !validUnitName(unit) {

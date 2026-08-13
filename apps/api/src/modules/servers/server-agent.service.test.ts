@@ -89,7 +89,8 @@ describe('ServerAgentService', () => {
 
   test('deduplicates journal lines by cursor and marks disconnects', () => {
     const { bindingId, store, service } = harness()
-    const socket = { send: () => {}, close: () => {} }
+    const sent: string[] = []
+    const socket = { send: (message: unknown) => sent.push(String(message)), close: () => {} }
     service.handle(socket, {
       type: 'hello',
       token: 'valid-token',
@@ -108,7 +109,46 @@ describe('ServerAgentService', () => {
     service.close(socket)
 
     expect(store.listEvents(bindingId).filter((event) => event.type === 'log.stdout')).toHaveLength(1)
+    expect(sent.map((message) => JSON.parse(message)).filter((message) => message.type === 'log.ack')).toEqual([
+      { type: 'log.ack', cursor: 'cursor-1' },
+      { type: 'log.ack', cursor: 'cursor-1' },
+    ])
     expect(service.runtime(bindingId).connected).toBe(false)
+  })
+
+  test('waits for a lifecycle command terminal result', async () => {
+    const { bindingId, service } = harness()
+    const socket = { send: () => {}, close: () => {} }
+    service.handle(socket, {
+      type: 'hello', token: 'valid-token', agentVersion: '0.2.0', hostname: 'game-1', capabilities: ['systemd'],
+    })
+    const command = service.createCommand(bindingId, 'service.start', {})
+    const waiting = service.waitForCommand(command.id, new AbortController().signal)
+    service.handle(socket, { type: 'command.ack', commandId: command.id })
+    service.handle(socket, { type: 'command.completed', commandId: command.id, output: '' })
+    expect((await waiting).status).toBe('succeeded')
+  })
+
+  test('correlates ephemeral live filesystem responses', async () => {
+    const { bindingId, service } = harness()
+    const sent: string[] = []
+    const socket = { send: (message: unknown) => sent.push(String(message)), close: () => {} }
+    service.handle(socket, {
+      type: 'hello', token: 'valid-token', agentVersion: '0.2.0', hostname: 'game-1',
+      capabilities: ['systemd', 'filesystem-v1'],
+    })
+
+    const pending = service.requestFilesystem(bindingId, 'list', { path: 'config' })
+    const request = JSON.parse(sent.at(-1)!)
+    expect(request).toMatchObject({
+      type: 'fs.request',
+      request: { bindingId, operation: 'list', path: 'config' },
+    })
+    service.handle(socket, {
+      type: 'fs.response', requestId: request.request.id, ok: true,
+      result: { path: 'config', entries: [] },
+    })
+    expect(await pending).toEqual({ path: 'config', entries: [] })
   })
 
   test('delivers an immediate pack updater command to a capable agent', () => {

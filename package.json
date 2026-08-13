@@ -11,6 +11,7 @@
     "dev:api": "bun --filter @gravit-panel/api dev",
     "dev:web": "bun --filter @gravit-panel/web dev",
     "build:launcher-runtime:local": "docker build --target launcher-runtime-artifact --output type=local,dest=apps/api/data/launcher-runtime .",
+    "build:server-agent:local": "docker build --target server-agent-artifact --output type=local,dest=apps/api/data/server-agent .",
     "check": "bun --filter '*' check",
     "test": "DATABASE_PATH=:memory: bun test"
   }
