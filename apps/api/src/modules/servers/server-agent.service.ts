@@ -19,6 +19,14 @@ interface AgentHello {
   capabilities: string[]
 }
 
+interface PendingFilesystemRequest {
+  bindingId: string
+  socketKey: object
+  resolve: (value: unknown) => void
+  reject: (error: Error) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
 const commandTypes = new Set<ServerCommandType>([
   'service.start',
   'service.stop',
@@ -32,6 +40,7 @@ export class ServerAgentService {
   private readonly bindings = new WeakMap<object, string>()
   private readonly helloTimers = new WeakMap<object, ReturnType<typeof setTimeout>>()
   private readonly pendingSockets = new Set<object>()
+  private readonly pendingFilesystem = new Map<string, PendingFilesystemRequest>()
 
   constructor(
     private readonly store: ServerAgentStore,
@@ -83,6 +92,52 @@ export class ServerAgentService {
     return command
   }
 
+  async waitForCommand(commandId: string, signal: AbortSignal) {
+    const deadline = Date.now() + 2 * 60_000
+    while (Date.now() < deadline) {
+      signal.throwIfAborted()
+      const command = this.store.getCommand(commandId)
+      if (!command) throw new Error('Server command no longer exists')
+      if (command.status === 'succeeded') return command
+      if (command.status === 'failed') throw new Error(command.error ?? 'Server command failed')
+      await Bun.sleep(100)
+    }
+    throw new Error('Server command timed out')
+  }
+
+  requestFilesystem(
+    bindingId: string,
+    operation: string,
+    payload: Record<string, unknown>,
+    timeoutMs = 30_000,
+  ) {
+    const socket = this.sockets.get(bindingId)
+    const runtime = this.store.runtime(bindingId, Boolean(socket))
+    if (!socket) return Promise.reject(new Error('Host agent is offline'))
+    if (!runtime.capabilities.includes('filesystem-v1')) {
+      return Promise.reject(new Error('Host agent does not support live files'))
+    }
+    const id = crypto.randomUUID()
+    const socketKey = this.socketKey(socket)
+    return new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingFilesystem.delete(id)
+        reject(new Error('Live filesystem request timed out'))
+      }, timeoutMs)
+      this.pendingFilesystem.set(id, { bindingId, socketKey, resolve, reject, timer })
+      try {
+        socket.send(JSON.stringify({
+          type: 'fs.request',
+          request: { id, bindingId, operation, ...payload },
+        }))
+      } catch (error) {
+        clearTimeout(timer)
+        this.pendingFilesystem.delete(id)
+        reject(error instanceof Error ? error : new Error(String(error)))
+      }
+    })
+  }
+
   handle(socket: AgentSocket, raw: unknown) {
     const message = this.parse(raw)
     if (!message || typeof message.type !== 'string') return
@@ -102,13 +157,15 @@ export class ServerAgentService {
       case 'status':
         return this.status(bindingId, message.runtime)
       case 'log':
-        return this.log(bindingId, message.line)
+        return this.log(socket, bindingId, message.line)
       case 'command.ack':
         return this.ack(bindingId, message.commandId)
       case 'command.completed':
         return this.complete(bindingId, message.commandId, message.output)
       case 'command.failed':
         return this.fail(bindingId, message.commandId, message.error)
+      case 'fs.response':
+        return this.filesystemResponse(socket, bindingId, message)
     }
   }
 
@@ -124,6 +181,12 @@ export class ServerAgentService {
     const activeSocket = this.sockets.get(bindingId)
     if (!activeSocket || this.socketKey(activeSocket) !== socketKey) return
     this.sockets.delete(bindingId)
+    for (const [id, pending] of this.pendingFilesystem) {
+      if (pending.socketKey !== socketKey) continue
+      clearTimeout(pending.timer)
+      this.pendingFilesystem.delete(id)
+      pending.reject(new Error('Host agent disconnected during filesystem request'))
+    }
     this.store.requeueActive(bindingId)
     this.publish(bindingId, 'agent.disconnected', 'Host agent disconnected')
   }
@@ -181,7 +244,7 @@ export class ServerAgentService {
     })
   }
 
-  private log(bindingId: string, value: unknown) {
+  private log(socket: AgentSocket, bindingId: string, value: unknown) {
     if (!value || typeof value !== 'object') return
     const line = value as Record<string, unknown>
     if (typeof line.message !== 'string') return
@@ -193,6 +256,9 @@ export class ServerAgentService {
       typeof line.cursor === 'string' ? line.cursor : undefined,
       typeof line.createdAt === 'string' ? line.createdAt : undefined,
     )
+    if (typeof line.cursor === 'string' && line.cursor) {
+      socket.send(JSON.stringify({ type: 'log.ack', cursor: line.cursor }))
+    }
   }
 
   private ack(bindingId: string, commandId: unknown) {
@@ -222,6 +288,31 @@ export class ServerAgentService {
     this.store.finishCommand(commandId, undefined, message)
     this.publish(bindingId, 'command.failed', message, commandId)
     this.dispatchNext(bindingId)
+  }
+
+  private filesystemResponse(
+    socket: AgentSocket,
+    bindingId: string,
+    message: Record<string, unknown>,
+  ) {
+    if (typeof message.requestId !== 'string') return
+    const pending = this.pendingFilesystem.get(message.requestId)
+    if (
+      !pending ||
+      pending.bindingId !== bindingId ||
+      pending.socketKey !== this.socketKey(socket)
+    ) return
+    clearTimeout(pending.timer)
+    this.pendingFilesystem.delete(message.requestId)
+    if (message.ok === true) {
+      pending.resolve(message.result)
+      return
+    }
+    const error = message.error
+    const text = error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
+      ? error.message
+      : 'Live filesystem request failed'
+    pending.reject(new Error(text))
   }
 
   private dispatchNext(bindingId: string) {

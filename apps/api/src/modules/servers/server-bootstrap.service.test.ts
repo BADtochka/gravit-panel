@@ -8,6 +8,7 @@ import { schema } from '../../db/schema'
 import { ServerBindingsStore } from './server-bindings.store'
 import {
   launchServerWebSocketAddress,
+  serverServiceSlug,
   ServerBootstrapService,
 } from './server-bootstrap.service'
 import { ServerBootstrapStore } from './server-bootstrap.store'
@@ -35,6 +36,33 @@ test('derives the ServerWrapper address from the public LaunchServer URL', () =>
   expect(launchServerWebSocketAddress('wss://mine.example.com/api')).toBe(
     'wss://mine.example.com/api',
   )
+})
+
+test('derives readable systemd service slugs from server names', () => {
+  const bindingId = '12345678-1234-1234-1234-123456789abc'
+  expect(serverServiceSlug('main', bindingId)).toBe('main')
+  expect(serverServiceSlug('Главный', bindingId)).toBe('glavniy')
+  expect(serverServiceSlug('Сервер для друзей #2', bindingId)).toBe('server-dlya-druzey-2')
+  expect(serverServiceSlug('日本語', bindingId)).toBe('server-12345678')
+})
+
+test('reports missing server-agent artifacts without throwing', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'gravit-agent-readiness-'))
+  const service = new ServerBootstrapService(
+    {} as never, {} as never, {} as never, {} as never, {} as never,
+    'https://panel.example.com', 'https://panel.example.com/launcher', directory,
+  )
+  try {
+    expect(await service.agentArtifactsReadiness()).toMatchObject({
+      ready: false,
+      message: expect.stringContaining('gravit-agent-amd64'),
+    })
+    await writeFile(join(directory, 'gravit-agent-amd64'), 'amd64')
+    await writeFile(join(directory, 'gravit-agent-arm64'), 'arm64')
+    expect(await service.agentArtifactsReadiness()).toEqual({ ready: true, message: null })
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 test('server bootstrap claim survives downloads and ends only after a terminal report', async () => {
@@ -148,8 +176,14 @@ test('server bootstrap claim survives downloads and ends only after a terminal r
   expect(script).not.toContain('WorkingDirectory="$WORKDIR"')
   expect(script).toContain('systemd-analyze verify "${UNITS[@]}"')
   expect(script).toContain('ExecStartPre=+$FIREWALL_ROOT/allow-local-rcon.sh $RCON_PORT')
+  expect(script).toContain('ip saddr 127.0.0.0/8 tcp dport @rcon_ports accept')
   expect(script).toContain('ExecStart=/usr/local/bin/gravit-agent')
-  expect(script).toContain('systemctl enable --now gravit-')
+  expect(script).toContain(`"root": "/var/lib/gravit-panel/servers/${binding.id!}"`)
+  expect(script).toContain('ProtectHome=false')
+  expect(script).toContain('systemctl enable --now gravit-main-server.service')
+  expect(script).toContain('gravit-main-server-pack-update.service')
+  expect(script).toContain(`gravit-${binding.id!.slice(0, 8)}`)
+  expect(script).toContain(`gravit-server-${binding.id!}`)
   const scriptDirectory = await mkdtemp(join(tmpdir(), 'gravit-bootstrap-script-'))
   try {
     const scriptPath = join(scriptDirectory, 'install.sh')

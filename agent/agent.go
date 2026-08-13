@@ -25,6 +25,7 @@ type bindingAgent struct {
 	logger            *slog.Logger
 	commands          chan queuedCommand
 	results           *commandResultCache
+	filesystemRoot    string
 }
 
 type queuedCommand struct {
@@ -36,6 +37,8 @@ type connectionSession struct {
 	conn   *websocket.Conn
 	write  sync.Mutex
 	cancel context.CancelFunc
+	ackMu  sync.Mutex
+	logAcks map[string]chan struct{}
 }
 
 func (a *bindingAgent) run(ctx context.Context) {
@@ -75,7 +78,7 @@ func (a *bindingAgent) connect(parent context.Context) error {
 		return fmt.Errorf("websocket connect: %w", err)
 	}
 	ctx, cancel := context.WithCancel(parent)
-	session := &connectionSession{conn: conn, cancel: cancel}
+	session := &connectionSession{conn: conn, cancel: cancel, logAcks: make(map[string]chan struct{})}
 	readStopped := make(chan struct{})
 	go func() {
 		select {
@@ -90,13 +93,17 @@ func (a *bindingAgent) connect(parent context.Context) error {
 		_ = session.close()
 	}()
 	conn.SetReadLimit(1 << 20)
+	_ = conn.SetReadDeadline(time.Now().Add(2 * a.heartbeatInterval))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(2 * a.heartbeatInterval))
+	})
 
 	if err := session.send(helloMessage{
 		Type:         "hello",
 		Token:        a.config.Token,
 		AgentVersion: agentVersion,
 		Hostname:     a.hostname,
-		Capabilities: []string{"systemd", "journald", "rcon", "pack-updater"},
+		Capabilities: a.capabilities(),
 	}); err != nil {
 		return err
 	}
@@ -106,7 +113,11 @@ func (a *bindingAgent) connect(parent context.Context) error {
 
 	go a.periodicUpdates(ctx, session)
 	go streamJournal(ctx, a.config.Unit, a.results.journalCursor, func(message any) error {
-		err := session.send(message)
+		line, ok := message.(logMessage)
+		if !ok {
+			return errors.New("invalid journal message")
+		}
+		err := session.sendLog(ctx, line)
 		if err != nil {
 			cancel()
 		}
@@ -123,6 +134,17 @@ func (a *bindingAgent) connect(parent context.Context) error {
 		var message inboundMessage
 		if err := conn.ReadJSON(&message); err != nil {
 			return err
+		}
+		if message.Type == "log.ack" {
+			session.ackLog(message.Cursor)
+			continue
+		}
+		if message.Type == "fs.request" {
+			response := a.handleFilesystem(message.Request)
+			if err := session.send(response); err != nil {
+				return err
+			}
+			continue
 		}
 		if message.Type != "command" {
 			continue
@@ -164,6 +186,14 @@ func (a *bindingAgent) connect(parent context.Context) error {
 	}
 }
 
+func (a *bindingAgent) capabilities() []string {
+	capabilities := []string{"systemd", "journald", "rcon", "pack-updater"}
+	if a.filesystemRoot != "" {
+		capabilities = append(capabilities, "filesystem-v1")
+	}
+	return capabilities
+}
+
 func (a *bindingAgent) enqueueCommand(command queuedCommand) bool {
 	select {
 	case a.commands <- command:
@@ -202,6 +232,10 @@ func (a *bindingAgent) periodicUpdates(ctx context.Context, session *connectionS
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if err := session.ping(); err != nil {
+				session.cancel()
+				return
+			}
 			if session.send(heartbeatMessage{Type: "heartbeat", CreatedAt: timestamp()}) != nil {
 				session.cancel()
 				return
@@ -276,6 +310,51 @@ func (s *connectionSession) send(message any) error {
 	return s.conn.WriteJSON(message)
 }
 
+func (s *connectionSession) ping() error {
+	s.write.Lock()
+	defer s.write.Unlock()
+	return s.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
+}
+
+func (s *connectionSession) sendLog(ctx context.Context, message logMessage) error {
+	if message.Line.Cursor == "" {
+		return s.send(message)
+	}
+	ack := make(chan struct{})
+	s.ackMu.Lock()
+	s.logAcks[message.Line.Cursor] = ack
+	s.ackMu.Unlock()
+	defer func() {
+		s.ackMu.Lock()
+		delete(s.logAcks, message.Line.Cursor)
+		s.ackMu.Unlock()
+	}()
+	if err := s.send(message); err != nil {
+		return err
+	}
+	select {
+	case <-ack:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(10 * time.Second):
+		return errors.New("journal acknowledgement timed out")
+	}
+}
+
+func (s *connectionSession) ackLog(cursor string) {
+	s.ackMu.Lock()
+	ack := s.logAcks[cursor]
+	s.ackMu.Unlock()
+	if ack != nil {
+		select {
+		case <-ack:
+		default:
+			close(ack)
+		}
+	}
+}
+
 func (s *connectionSession) close() error {
 	s.write.Lock()
 	defer s.write.Unlock()
@@ -299,6 +378,10 @@ func newBindingAgents(cfg Config, logger *slog.Logger) ([]*bindingAgent, error) 
 		if err != nil {
 			return nil, fmt.Errorf("initialize command state for binding %q: %w", binding.ID, err)
 		}
+		filesystemRoot, rootErr := initializeFilesystemRoot(binding)
+		if rootErr != nil && binding.Root != "" {
+			logger.Warn("live filesystem unavailable", "bindingId", binding.ID, "error", rootErr)
+		}
 		agents = append(agents, &bindingAgent{
 			config:            binding,
 			endpoint:          endpoint,
@@ -307,6 +390,7 @@ func newBindingAgents(cfg Config, logger *slog.Logger) ([]*bindingAgent, error) 
 			logger:            logger.With("bindingId", binding.ID, "unit", binding.Unit),
 			commands:          make(chan queuedCommand, commandQueueCapacity),
 			results:           results,
+			filesystemRoot:    filesystemRoot,
 		})
 	}
 	return agents, nil
