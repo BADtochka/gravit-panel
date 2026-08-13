@@ -23,6 +23,13 @@
       </div>
     </div>
 
+    <div class="flex w-fit rounded-lg border bg-muted/30 p-1">
+      <Button v-for="item in scopes" :key="item.value" size="sm" :variant="scope === item.value ? 'secondary' : 'ghost'" @click="scope = item.value">
+        {{ item.label }}
+        <span class="ml-1 text-xs text-muted-foreground">{{ countFor(item.value) }}</span>
+      </Button>
+    </div>
+
     <p
       v-if="queryError || createError"
       class="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
@@ -31,40 +38,44 @@
     </p>
 
     <div class="grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
-      <div class="space-y-2">
-        <p class="text-xs font-medium uppercase text-muted-foreground">Recent jobs</p>
-        <p v-if="isLoading" class="py-8 text-center text-sm text-muted-foreground">Loading jobs...</p>
-        <p
-          v-else-if="!jobs?.items.length"
-          class="rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground"
-        >
-          No jobs yet
-        </p>
-        <Button
-          v-for="job in jobs?.items"
-          :key="job.id"
-          variant="outline"
-          type="button"
-          class="h-auto w-full flex-col items-stretch gap-0 whitespace-normal bg-card p-3 text-left shadow-none hover:bg-accent dark:bg-card"
-          :class="{
-            'border-foreground/30 bg-accent dark:bg-accent': selectedJobId === job.id,
-          }"
-          @click="selectedJobId = job.id"
-        >
-          <span class="flex items-center justify-between gap-2">
-            <span class="truncate text-sm font-medium">{{ job.type }}</span>
-            <span class="rounded px-1.5 py-0.5 text-xs font-medium" :class="statusClass[job.status]">
-              {{ statusLabel[job.status] }}
+      <div class="overflow-hidden rounded-md border bg-card">
+        <div class="flex h-12 items-center border-b px-4">
+          <p class="text-xs font-medium uppercase text-muted-foreground">Recent jobs</p>
+        </div>
+        <div class="max-h-[36rem] min-h-80 space-y-2 overflow-y-auto p-3">
+          <p v-if="isLoading" class="py-8 text-center text-sm text-muted-foreground">Loading jobs...</p>
+          <p
+            v-else-if="!filteredJobs.length"
+            class="rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground"
+          >
+            No jobs yet
+          </p>
+          <Button
+            v-for="job in filteredJobs"
+            :key="job.id"
+            variant="outline"
+            type="button"
+            class="h-auto w-full flex-col items-stretch gap-0 whitespace-normal bg-card p-3 text-left shadow-none hover:bg-accent dark:bg-card"
+            :class="{
+              'border-foreground/30 bg-accent dark:bg-accent': selectedJobId === job.id,
+            }"
+            @click="selectedJobId = job.id"
+          >
+            <span class="flex items-center justify-between gap-2">
+              <span class="truncate text-sm font-medium">{{ job.type }}</span>
+              <span class="rounded px-1.5 py-0.5 text-xs font-medium" :class="statusClass[job.status]">
+                {{ statusLabel[job.status] }}
+              </span>
             </span>
-          </span>
-          <span class="mt-2 block h-1.5 overflow-hidden rounded bg-muted">
-            <span
-              class="block h-full bg-foreground transition-[width]"
-              :style="{ width: `${job.progress}%` }"
-            />
-          </span>
-          <span class="mt-2 block text-xs text-muted-foreground">{{ formatTime(job.createdAt) }}</span>
-        </Button>
+            <span class="mt-2 block h-1.5 overflow-hidden rounded bg-muted">
+              <span
+                class="block h-full bg-foreground transition-[width]"
+                :style="{ width: `${job.progress}%` }"
+              />
+            </span>
+            <span class="mt-2 block text-xs text-muted-foreground">{{ formatTime(job.createdAt) }}</span>
+          </Button>
+        </div>
       </div>
 
       <div class="min-w-0 rounded-md border bg-card">
@@ -117,13 +128,17 @@ import { useLogAutoScroll } from '@/composables/useLogAutoScroll'
 import { connectJobEventSocket, type JobEventConnection } from '@/lib/job-event-socket'
 import { panelFetch } from '@/lib/public-path'
 import type { JobEvent, JobRecord, JobStatus, JobsResponse } from '@gravit-panel/shared'
+import type { JobType } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { Play, RefreshCw } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useJobsStore, type JobsScope } from '@/stores/jobs'
+import { storeToRefs } from 'pinia'
 
 const queryClient = useQueryClient()
 const route = useRoute()
+const { scope } = storeToRefs(useJobsStore())
 const routeJobId = computed(() =>
   typeof route.query.job === 'string' ? route.query.job : '',
 )
@@ -148,7 +163,6 @@ const {
 } = useQuery({
   queryKey: ['jobs'],
   queryFn: () => getJson<JobsResponse>('/api/jobs?limit=50'),
-  refetchInterval: 1_000,
 })
 
 const { error: createError, mutate: createJob, isPending } = useMutation({
@@ -158,6 +172,27 @@ const { error: createError, mutate: createJob, isPending } = useMutation({
     await queryClient.invalidateQueries({ queryKey: ['jobs'] })
   },
 })
+
+const serverJobTypes = new Set<JobType>([
+  'gravit.server.binding.apply',
+  'gravit.server.binding.remove',
+  'gravit.server-pack.modify',
+  'gravit.server-pack.publish',
+  'gravit.server-pack.deploy',
+  'gravit.server.service',
+  'gravit.server-bootstrap.prepare',
+  'gravit.mods.server.install',
+])
+const jobScope = (job: JobRecord): Exclude<JobsScope, 'all'> => serverJobTypes.has(job.type) ? 'server' : 'client'
+const filteredJobs = computed(() => jobs.value?.items.filter((job) => scope.value === 'all' || jobScope(job) === scope.value) ?? [])
+const scopes: Array<{ value: JobsScope; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'client', label: 'Client & Launcher' },
+  { value: 'server', label: 'Server' },
+]
+const countFor = (value: JobsScope) => value === 'all'
+  ? jobs.value?.items.length ?? 0
+  : jobs.value?.items.filter((job) => jobScope(job) === value).length ?? 0
 
 const selectedJob = computed(() => jobs.value?.items.find((job) => job.id === selectedJobId.value))
 
@@ -199,12 +234,12 @@ watch(
   },
 )
 watch(
-  () => jobs.value?.items,
-  (items) => {
-    if (!selectedJobId.value && items?.length) {
+  [() => jobs.value?.items, scope],
+  ([items]) => {
+    if ((!selectedJobId.value || !filteredJobs.value.some((job) => job.id === selectedJobId.value)) && filteredJobs.value.length) {
       selectedJobId.value =
-        items.find((job) => job.status === 'queued' || job.status === 'running')?.id ??
-        items[0].id
+        filteredJobs.value.find((job) => job.status === 'queued' || job.status === 'running')?.id ??
+        filteredJobs.value[0]!.id
     }
   },
   { immediate: true },

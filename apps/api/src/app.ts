@@ -6,6 +6,7 @@ import { authRoutes } from './modules/auth/auth.routes'
 import { clientsRoutes } from './modules/clients/clients.routes'
 import { dockerRoutes } from './modules/docker/docker.routes'
 import { gravitRoutes } from './modules/gravit/gravit.routes'
+import { launchServerFilesRoutes } from './modules/gravit/launchserver-files.routes'
 import { jobsRoutes } from './modules/jobs/jobs.routes'
 import { modsRoutes } from './modules/mods/mods.routes'
 import { modulesRoutes } from './modules/modules/modules.routes'
@@ -50,6 +51,7 @@ export const app = new Elysia({ prefix: '/api' })
   .use(dockerRoutes)
   .use(authRoutes)
   .use(gravitRoutes)
+  .use(launchServerFilesRoutes)
   .use(jobsRoutes)
   .use(modulesRoutes)
   .use(clientsRoutes)

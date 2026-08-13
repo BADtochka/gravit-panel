@@ -64,6 +64,7 @@ const {
     'gravit.server-pack.modify',
     'gravit.server-pack.publish',
     'gravit.server-pack.deploy',
+    'gravit.server.service',
     'gravit.server-bootstrap.prepare',
   ],
 )

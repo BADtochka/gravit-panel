@@ -437,6 +437,8 @@ export const createModsRoutes = ({
         minecraftVersion: t.Optional(minecraftVersion),
         loader: t.Optional(loader),
         confirmRemoval: t.Optional(t.Boolean()),
+        removeFromServer: t.Optional(t.Boolean()),
+        removeUnusedDependencies: t.Optional(t.Boolean()),
       }),
     },
   )
@@ -478,7 +480,10 @@ export const createModsRoutes = ({
         { ...body },
         'Permanent mod deletion queued',
         async (context) => ({
-          ...(await manager.remove(installation, body.profile, body.filename, context)),
+          ...(await manager.remove(installation, body.profile, body.filename, context, {
+            removeFromServer: body.removeFromServer,
+            removeUnusedDependencies: body.removeUnusedDependencies,
+          })),
         }),
       )
       set.status = 202
@@ -490,6 +495,8 @@ export const createModsRoutes = ({
         profile,
         filename,
         confirmRemoval: t.Literal(true),
+        removeFromServer: t.Optional(t.Boolean()),
+        removeUnusedDependencies: t.Optional(t.Boolean()),
       }),
     },
   )

@@ -4,7 +4,7 @@
       <div>
         <h2 class="text-2xl font-semibold tracking-tight">Mods</h2>
         <p class="mt-1 text-sm text-muted-foreground">
-          Manage installed mods, configure optional mods, and install new ones.
+          Install and manage mods across the client profile, launcher, and managed servers.
         </p>
       </div>
       <div class="flex gap-2">
@@ -191,6 +191,49 @@
 
     <Card>
       <CardHeader>
+        <CardTitle class="text-base">Destinations</CardTitle>
+        <CardDescription>
+          One profile defines compatibility; each operation can target the client, one or more servers, or both.
+        </CardDescription>
+      </CardHeader>
+      <CardContent class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div class="rounded-lg border bg-primary/5 p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-sm font-semibold">Client profile</p>
+              <p class="mt-1 font-mono text-xs text-muted-foreground">{{ profile || 'No profile selected' }}</p>
+            </div>
+            <Badge variant="secondary">Client & Launcher</Badge>
+          </div>
+          <p class="mt-3 text-xs text-muted-foreground">
+            Required client files and optional launcher mod settings.
+          </p>
+        </div>
+        <div
+          v-for="server in managedServers"
+          :key="server.id!"
+          class="rounded-lg border p-4"
+          :class="selectedServerId === server.id ? 'border-primary bg-primary/5' : ''"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="truncate text-sm font-semibold">{{ server.name }}</p>
+              <p class="mt-1 truncate font-mono text-xs text-muted-foreground">{{ server.serverAddress }}:{{ server.serverPort }}</p>
+            </div>
+            <Badge :variant="server.deploymentState === 'installed' ? 'secondary' : 'outline'">{{ server.deploymentState }}</Badge>
+          </div>
+          <Button class="mt-3 px-0" size="sm" variant="link" @click="openServerFiles(server)">
+            <FolderOpen /> Open live files
+          </Button>
+        </div>
+        <div v-if="!managedServers.length" class="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+          No managed server destinations exist for this profile.
+        </div>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <CardTitle class="text-base">Target profile</CardTitle>
@@ -214,11 +257,18 @@
       <CardContent class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <div>
           <label class="text-xs font-medium" for="mods-profile">Profile</label>
-          <p id="mods-profile" class="mt-1 flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm">
-            {{ profile || 'No profile selected' }}
-          </p>
+          <Select v-model="profile">
+            <SelectTrigger id="mods-profile" class="mt-1 w-full">
+              <SelectValue placeholder="No profile selected" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="item in profiles?.items ?? []" :key="item.name" :value="item.name">
+                {{ item.title }}<template v-if="item.title !== item.name"> · {{ item.name }}</template>
+              </SelectItem>
+            </SelectContent>
+          </Select>
           <p class="mt-1 text-xs text-muted-foreground">
-            Switch profiles from the sidebar.
+            Shared by client files and managed server destinations.
           </p>
         </div>
         <div>
@@ -282,11 +332,51 @@
 
     <Card>
       <CardHeader>
+        <CardTitle class="text-base">Managed server mods</CardTitle>
+        <CardDescription>
+          Live JAR files currently present in each managed server's mods directory.
+        </CardDescription>
+      </CardHeader>
+      <CardContent class="grid gap-3 lg:grid-cols-2">
+        <div
+          v-for="server in serverModInventories"
+          :key="server.bindingId"
+          class="min-w-0 rounded-lg border p-4"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="truncate text-sm font-semibold">{{ server.serverName }}</p>
+              <p class="mt-1 text-xs text-muted-foreground">
+                {{ server.error ? server.error : `${server.items.length} live mod${server.items.length === 1 ? '' : 's'}` }}
+              </p>
+            </div>
+            <Badge :variant="server.connected ? 'secondary' : 'destructive'">
+              {{ server.connected ? 'Live' : 'Offline' }}
+            </Badge>
+          </div>
+          <div v-if="server.items.length" class="mt-3 max-h-40 space-y-1 overflow-auto rounded-md bg-muted/35 p-2">
+            <div v-for="mod in server.items" :key="mod.path" class="flex items-center justify-between gap-3 px-2 py-1 text-xs">
+              <span class="min-w-0 truncate font-mono">{{ mod.path.split('/').at(-1) }}</span>
+              <span class="shrink-0 text-muted-foreground">{{ formatBytes(mod.size ?? 0) }}</span>
+            </div>
+          </div>
+          <Button class="mt-3 px-0" size="sm" variant="link" @click="openServerMods(server.bindingId)">
+            <FolderOpen /> Open live mods folder
+          </Button>
+        </div>
+        <div v-if="!serverModInventories.length" class="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+          No managed server mod inventories are available.
+        </div>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <CardTitle class="text-base">Installed mods</CardTitle>
+            <CardTitle class="text-base">Client profile mods</CardTitle>
             <CardDescription>
-              Manage installed mod files. Click to select for bulk actions.
+              Manage client-side files and optionally mirror compatible projects to managed servers.
             </CardDescription>
           </div>
           <div class="flex items-center gap-2">
@@ -349,10 +439,14 @@
                   Every selected file will be deleted permanently. This action cannot be undone.
                 </AlertDialogDescription>
               </AlertDialogHeader>
-              <div class="py-3">
+              <div class="space-y-3 py-3">
                 <label class="flex items-center gap-2 text-sm">
                   <Checkbox v-model="bulkRemoveFromServer" />
                   Also remove from managed servers
+                </label>
+                <label class="flex items-center gap-2 text-sm" :class="{ 'text-muted-foreground': !bulkRemoveFromServer }">
+                  <Checkbox v-model="bulkRemoveUnusedDependencies" :disabled="!bulkRemoveFromServer" />
+                  Remove dependencies no longer used by other server mods
                 </label>
               </div>
               <AlertDialogFooter>
@@ -438,10 +532,14 @@
                         The file will be deleted permanently. This action cannot be undone.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
-                    <div class="py-3">
+                    <div class="space-y-3 py-3">
                       <label class="flex items-center gap-2 text-sm">
                         <Checkbox v-model="item._removeFromServer" />
                         Also remove from managed servers
+                      </label>
+                      <label class="flex items-center gap-2 text-sm" :class="{ 'text-muted-foreground': !item._removeFromServer }">
+                        <Checkbox v-model="item._removeUnusedDependencies" :disabled="!item._removeFromServer" />
+                        Remove dependencies no longer used by other server mods
                       </label>
                     </div>
                     <AlertDialogFooter>
@@ -574,6 +672,7 @@ import { useInstallationJob } from '@/composables/useInstallationJob'
 import { useClientProfiles } from '@/composables/useClientProfiles'
 import { useLaunchServerStore } from '@/stores/launchserver'
 import { useProfilesStore } from '@/stores/profiles'
+import { serverBindingKey, useServersStore } from '@/stores/servers'
 import { registerJobNotification } from '@/stores/job-notifications'
 import type {
   ClientModMode, InstalledMod, JobRecord, MinecraftLoader,
@@ -582,17 +681,21 @@ import type {
 } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
-  Check, Copy, Download, Lock, Power, RefreshCw, Search, ServerCog, Settings, Trash2,
+  Check, Copy, Download, FolderOpen, Lock, Power, RefreshCw, Search, ServerCog, Settings, Trash2,
   TriangleAlert, Unlock,
 } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { computed, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 const loaders = ['VANILLA', 'FABRIC', 'FORGE', 'NEOFORGE', 'QUILT'] as const
 const installSelectionLimit = 200
 const queryClient = useQueryClient()
+const router = useRouter()
 const { launchServerId: installationId } = storeToRefs(useLaunchServerStore())
 const { selectedProfileName: profile } = storeToRefs(useProfilesStore())
+const serversStore = useServersStore()
+const { selectedBindingKey } = storeToRefs(serversStore)
 const version = ref('')
 const loader = ref<MinecraftLoader>('FABRIC')
 const constraintsLocked = ref(true)
@@ -604,8 +707,19 @@ const selectedInstalledFilenames = ref<string[]>([])
 const childError = ref<Error | null>(null)
 const installDialogOpen = ref(false)
 const bulkRemoveFromServer = ref(false)
+const bulkRemoveUnusedDependencies = ref(false)
 const optionalDialogOpen = ref(false)
-type InstalledModItem = InstalledMod & { _removeFromServer?: boolean }
+type InstalledModItem = InstalledMod & {
+  _removeFromServer?: boolean
+  _removeUnusedDependencies?: boolean
+}
+interface ServerModInventory {
+  bindingId: string
+  serverName: string
+  connected: boolean
+  error: string | null
+  items: Array<{ path: string; type: string; size: number | null; modifiedAt: string }>
+}
 const optionalDialogMod = ref<InstalledModItem | null>(null)
 const serverInstallDialogOpen = ref(false)
 const serverInstallMods = ref<InstalledModItem[]>([])
@@ -751,7 +865,7 @@ const {
   enabled: stateReady,
   retry: false,
 })
-const { data: serverBindings } = useQuery({
+const { data: serverBindings, error: serverBindingsError } = useQuery({
   queryKey: computed(() => ['server-bindings', installationId.value, profile.value]),
   queryFn: () => getJson<{ items: ProfileServerBinding[] }>(
     `/api/servers/profiles/${encodeURIComponent(profile.value)}/bindings` +
@@ -762,6 +876,28 @@ const { data: serverBindings } = useQuery({
 const managedServers = computed(
   () => serverBindings.value?.items.filter((item) => item.managed && item.id) ?? [],
 )
+const { data: serverMods, error: serverModsError } = useQuery({
+  queryKey: computed(() => ['server-mod-inventories', installationId.value, profile.value]),
+  queryFn: () => getJson<{ items: ServerModInventory[] }>(
+    `/api/servers/profiles/${encodeURIComponent(profile.value)}/mods` +
+    `?installationId=${encodeURIComponent(installationId.value)}`,
+  ),
+  enabled: stateReady,
+  retry: false,
+})
+const serverModInventories = computed(() => serverMods.value?.items ?? [])
+const selectedServerId = computed(
+  () => managedServers.value.find((server) => serverBindingKey(server) === selectedBindingKey.value)?.id ?? null,
+)
+const openServerFiles = (server: ProfileServerBinding) => {
+  selectedBindingKey.value = serverBindingKey(server)
+  void router.push('/panel/server/files')
+}
+const openServerMods = (bindingId: string) => {
+  const server = managedServers.value.find((item) => item.id === bindingId)
+  if (server) selectedBindingKey.value = serverBindingKey(server)
+  void router.push('/panel/server/files?path=mods')
+}
 const filteredInstalledItems = computed(() => {
   const items = installed.value?.items ?? []
   const search = installedSearch.value.trim().toLowerCase()
@@ -938,6 +1074,9 @@ const removeMod = (item: InstalledModItem) => runOperation({
     filename: item.filename,
     confirmRemoval: true,
     removeFromServer: item._removeFromServer ?? false,
+    removeUnusedDependencies: item._removeFromServer
+      ? item._removeUnusedDependencies ?? false
+      : false,
   },
 })
 const openOptionalDialog = (item: InstalledMod) => {
@@ -1014,7 +1153,11 @@ const runBulk = (action: 'enable' | 'disable' | 'update' | 'remove') => {
         ? { minecraftVersion: version.value, loader: loader.value }
         : {}),
       ...(action === 'remove'
-        ? { confirmRemoval: true, removeFromServer: bulkRemoveFromServer.value }
+        ? {
+            confirmRemoval: true,
+            removeFromServer: bulkRemoveFromServer.value,
+            removeUnusedDependencies: bulkRemoveFromServer.value && bulkRemoveUnusedDependencies.value,
+          }
         : {}),
     },
   })
@@ -1032,6 +1175,7 @@ const jobFinished = async (job: JobRecord) => {
   })
   await queryClient.invalidateQueries({ queryKey: ['server-pack'] })
   await queryClient.invalidateQueries({ queryKey: ['server-bindings'] })
+  await queryClient.invalidateQueries({ queryKey: ['server-mod-inventories'] })
   await queryClient.invalidateQueries({
     queryKey: ['optional-mods', installationId.value, profile.value],
   })
@@ -1043,6 +1187,8 @@ const pageError = computed(
     operationError.value ||
     versionsError.value ||
     profilesError.value ||
+    serverBindingsError.value ||
+    serverModsError.value ||
     activeJobError.value
     || childError.value
   ) as Error | null,

@@ -17,12 +17,18 @@ const adminPaths = new Set([
   '/panel/status',
   '/panel/jobs',
   '/panel/modules',
+  '/panel/files',
   '/panel/auth',
   '/panel/users',
   '/panel/launcher',
   '/panel/clients',
   '/panel/mods',
   '/panel/servers',
+  '/panel/server/overview',
+  '/panel/server/console',
+  '/panel/server/files',
+  '/panel/server/mods',
+  '/panel/server/deployment',
   '/panel/public-settings',
 ])
 
