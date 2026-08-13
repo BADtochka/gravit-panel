@@ -61,6 +61,7 @@ export const connectJobEventSocket = (jobId: string): JobEventConnection => {
           : []
       if (batch.length > 0) eventsListener(batch)
       terminal = message.terminal === true || batch.some((event) => terminalTypes.has(event.type))
+      if (terminal) socket?.close(1000, 'Terminal history received')
     })
     socket.addEventListener('close', () => {
       clearHeartbeat()

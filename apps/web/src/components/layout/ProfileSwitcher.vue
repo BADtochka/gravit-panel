@@ -52,32 +52,32 @@ import { useClientProfiles } from '@/composables/useClientProfiles'
 import { useProfilesStore } from '@/stores/profiles'
 import { Pencil, Plus } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 
 // Client profiles of the single managed LaunchServer. The server itself is
 // created once from the first-run wizard; this switcher only selects which
 // game client profile the operational pages act on.
 const emit = defineEmits<{ selected: [] }>()
-const route = useRoute()
 const router = useRouter()
-const { profiles, selectedProfileName } = storeToRefs(useProfilesStore())
+const profilesStore = useProfilesStore()
+const { profiles, selectedProfileName } = storeToRefs(profilesStore)
 const { error, isFetching } = useClientProfiles()
 const selectId = `profile-switcher-${crypto.randomUUID()}`
 
 const profileSelected = () => {
-  if (route.path === '/panel/clients' && route.query.new) {
-    void router.replace('/panel/clients')
-  }
+  profilesStore.consumeCreateRequest()
   emit('selected')
 }
 
 const addProfile = () => {
   emit('selected')
-  void router.push({ path: '/panel/clients', query: { new: crypto.randomUUID() } })
+  profilesStore.requestCreate()
+  void router.push('/panel/clients')
 }
 
 const manageProfile = () => {
   emit('selected')
+  profilesStore.consumeCreateRequest()
   void router.push('/panel/clients')
 }
 </script>

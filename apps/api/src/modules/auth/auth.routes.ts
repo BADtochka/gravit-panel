@@ -15,6 +15,7 @@ import type { InstallationsStore } from '../gravit/installations.store'
 import type { JobsRunner } from '../jobs/jobs.runner'
 import { activeJobForInstallation, jobsRunner } from '../jobs/jobs.runtime'
 import { AuthModuleConfigService } from './auth-module-config.service'
+import { AuthModuleArtifactsService } from './auth-module-artifacts.service'
 import { AuthProviderService } from './auth-provider.service'
 import { AuthUsersService } from './auth-users.service'
 import { moduleManagement } from '../modules/modules.runtime'
@@ -33,6 +34,7 @@ const providerService = new AuthProviderService(
 )
 const usersService = new AuthUsersService(controlFileService)
 const moduleConfigService = new AuthModuleConfigService()
+const moduleArtifactsService = new AuthModuleArtifactsService(env.MODULE_ARTIFACTS_DIR)
 
 const installationId = t.String({ format: 'uuid' })
 const authId = t.String({
@@ -53,6 +55,7 @@ export interface AuthRoutesDependencies {
   >
   users: Pick<AuthUsersService, 'list' | 'create' | 'setPassword' | 'delete'>
   moduleConfig: Pick<AuthModuleConfigService, 'getFileAuthConfig' | 'applyFileAuthConfig'>
+  moduleArtifacts: Pick<AuthModuleArtifactsService, 'cleanup'>
   installations: Pick<InstallationsStore, 'get'>
   jobs: Pick<JobsRunner, 'create'>
   activeJob: (installationId: string) => JobRecord | null | undefined
@@ -62,6 +65,7 @@ export const createAuthRoutes = ({
   providers,
   users,
   moduleConfig,
+  moduleArtifacts,
   installations,
   jobs,
   activeJob,
@@ -83,6 +87,11 @@ export const createAuthRoutes = ({
   }
 
   return new Elysia({ prefix: '/auth' })
+    .post(
+      '/module-artifacts/cleanup',
+      () => moduleArtifacts.cleanup(),
+      { body: t.Object({ confirmCleanup: t.Literal(true) }) },
+    )
     .get(
       '/configuration',
       ({ query, set }) => {
@@ -334,6 +343,7 @@ export const authRoutes = createAuthRoutes({
   providers: providerService,
   users: usersService,
   moduleConfig: moduleConfigService,
+  moduleArtifacts: moduleArtifactsService,
   installations: installationsStore,
   jobs: jobsRunner,
   activeJob: activeJobForInstallation,

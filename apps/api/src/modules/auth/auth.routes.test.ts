@@ -112,6 +112,9 @@ const createHarness = (overrides: Partial<AuthRoutesDependencies['providers']> =
           source: fileAuthRecipeSource,
         }),
       },
+      moduleArtifacts: {
+        cleanup: async () => ({ removedFiles: [], removedBytes: 0 }),
+      },
       installations: {
         get: (id) => (id === installation.id ? installation : null),
       },
