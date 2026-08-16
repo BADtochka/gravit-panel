@@ -13,7 +13,6 @@ import { ServerAgentStore } from './server-agent.store'
 import { ServerAgentEventHub } from './server-agent.events'
 import { ServerAgentService } from './server-agent.service'
 import { ServerBrowserEventsService } from './server-browser-events.service'
-import { ServerPackDeployService } from './server-pack-deploy.service'
 
 export const serverBindingsStore = new ServerBindingsStore(database)
 export const serverPackStore = new ServerPackStore(database)
@@ -32,7 +31,6 @@ export const serverPackService = new ServerPackService(
 export const serverBootstrapService = new ServerBootstrapService(
   serverBootstrapStore,
   serverBindingsStore,
-  serverPackStore,
   clientBuildService,
   controlFileService,
   env.PANEL_PUBLIC_URL,
@@ -51,9 +49,4 @@ export const serverAgentService = new ServerAgentService(
     const binding = serverBootstrapService.updaterBinding(token)
     return binding?.id ? { id: binding.id } : null
   },
-)
-export const serverPackDeployService = new ServerPackDeployService(
-  serverBindingsStore,
-  serverAgentService,
-  serverAgentStore,
 )

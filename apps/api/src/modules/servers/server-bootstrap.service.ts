@@ -24,7 +24,6 @@ import type { ControlFileService } from '../gravit/control-file.service'
 import type { JobTaskContext } from '../jobs/jobs.runner'
 import type { ServerBindingsStore } from './server-bindings.store'
 import type { ServerBootstrapStore } from './server-bootstrap.store'
-import type { ServerPackStore } from './server-pack.store'
 
 const wrapperArtifacts = {
   serverWrapper: {
@@ -145,7 +144,6 @@ export class ServerBootstrapService {
   constructor(
     private readonly drafts: ServerBootstrapStore,
     private readonly bindings: ServerBindingsStore,
-    private readonly packs: ServerPackStore,
     private readonly clients: Pick<ClientBuildService, 'getProfile'>,
     private readonly control: Pick<ControlFileService, 'createServerToken'>,
     private readonly publicUrl: string | undefined,
@@ -216,28 +214,6 @@ export class ServerBootstrapService {
       if (!binding.authId || !binding.xms || !binding.xmx) {
         throw new Error('Server binding bootstrap settings are incomplete')
       }
-      const pack = binding.packVersionId ? this.packs.get(binding.packVersionId) : null
-      if (
-        binding.packVersionId &&
-        (
-          !pack ||
-          pack.installationId !== installation.id ||
-          pack.profileName !== binding.profileName ||
-          (pack.bindingId !== null && pack.bindingId !== binding.id)
-        )
-      ) {
-        throw new Error('Selected server pack version does not exist')
-      }
-      if (
-        pack &&
-        (
-          pack.profileName !== profile.name ||
-          pack.minecraftVersion !== profile.minecraftVersion ||
-          pack.loader !== profile.loader ||
-          pack.loaderVersion !== profile.loaderVersion
-        )
-      ) throw new Error('Selected server pack version does not match the current profile')
-
       const compatibility = resolveClientCompatibility(profile.minecraftVersion)
       const launchServerAddress = launchServerWebSocketAddress(this.launchServerPublicUrl)
       const draftConfig = JSON.parse(draft.config_json) as { eulaAcceptedAt?: unknown }
@@ -253,7 +229,7 @@ export class ServerBootstrapService {
         authlibArtifact: compatibility.authlibArtifact,
         coreFile: profile.loader === 'VANILLA' ? 'server.jar' : 'core-installer.jar',
         coreInstall: profile.loader.toLowerCase() as BootstrapConfig['coreInstall'],
-        hasServerPack: Boolean(pack),
+        hasServerPack: false,
         launchServerAddress,
         binding,
       }
@@ -311,17 +287,6 @@ export class ServerBootstrapService {
           throw new Error(`${compatibility.authlibArtifact} is absent from MirrorHelper workspace`)
         }
         await copyFile(authlibPath, join(staging, 'LauncherAuthlib.jar'))
-        if (pack) {
-          const archivePath = this.packs.archivePath(pack.id)
-          const manifest = this.packs.manifest(pack.id)
-          if (!archivePath) throw new Error('Published server pack archive is missing')
-          if (!manifest?.files) throw new Error('Published server pack manifest is missing')
-          await copyFile(archivePath, join(staging, 'server-pack.tar.gz'))
-          await writeFile(
-            join(staging, 'server-pack-files'),
-            `${manifest.files.map((item) => item.path).join('\n')}\n`,
-          )
-        }
         await writeFile(
           join(staging, 'bootstrap-manifest.json'),
           `${JSON.stringify({
@@ -334,7 +299,7 @@ export class ServerBootstrapService {
               config.loader === 'FABRIC' ? fabricInstaller.version : null,
             coreSha256: sha256(core.bytes),
             authlibArtifact: config.authlibArtifact,
-            serverPackId: pack?.id ?? null,
+            serverPackId: null,
           }, null, 2)}\n`,
         )
         context.progress(45, 'Packing bootstrap payload')
@@ -451,8 +416,6 @@ bash "$TMP"
     error?: string,
     updaterToken?: string,
   ) {
-    const row = this.drafts.internalByClaim(claim)
-    const config = row ? JSON.parse(row.config_json) as BootstrapConfig : null
     const draft = this.drafts.reportClaim(claim, status, error)
     if (draft) {
       this.bindings.setState(draft.bindingId, status)
@@ -460,12 +423,6 @@ bash "$TMP"
         this.bindings.saveUpdaterToken(
           draft.bindingId,
           createHash('sha256').update(updaterToken).digest('hex'),
-        )
-      }
-      if (status === 'installed' && config?.binding.packVersionId) {
-        this.bindings.reportPack(
-          draft.bindingId,
-          config.binding.packVersionId,
         )
       }
     }
@@ -486,111 +443,6 @@ bash "$TMP"
       createHash('sha256').update(token).digest('hex'),
     )
     return binding?.id ? this.bindings.touchUpdater(binding.id) : null
-  }
-
-  updaterScript(token: string) {
-    const binding = this.updaterBinding(token)
-    if (!binding?.id || !binding.packVersionId) return null
-    if (binding.appliedPackVersionId === binding.packVersionId) return null
-    const version = this.packs.get(binding.packVersionId)
-    const manifest = this.packs.manifest(binding.packVersionId)
-    if (!version || version.bindingId !== binding.id || !manifest?.files) {
-      throw new Error('Desired server pack is unavailable')
-    }
-    const files = manifest.files.map((item) => item.path)
-    const encodedFiles = Buffer.from(`${files.join('\n')}\n`).toString('base64')
-    const publicUrl = this.requirePublicUrl()
-    const curl = publicUrl.startsWith('https:')
-      ? "curl --proto '=https' --tlsv1.2"
-      : 'curl'
-    const archiveUrl = `${publicUrl}/api/server-agent/archive/${version.id}`
-    const reportUrl = `${publicUrl}/api/server-agent/report`
-    return `#!/usr/bin/env bash
-set -Eeuo pipefail
-WORKDIR="$(readlink -f /var/lib/gravit-panel/servers/${binding.id})"
-STATE="$WORKDIR/.gravit-panel"
-NEW_LIST="$STATE/server-pack-files.new"
-OLD_LIST="$STATE/server-pack-files"
-ROLLBACK_LIST="$STATE/server-pack-files.rollback"
-ARCHIVE="$STATE/download/server-pack-${version.id}.tar.gz"
-BACKUP="$STATE/backups/pack-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
-mkdir -p "$STATE/download" "$STATE/backups"
-printf '%s' ${shellQuote(encodedFiles)} | base64 -d > "$NEW_LIST"
-cp "$NEW_LIST" "$ROLLBACK_LIST"
-${curl} -fL --retry 3 \
-  -H "authorization: Bearer $UPDATER_TOKEN" -o "$ARCHIVE" ${shellQuote(archiveUrl)}
-echo ${shellQuote(version.sha256)}"  $ARCHIVE" | sha256sum -c -
-touch "$OLD_LIST"
-EXISTING="$(mktemp)"
-while IFS= read -r path; do
-  [[ -z "$path" || ! -f "$WORKDIR/$path" ]] || printf '%s\\n' "$path" >> "$EXISTING"
-done < "$OLD_LIST"
-if [[ -s "$EXISTING" ]]; then
-  tar -czf "$BACKUP" -C "$WORKDIR" --files-from="$EXISTING"
-else
-  tar -czf "$BACKUP" --files-from=/dev/null
-fi
-rm -f "$EXISTING"
-apply_failed=false
-while IFS= read -r path; do
-  [[ -z "$path" ]] || rm -f "$WORKDIR/$path"
-done < "$OLD_LIST"
-tar -xzf "$ARCHIVE" --no-same-owner -C "$WORKDIR" || apply_failed=true
-if [[ "$apply_failed" == false ]]; then
-  mv "$NEW_LIST" "$OLD_LIST"
-  chown -R "$(stat -c %u "$WORKDIR")":"$(stat -c %g "$WORKDIR")" "$WORKDIR"
-fi
-if [[ "$apply_failed" == true ]]; then
-  while IFS= read -r path; do
-    [[ -z "$path" ]] || rm -f "$WORKDIR/$path"
-  done < "$ROLLBACK_LIST"
-  tar -xzf "$BACKUP" -C "$WORKDIR" || true
-  rm -f "$NEW_LIST"
-  curl -fsS -X POST -H "authorization: Bearer $UPDATER_TOKEN" \
-    -H 'content-type: application/json' \
-    --data ${shellQuote(JSON.stringify({
-      packVersionId: version.id,
-      status: 'failed',
-      error: 'Server pack apply failed',
-    }))} ${shellQuote(reportUrl)} >/dev/null 2>&1 || true
-  exit 1
-fi
-rm -f "$ROLLBACK_LIST"
-curl -fsS -X POST -H "authorization: Bearer $UPDATER_TOKEN" \
-  -H 'content-type: application/json' \
-  --data ${shellQuote(JSON.stringify({
-    packVersionId: version.id,
-    status: 'installed',
-  }))} ${shellQuote(reportUrl)} >/dev/null
-`
-  }
-
-  updaterArchive(token: string, versionId: string) {
-    const binding = this.updaterBinding(token)
-    const version = this.packs.get(versionId)
-    if (
-      !binding?.id ||
-      !version ||
-      binding.packVersionId !== version.id ||
-      version.bindingId !== binding.id
-    ) return null
-    const path = this.packs.archivePath(versionId)
-    return path ? { path, digest: version.sha256 } : null
-  }
-
-  reportUpdater(
-    token: string,
-    packVersionId: string,
-    status: 'installed' | 'failed',
-    error?: string,
-  ) {
-    const binding = this.updaterBinding(token)
-    if (!binding?.id || binding.packVersionId !== packVersionId) return null
-    return this.bindings.reportPack(
-      binding.id,
-      status === 'installed' ? packVersionId : null,
-      status === 'failed' ? error ?? 'Server pack apply failed' : undefined,
-    )
   }
 
   private requireBinding(installation: GravitInstallation, bindingId: string) {
@@ -620,7 +472,6 @@ curl -fsS -X POST -H "authorization: Bearer $UPDATER_TOKEN" \
       binding.serverAddress !== config.binding.serverAddress ||
       binding.serverPort !== config.binding.serverPort ||
       binding.authId !== config.binding.authId ||
-      binding.packVersionId !== config.binding.packVersionId ||
       binding.xms !== config.binding.xms ||
       binding.xmx !== config.binding.xmx ||
       JSON.stringify(binding.jvmArgs) !== JSON.stringify(config.binding.jvmArgs) ||
@@ -739,17 +590,11 @@ curl -fsS -X POST -H "authorization: Bearer $UPDATER_TOKEN" \
       '-Dlauncher.useSlf4j=true',
     ].join(' ')
     const serviceName = `gravit-${serverServiceSlug(config.binding.name, config.binding.id!)}`
-    const updaterServiceName = `${serviceName}-pack-update`
     const legacyServiceNames = [
       `gravit-${config.binding.id!.slice(0, 8)}`,
       `gravit-server-${config.binding.id!}`,
     ]
     const rconPort = 26_000 + (Number.parseInt(config.binding.id!.slice(0, 4), 16) % 10_000)
-    const updaterUrl = `${publicUrl}/api/server-agent/update`
-    const packCommand = config.hasServerPack
-      ? `tar -xzf "$PAYLOAD/server-pack.tar.gz" --no-same-owner -C "$WORKDIR"
-install -m 0600 "$PAYLOAD/server-pack-files" "$WORKDIR/.gravit-panel/server-pack-files"`
-      : ':'
     const coreCommand =
       config.coreInstall === 'vanilla'
         ? 'install -m 0644 "$PAYLOAD/server.jar" "$WORKDIR/server.jar"'
@@ -856,7 +701,6 @@ tar -xzf "$JRE_ARCHIVE" --no-same-owner --strip-components=1 -C "$WORKDIR/.gravi
 JAVA="$WORKDIR/.gravit-panel/jre/bin/java"
 
 ${coreCommand}
-${packCommand}
 "$JAVA" -jar "$PAYLOAD/ServerWrapper.jar" installAuthlib "$PAYLOAD/LauncherAuthlib.jar"
 "$JAVA" -jar "$PAYLOAD/ServerWrapper.jar" installAuthlib "$PAYLOAD/ServerWrapperInline.jar"
 install -m 0644 "$PAYLOAD/ServerWrapper.jar" "$WORKDIR/ServerWrapper.jar"
@@ -953,15 +797,7 @@ KillSignal=SIGINT
 [Install]
 WantedBy=multi-user.target
 SYSTEMD_UNIT
-UPDATER_ROOT=/usr/local/lib/gravit-panel/${config.binding.id!}
-UPDATER_ENV=/etc/gravit-panel/servers/${config.binding.id!}.env
 UPDATER_TOKEN="$(head -c 32 /dev/urandom | base64 | tr -d '\\n')"
-install -d -m 0755 "$UPDATER_ROOT" /etc/gravit-panel/servers
-cat > "$UPDATER_ENV" <<UPDATER_ENV_FILE
-UPDATER_TOKEN=$UPDATER_TOKEN
-UPDATER_URL=${updaterUrl}
-UPDATER_ENV_FILE
-chmod 0600 "$UPDATER_ENV"
 AGENT_UNIT_TMP=
 case "$ARCH" in
   x86_64|amd64) AGENT_BINARY="$PAYLOAD/gravit-agent-amd64" ;;
@@ -1010,66 +846,24 @@ ProtectHome=false
 WantedBy=multi-user.target
 AGENT_SERVICE
 fi
-cat > "$UPDATER_ROOT/update.sh" <<'UPDATER_SCRIPT'
-#!/usr/bin/env bash
-set -Eeuo pipefail
-set -a
-source /etc/gravit-panel/servers/${config.binding.id!}.env
-set +a
-TMP="$(mktemp /tmp/gravit-pack-update.XXXXXXXX)"
-cleanup() { rm -f "$TMP"; }
-trap cleanup EXIT
-STATUS="$(${curl} -sS -o "$TMP" -w '%{http_code}' \
-  -H "authorization: Bearer $UPDATER_TOKEN" "$UPDATER_URL")"
-case "$STATUS" in
-  204) exit 0 ;;
-  200) bash "$TMP" ;;
-  *) cat "$TMP" >&2; echo "Pack updater failed with HTTP $STATUS" >&2; exit 1 ;;
-esac
-UPDATER_SCRIPT
-chmod 0755 "$UPDATER_ROOT/update.sh"
-UPDATER_UNIT_TMP="$UNIT_TMP_DIR/${updaterServiceName}.service"
-UPDATER_TIMER_TMP="$UNIT_TMP_DIR/${updaterServiceName}.timer"
-cat > "$UPDATER_UNIT_TMP" <<UPDATER_SERVICE
-[Unit]
-Description=Update Gravit server pack
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=$UPDATER_ROOT/update.sh
-UPDATER_SERVICE
-cat > "$UPDATER_TIMER_TMP" <<UPDATER_TIMER
-[Unit]
-Description=Poll Gravit Panel for server pack updates
-
-[Timer]
-OnBootSec=1min
-OnUnitActiveSec=1min
-RandomizedDelaySec=15
-Persistent=true
-Unit=${updaterServiceName}.service
-
-[Install]
-WantedBy=timers.target
-UPDATER_TIMER
-UNITS=("$UNIT_TMP" "$UPDATER_UNIT_TMP" "$UPDATER_TIMER_TMP")
+UNITS=("$UNIT_TMP")
 [[ -z "$AGENT_UNIT_TMP" ]] || UNITS+=("$AGENT_UNIT_TMP")
 if ! systemd-analyze verify "\${UNITS[@]}"; then
   echo "Generated systemd units are invalid:" >&2
-  sed -n '1,200p' "$UNIT_TMP" "$UPDATER_UNIT_TMP" "$UPDATER_TIMER_TMP" >&2
+  sed -n '1,200p' "\${UNITS[@]}" >&2
   exit 1
 fi
 install -m 0644 "$UNIT_TMP" /etc/systemd/system/${serviceName}.service
-install -m 0644 "$UPDATER_UNIT_TMP" /etc/systemd/system/${updaterServiceName}.service
-install -m 0644 "$UPDATER_TIMER_TMP" /etc/systemd/system/${updaterServiceName}.timer
 if [[ -n "$AGENT_UNIT_TMP" ]]; then
   install -m 0644 "$AGENT_UNIT_TMP" /etc/systemd/system/gravit-agent.service
 fi
 rm -rf "$UNIT_TMP_DIR"
 UNIT_TMP_DIR=
 systemctl daemon-reload
+for PACK_SERVICE in ${[serviceName, ...legacyServiceNames].map((name) => `${name}-pack-update`).map(shellQuote).join(' ')}; do
+  systemctl disable --now "$PACK_SERVICE.service" "$PACK_SERVICE.timer" >/dev/null 2>&1 || true
+  rm -f "/etc/systemd/system/$PACK_SERVICE.service" "/etc/systemd/system/$PACK_SERVICE.timer"
+done
 for LEGACY_SERVICE in ${legacyServiceNames.map(shellQuote).join(' ')}; do
   [[ "$LEGACY_SERVICE" == ${shellQuote(serviceName)} ]] && continue
   systemctl disable --now "$LEGACY_SERVICE.service" "$LEGACY_SERVICE-pack-update.timer" >/dev/null 2>&1 || true
@@ -1079,7 +873,6 @@ for LEGACY_SERVICE in ${legacyServiceNames.map(shellQuote).join(' ')}; do
 done
 systemctl daemon-reload
 systemctl enable --now ${serviceName}.service
-systemctl enable --now ${updaterServiceName}.timer
 if [[ -n "$AGENT_UNIT_TMP" ]]; then
   systemctl enable gravit-agent.service
   systemctl restart gravit-agent.service

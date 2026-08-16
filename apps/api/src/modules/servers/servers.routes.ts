@@ -10,8 +10,6 @@ import {
   serverBindingsStore,
   serverBootstrapService,
   serverBootstrapStore,
-  serverPackService,
-  serverPackDeployService,
 } from './servers.runtime'
 
 const installationId = t.String({ format: 'uuid' })
@@ -70,6 +68,11 @@ const liveFileError = (set: { status?: number | string }, error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)
   set.status = message.includes('offline') || message.includes('does not support') ? 409 : 422
   return { message }
+}
+
+const serverPacksDisabled = (set: { status?: number | string }) => {
+  set.status = 410
+  return { message: 'Server packs are disabled. Use live server files instead.' }
 }
 
 export const serversRoutes = new Elysia({ prefix: '/servers' })
@@ -165,6 +168,7 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
       try {
         const result = await serverAgentService.requestFilesystem(params.bindingId, 'read', {
           path: query.path,
+          maxBytes: 512 * 1024,
         }) as { data: string; [key: string]: unknown }
         const bytes = Buffer.from(result.data, 'base64')
         if (bytes.includes(0)) throw new Error('Binary files cannot be opened in the text editor')
@@ -193,6 +197,7 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
           path: body.path,
           data: Buffer.from(bytes).toString('base64'),
           overwrite: body.overwrite,
+          maxBytes: 512 * 1024,
         })
       } catch (error) {
         return liveFileError(set, error)
@@ -213,16 +218,17 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
     async ({ params, body, set }) => {
       const target = liveBinding(body.installationId, params.bindingId, set)
       if (!target) return { message: 'Managed server binding not found.' }
-      const bytes = new Uint8Array(await body.file.arrayBuffer())
-      if (bytes.length > 512 * 1024) {
-        set.status = 422
-        return { message: 'Live uploads currently support files up to 512 KiB.' }
+       const bytes = new Uint8Array(await body.file.arrayBuffer())
+       if (bytes.length > 64 * 1024 * 1024) {
+         set.status = 422
+         return { message: 'Live uploads currently support files up to 64 MiB.' }
       }
       try {
         return await serverAgentService.requestFilesystem(params.bindingId, 'write', {
           path: body.path,
           data: Buffer.from(bytes).toString('base64'),
           overwrite: body.overwrite === 'true',
+          maxBytes: 64 * 1024 * 1024,
         })
       } catch (error) {
         return liveFileError(set, error)
@@ -234,7 +240,7 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
         installationId,
         path: t.String({ minLength: 1, maxLength: 512 }),
         overwrite: t.String(),
-        file: t.File({ maxSize: 512 * 1024 }),
+         file: t.File({ maxSize: 64 * 1024 * 1024 }),
       }),
     },
   )
@@ -333,38 +339,15 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
   )
   .get(
     '/bindings/:bindingId/pack',
-    ({ params, query, set }) => {
-      const installation = findInstallation(query.installationId, set)
-      if (!installation) return { message: 'LauncherDockered installation not found.' }
-      return serverPackService.listEntries(installation, params.bindingId)
+    ({ set }) => {
+      return serverPacksDisabled(set)
     },
     { params: t.Object({ bindingId }), query: t.Object({ installationId }) },
   )
   .post(
     '/bindings/:bindingId/pack/files',
-    async ({ params, body, set }) => {
-      const installation = findInstallation(body.installationId, set)
-      if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = conflictFor(installation.id, set)
-      if (conflict) return { message: 'Another server pack operation is active.', jobId: conflict.id }
-      const bytes = new Uint8Array(await body.file.arrayBuffer())
-      const job = jobsRunner.create(
-        'gravit.server-pack.modify',
-        { installationId: installation.id, bindingId: params.bindingId, path: body.path },
-        'Server pack file upload queued',
-        async (context) => {
-          await serverPackService.putFile(installation, params.bindingId, body.path, bytes)
-          const result = await serverPackService.publish(
-            installation,
-            params.bindingId,
-            context,
-          )
-          serverBindingsStore.setDesiredPack(params.bindingId, result.version.id)
-          return result
-        },
-      )
-      set.status = 202
-      return job
+    ({ set }) => {
+      return serverPacksDisabled(set)
     },
     {
       params: t.Object({ bindingId }),
@@ -377,43 +360,8 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
   )
   .post(
     '/bindings/:bindingId/pack/operations',
-    ({ params, body, set }) => {
-      const installation = findInstallation(body.installationId, set)
-      if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = conflictFor(installation.id, set)
-      if (conflict) return { message: 'Another server pack operation is active.', jobId: conflict.id }
-      const input = { ...body, bindingId: params.bindingId }
-      const job = jobsRunner.create(
-        'gravit.server-pack.modify',
-        input,
-        `Server pack ${body.action} queued`,
-        async (context) => {
-          if (body.action === 'mkdir') {
-            await serverPackService.createDirectory(installation, params.bindingId, body.path)
-          } else if (body.action === 'create-file') {
-            await serverPackService.createTextFile(
-              installation,
-              params.bindingId,
-              body.path,
-              body.content ?? '',
-            )
-          } else if (body.action === 'move') {
-            await serverPackService.moveEntry(
-              installation,
-              params.bindingId,
-              body.sourcePath,
-              body.destinationPath,
-            )
-          } else {
-            await serverPackService.removeEntries(installation, params.bindingId, body.paths)
-          }
-          const result = await serverPackService.publish(installation, params.bindingId, context)
-          serverBindingsStore.setDesiredPack(params.bindingId, result.version.id)
-          return result
-        },
-      )
-      set.status = 202
-      return job
+    ({ set }) => {
+      return serverPacksDisabled(set)
     },
     {
       params: t.Object({ bindingId }),
@@ -450,15 +398,8 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
   )
   .get(
     '/bindings/:bindingId/pack/file',
-    async ({ params, query, set }) => {
-      const installation = findInstallation(query.installationId, set)
-      if (!installation) return { message: 'LauncherDockered installation not found.' }
-      try {
-        return await serverPackService.readTextFile(installation, params.bindingId, query.path)
-      } catch (error) {
-        set.status = 422
-        return { message: error instanceof Error ? error.message : String(error) }
-      }
+    ({ set }) => {
+      return serverPacksDisabled(set)
     },
     {
       params: t.Object({ bindingId }),
@@ -467,24 +408,8 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
   )
   .post(
     '/bindings/:bindingId/pack/file',
-    ({ params, body, set }) => {
-      const installation = findInstallation(body.installationId, set)
-      if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = conflictFor(installation.id, set)
-      if (conflict) return { message: 'Another server pack operation is active.', jobId: conflict.id }
-      const job = jobsRunner.create(
-        'gravit.server-pack.modify',
-        { installationId: installation.id, bindingId: params.bindingId, path: body.path },
-        'Server pack text file save queued',
-        async (context) => {
-          await serverPackService.putTextFile(installation, params.bindingId, body.path, body.content)
-          const result = await serverPackService.publish(installation, params.bindingId, context)
-          serverBindingsStore.setDesiredPack(params.bindingId, result.version.id)
-          return result
-        },
-      )
-      set.status = 202
-      return job
+    ({ set }) => {
+      return serverPacksDisabled(set)
     },
     {
       params: t.Object({ bindingId }),
@@ -497,28 +422,8 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
   )
   .post(
     '/bindings/:bindingId/pack/files/remove',
-    ({ params, body, set }) => {
-      const installation = findInstallation(body.installationId, set)
-      if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = conflictFor(installation.id, set)
-      if (conflict) return { message: 'Another server pack operation is active.', jobId: conflict.id }
-      const job = jobsRunner.create(
-        'gravit.server-pack.modify',
-        { installationId: installation.id, bindingId: params.bindingId, path: body.path },
-        'Server pack file removal queued',
-        async (context) => {
-          await serverPackService.removeFile(installation, params.bindingId, body.path)
-          const result = await serverPackService.publish(
-            installation,
-            params.bindingId,
-            context,
-          )
-          serverBindingsStore.setDesiredPack(params.bindingId, result.version.id)
-          return result
-        },
-      )
-      set.status = 202
-      return job
+    ({ set }) => {
+      return serverPacksDisabled(set)
     },
     {
       params: t.Object({ bindingId }),
@@ -531,27 +436,8 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
   )
   .post(
     '/bindings/:bindingId/pack/publish',
-    ({ params, body, set }) => {
-      const installation = findInstallation(body.installationId, set)
-      if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = conflictFor(installation.id, set)
-      if (conflict) return { message: 'Another server pack operation is active.', jobId: conflict.id }
-      const job = jobsRunner.create(
-        'gravit.server-pack.publish',
-        { installationId: installation.id, bindingId: params.bindingId },
-        'Server pack publication queued',
-        async (context) => {
-          const result = await serverPackService.publish(
-            installation,
-            params.bindingId,
-            context,
-          )
-          serverBindingsStore.setDesiredPack(params.bindingId, result.version.id)
-          return result
-        },
-      )
-      set.status = 202
-      return job
+    ({ set }) => {
+      return serverPacksDisabled(set)
     },
     {
       params: t.Object({ bindingId }),
@@ -675,35 +561,8 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
   )
   .post(
     '/bindings/:bindingId/pack/deploy',
-    ({ params, body, set }) => {
-      const installation = findInstallation(body.installationId, set)
-      if (!installation) return { message: 'LauncherDockered installation not found.' }
-      const conflict = conflictFor(installation.id, set)
-      if (conflict) return { message: 'Another server operation is active.', jobId: conflict.id }
-      const binding = serverBindingsStore.get(params.bindingId)
-      if (!binding || binding.installationId !== installation.id) {
-        set.status = 404
-        return { message: 'Managed server binding not found.' }
-      }
-      try {
-        const packVersionId = serverPackDeployService.validate(binding)
-        const job = jobsRunner.create(
-          'gravit.server-pack.deploy',
-          { installationId: installation.id, bindingId: binding.id, packVersionId },
-          `${binding.name} server pack redeploy queued`,
-          async (context) => serverPackDeployService.deploy(
-            binding.id!,
-            packVersionId,
-            context.signal,
-            context.progress,
-          ),
-        )
-        set.status = 202
-        return job
-      } catch (error) {
-        set.status = 409
-        return { message: error instanceof Error ? error.message : String(error) }
-      }
+    ({ set }) => {
+      return serverPacksDisabled(set)
     },
     {
       params: t.Object({ bindingId }),
@@ -889,13 +748,10 @@ export const serverBootstrapRoutes = new Elysia({ prefix: '/server-bootstrap' })
     },
   )
 
-const bearerToken = (authorization: string | undefined) =>
-  authorization?.match(/^Bearer ([A-Za-z0-9+/=_-]{32,256})$/)?.[1] ?? ''
-
 export const serverAgentRoutes = new Elysia({ prefix: '/server-agent' })
   .ws('/connect', {
     idleTimeout: 45,
-    maxPayloadLength: 1024 * 1024,
+    maxPayloadLength: 96 * 1024 * 1024,
     open: (socket) => {
       serverAgentService.open(socket)
     },
@@ -906,53 +762,20 @@ export const serverAgentRoutes = new Elysia({ prefix: '/server-agent' })
       serverAgentService.close(socket)
     },
   })
-  .get('/update', ({ headers, set }) => {
-    const token = bearerToken(headers.authorization)
-    const binding = serverBootstrapService.updaterBinding(token)
-    if (!binding) {
-      set.status = 401
-      return 'Invalid updater credential.'
-    }
-    const script = serverBootstrapService.updaterScript(token)
-    if (!script) {
-      set.status = 204
-      return ''
-    }
-    set.headers['content-type'] = 'text/x-shellscript; charset=utf-8'
-    set.headers['cache-control'] = 'no-store'
-    return script
+  .get('/update', ({ set }) => {
+    return serverPacksDisabled(set)
   })
   .get(
     '/archive/:versionId',
-    ({ params, headers, set }) => {
-      const token = bearerToken(headers.authorization)
-      const artifact = serverBootstrapService.updaterArchive(token, params.versionId)
-      if (!artifact) {
-        set.status = 404
-        return 'Server pack is unavailable.'
-      }
-      set.headers['content-disposition'] = `attachment; filename="${basename(artifact.path)}"`
-      set.headers['x-content-sha256'] = artifact.digest
-      set.headers['cache-control'] = 'private, no-store'
-      return Bun.file(artifact.path)
+    ({ set }) => {
+      return serverPacksDisabled(set)
     },
     { params: t.Object({ versionId: t.String({ format: 'uuid' }) }) },
   )
   .post(
     '/report',
-    ({ headers, body, set }) => {
-      const token = bearerToken(headers.authorization)
-      const binding = serverBootstrapService.reportUpdater(
-        token,
-        body.packVersionId,
-        body.status,
-        body.error,
-      )
-      if (!binding) {
-        set.status = 404
-        return { message: 'Updater credential or desired pack is invalid.' }
-      }
-      return { received: true }
+    ({ set }) => {
+      return serverPacksDisabled(set)
     },
     {
       body: t.Object({

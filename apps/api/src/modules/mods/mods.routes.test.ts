@@ -169,6 +169,7 @@ describe('mod management API', () => {
         installationId: installation.id,
         profile: 'fabric',
         projectId: 'sodium',
+        filename: 'sodium.jar',
         name: 'Sodium',
         description: 'Fast renderer',
         category: 'Performance',

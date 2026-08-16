@@ -1094,6 +1094,7 @@ const convertToOptional = () => {
     body: {
       ...commonBody(),
       projectId: optionalDialogMod.value.projectId,
+      filename: optionalDialogMod.value.filename,
       name: optionalForm.name.trim(),
       description: optionalForm.description.trim(),
       category: optionalForm.category.trim() || 'Mods',
@@ -1173,7 +1174,6 @@ const jobFinished = async (job: JobRecord) => {
   await queryClient.invalidateQueries({
     queryKey: ['installed-mods', installationId.value, profile.value],
   })
-  await queryClient.invalidateQueries({ queryKey: ['server-pack'] })
   await queryClient.invalidateQueries({ queryKey: ['server-bindings'] })
   await queryClient.invalidateQueries({ queryKey: ['server-mod-inventories'] })
   await queryClient.invalidateQueries({
