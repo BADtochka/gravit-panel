@@ -64,7 +64,7 @@
       </div>
 
       <div class="h-[34rem] max-w-full overflow-auto overscroll-contain">
-        <div v-if="packLoading" class="grid h-full min-w-[40rem] place-items-center text-sm text-muted-foreground">Loading workspace...</div>
+        <div v-if="packLoading" class="grid h-full min-w-[40rem] place-items-center text-sm text-muted-foreground">Loading live files...</div>
         <div v-else-if="!visibleEntries.length" class="grid h-full min-w-[40rem] place-items-center p-8 text-center">
           <div>
             <FolderOpen class="mx-auto size-8 text-muted-foreground" />
@@ -180,7 +180,7 @@
 
     <Dialog v-model:open="renameOpen">
       <DialogContent>
-        <DialogHeader><DialogTitle>Rename or move entry</DialogTitle><DialogDescription>Enter a full path relative to the pack root. Existing entries are never overwritten.</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>Rename or move entry</DialogTitle><DialogDescription>Enter a full path relative to the server root. Existing entries are never overwritten.</DialogDescription></DialogHeader>
         <div><label class="text-sm font-medium" for="destination-path">Destination path</label><Input id="destination-path" v-model="destinationPath" class="mt-2 font-mono" @keyup.enter="moveEntry" /></div>
         <DialogFooter><Button variant="outline" @click="renameOpen = false">Cancel</Button><Button :disabled="!destinationPath.trim() || pending" @click="moveEntry">Move</Button></DialogFooter>
       </DialogContent>
@@ -346,7 +346,7 @@ const uploadFile = (event: Event) => {
   if (!file) return
   const path = joinPath(currentDirectory.value, file.name)
   if (entries.value.some((entry) => entry.path === path) && !window.confirm(`Replace ${path}?`)) return
-  if (file.size > 512 * 1024) { window.alert('Live uploads currently support files up to 512 KiB.'); return }
+  if (file.size > 64 * 1024 * 1024) { window.alert('Live uploads currently support files up to 64 MiB.'); return }
   uploadMutation.mutate({ file, path, overwrite: entries.value.some((entry) => entry.path === path) })
 }
 const saveText = () => { if (editorDirty.value && !pending.value) saveMutation.mutate({ path: activePath.value, content: editorContent.value, overwrite: true }) }

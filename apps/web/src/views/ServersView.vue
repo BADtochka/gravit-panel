@@ -61,9 +61,6 @@ const {
   [
     'gravit.server.binding.apply',
     'gravit.server.binding.remove',
-    'gravit.server-pack.modify',
-    'gravit.server-pack.publish',
-    'gravit.server-pack.deploy',
     'gravit.server.service',
     'gravit.server-bootstrap.prepare',
   ],
@@ -78,7 +75,6 @@ const jobFinished = async (job: JobRecord) => {
     queryClient.invalidateQueries({
       queryKey: ['server-bindings', installationId.value, selectedProfileName.value],
     }),
-    queryClient.invalidateQueries({ queryKey: ['server-pack'] }),
     queryClient.invalidateQueries({ queryKey: ['server-bootstrap'] }),
     queryClient.invalidateQueries({
       queryKey: ['client-profiles', installationId.value],

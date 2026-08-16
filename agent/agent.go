@@ -92,7 +92,7 @@ func (a *bindingAgent) connect(parent context.Context) error {
 		cancel()
 		_ = session.close()
 	}()
-	conn.SetReadLimit(1 << 20)
+	conn.SetReadLimit(96 << 20)
 	_ = conn.SetReadDeadline(time.Now().Add(2 * a.heartbeatInterval))
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(2 * a.heartbeatInterval))
@@ -187,7 +187,7 @@ func (a *bindingAgent) connect(parent context.Context) error {
 }
 
 func (a *bindingAgent) capabilities() []string {
-	capabilities := []string{"systemd", "journald", "rcon", "pack-updater"}
+	capabilities := []string{"systemd", "journald", "rcon"}
 	if a.filesystemRoot != "" {
 		capabilities = append(capabilities, "filesystem-v1")
 	}
@@ -262,8 +262,6 @@ func (a *bindingAgent) executeCommand(ctx context.Context, session *connectionSe
 			output, err = runSystemctl(ctx, "stop", a.config.Unit)
 		case "service.restart":
 			output, err = runSystemctl(ctx, "restart", a.config.Unit)
-		case "pack.apply":
-			output, err = runPackUpdater(ctx, a.config.Unit)
 		case "console.execute":
 			if command.Payload.Command == "" {
 				err = errors.New("payload.command is required")

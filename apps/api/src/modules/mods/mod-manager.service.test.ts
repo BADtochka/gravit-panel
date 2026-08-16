@@ -213,6 +213,7 @@ describe('ModManagerService', () => {
     const installation = installationFor(root)
     const bindingIds = [crypto.randomUUID(), crypto.randomUUID()]
     const removed: Array<{ bindingId: string; cleanup: boolean }> = []
+    const liveRemoved: string[] = []
     const desired: string[] = []
     const service = new ModManagerService(
       {} as ControlFileService,
@@ -244,6 +245,13 @@ describe('ModManagerService', () => {
         list: () => bindingIds.map((id, index) => ({ id, name: `server-${index}` })),
         setDesiredPack: (bindingId: string) => desired.push(bindingId),
       } as never,
+      {
+        requestFilesystem: async (_bindingId: string, operation: string, payload: Record<string, unknown>) => {
+          if (operation === 'list') return { entries: [{ path: 'mods/sodium.jar', type: 'file' }] }
+          if (operation === 'delete') liveRemoved.push(...payload.paths as string[])
+          return {}
+        },
+      } as never,
     )
 
     try {
@@ -251,8 +259,9 @@ describe('ModManagerService', () => {
         removeFromServer: true,
         removeUnusedDependencies: true,
       })
-      expect(removed).toEqual(bindingIds.map((bindingId) => ({ bindingId, cleanup: true })))
-      expect(desired).toEqual(bindingIds)
+      expect(removed).toEqual([])
+      expect(liveRemoved).toEqual(['mods/sodium.jar', 'mods/sodium.jar'])
+      expect(desired).toEqual([])
       await expect(access(join(directory, 'sodium.jar'))).rejects.toThrow()
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -328,6 +337,12 @@ describe('ModManagerService', () => {
         }),
         setDesiredPack: () => null,
       } as never,
+      {
+        requestFilesystem: async (_bindingId: string, operation: string, payload: Record<string, unknown>) => {
+          if (operation === 'write') installedOnServer.push(String(payload.path))
+          return {}
+        },
+      } as never,
     )
 
     try {
@@ -389,8 +404,8 @@ describe('ModManagerService', () => {
       }])
       expect(removedOptionalProjectIds).toEqual(['architectury', 'cloth-config'])
       expect(reloaded).toBe(0)
-      expect(installedOnServer).toEqual(['sodium', 'lithium'])
-      expect(published).toBe(1)
+      expect(installedOnServer).toEqual(['mods/sodium.jar', 'mods/architectury.jar', 'mods/cloth-config.jar', 'mods/lithium.jar'])
+      expect(published).toBe(0)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -519,6 +534,12 @@ describe('ModManagerService', () => {
         }),
         setDesiredPack: () => null,
       } as never,
+      {
+        requestFilesystem: async (_bindingId: string, operation: string, payload: Record<string, unknown>) => {
+          if (operation === 'write') serverFiles.push(String(payload.path))
+          return {}
+        },
+      } as never,
     )
 
     try {
@@ -567,7 +588,7 @@ describe('ModManagerService', () => {
         join(root, 'launcher', 'updates', 'fabric', 'config', 'client.json'),
         'utf8',
       )).toBe('client')
-      expect(result.serverPackVersionIds).toEqual(['pack-version'])
+      expect(result.serverFilesApplied).toBe(true)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

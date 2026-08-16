@@ -20,6 +20,7 @@ type filesystemRequest struct {
 	DestinationPath string   `json:"destinationPath,omitempty"`
 	Paths           []string `json:"paths,omitempty"`
 	Data            string   `json:"data,omitempty"`
+	MaxBytes       int64    `json:"maxBytes,omitempty"`
 	Overwrite       bool     `json:"overwrite,omitempty"`
 	Confirm         bool     `json:"confirm,omitempty"`
 }

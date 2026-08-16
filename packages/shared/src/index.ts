@@ -817,7 +817,6 @@ export type ServerCommandType =
   | 'service.stop'
   | 'service.restart'
   | 'console.execute'
-  | 'pack.apply'
 
 export type ServerCommandStatus =
   | 'queued'
@@ -974,6 +973,7 @@ export interface OptionalModUpdateInput {
   installationId: string
   profile: string
   projectId: string
+  filename: string
   name: string
   description: string
   category: string

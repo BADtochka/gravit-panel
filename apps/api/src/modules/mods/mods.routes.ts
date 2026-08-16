@@ -13,7 +13,7 @@ import { ModrinthService, modrinthSource } from './modrinth.service'
 import { clientBuildService } from '../clients/clients.routes'
 import {
   serverBindingsStore,
-  serverPackService,
+  serverAgentService,
 } from '../servers/servers.runtime'
 
 const modrinth = new ModrinthService()
@@ -22,8 +22,9 @@ const manager = new ModManagerService(
   modrinth,
   undefined,
   clientBuildService,
-  serverPackService,
+  undefined,
   serverBindingsStore,
+  serverAgentService,
 )
 const installationId = t.String({ format: 'uuid' })
 const profile = t.String({
@@ -302,6 +303,7 @@ export const createModsRoutes = ({
         installationId,
         profile,
         projectId,
+        filename,
         name: t.String({ minLength: 1, maxLength: 80 }),
         description: t.String({ maxLength: 500 }),
         category: t.String({ minLength: 1, maxLength: 40 }),

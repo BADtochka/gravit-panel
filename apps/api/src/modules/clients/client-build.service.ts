@@ -73,6 +73,7 @@ const profilePattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/
 const assetPathSegmentPattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/
 const versionPattern = /^[0-9]+(?:\.[0-9]+){1,3}$/
 const modPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/
+const optionalFilenamePattern = /^[^/\\\0]{1,255}\.jar$/
 const mirrorHelperModule = (() => {
   const item = findCatalogModule('MirrorHelper_module')
   if (!item) throw new Error('MirrorHelper is missing from the verified module catalog')
@@ -662,6 +663,7 @@ export class ClientBuildService {
     name: string,
     input: {
       projectId: string
+      filename: string
       title: string
       description: string
       category: string
@@ -689,6 +691,7 @@ export class ClientBuildService {
         item.name.toLowerCase() === title.toLowerCase()
     })) throw new Error('Another optional mod already uses this name')
     let found = false
+    let convertedSource: { source: string; target: string } | null = null
     const nextOptional = optional.map((value) => {
       if (!value || typeof value !== 'object' || Array.isArray(value)) return value
       const item = value as Record<string, unknown>
@@ -702,14 +705,46 @@ export class ClientBuildService {
         mark: input.enabledByDefault,
       }
     })
-    if (!found) throw new Error('Optional mod was not found in this profile')
-    await this.writeOptionalProfile(
-      installation,
-      name,
-      current,
-      nextOptional,
-      context,
-    )
+    if (!found) {
+      if (!optionalFilenamePattern.test(input.filename) || basename(input.filename) !== input.filename) {
+        throw new Error('Optional mod filename is invalid')
+      }
+      const source = join('updates', name, 'mods', input.filename)
+      const target = join(
+        'updates', name, '.gravit-panel-optional', 'mods', input.projectId, input.filename,
+      )
+      if (!(await this.volume.exists(installation, source, 'file'))) {
+        throw new Error('Installed mod was not found in this profile')
+      }
+      if (await this.volume.exists(installation, target, 'file')) {
+        throw new Error('Optional mod source already exists')
+      }
+      await this.volume.ensureDirectory(installation, join('updates', name, '.gravit-panel-optional', 'mods', input.projectId))
+      await this.volume.move(installation, source, target)
+      convertedSource = { source, target }
+      nextOptional.push({
+        name: title,
+        info: description,
+        category,
+        visible: true,
+        mark: input.enabledByDefault,
+        actions: [{ files: { [join('.gravit-panel-optional', 'mods', input.projectId, input.filename)]: `mods/${input.filename}` } }],
+      })
+    }
+    try {
+      await this.writeOptionalProfile(
+        installation,
+        name,
+        current,
+        nextOptional,
+        context,
+      )
+    } catch (error) {
+      if (convertedSource) {
+        await this.volume.move(installation, convertedSource.target, convertedSource.source).catch(() => {})
+      }
+      throw error
+    }
     return this.listOptionalMods(installation, name)
   }
 
