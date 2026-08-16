@@ -1,4 +1,4 @@
-import { Elysia } from 'elysia'
+import { Elysia, t } from 'elysia'
 import { env } from '../../core/env'
 import {
   SelfUpdateConflictError,
@@ -16,7 +16,9 @@ export const selfUpdateService = new SelfUpdateService({
 })
 
 export const selfUpdateRoutes = new Elysia({ prefix: '/self-update' })
-  .get('/', () => selfUpdateService.status())
+  .get('/', ({ query }) => selfUpdateService.status(query.force === 'true'), {
+    query: t.Object({ force: t.Optional(t.String()) }),
+  })
   .post('/deploy', async ({ set }) => {
     try {
       set.status = 202

@@ -9,8 +9,8 @@ interface SelfUpdateConfig {
   coolifyApplicationUuid?: string
 }
 
-interface WorkflowRunsResponse {
-  workflow_runs?: Array<{ head_sha?: string }>
+interface ReleaseResponse {
+  tag_name?: string
 }
 
 interface CoolifyDeployResponse {
@@ -39,22 +39,11 @@ export class SelfUpdateService {
     private readonly fetcher: Fetcher = fetch,
   ) {}
 
-  async status(): Promise<PanelUpdateStatus> {
+  async status(force = false): Promise<PanelUpdateStatus> {
     const currentRevision = this.revision(this.config.currentRevision)
     const configured = this.deployConfigured()
-    if (!this.config.githubToken) {
-      return {
-        configured,
-        deployEnabled: false,
-        currentRevision,
-        latestRevision: null,
-        updateAvailable: null,
-        checkedAt: new Date().toISOString(),
-        message: 'GitHub update checks are not configured.',
-      }
-    }
     try {
-      const latestRevision = await this.latestRevision()
+      const latestRevision = await this.latestRevision(force)
       return {
         configured,
         deployEnabled: configured && Boolean(currentRevision && latestRevision),
@@ -112,25 +101,27 @@ export class SelfUpdateService {
     }
   }
 
-  private async latestRevision() {
-    if (this.latestCache && this.latestCache.expiresAt > Date.now()) {
+  private async latestRevision(force = false) {
+    if (!force && this.latestCache && this.latestCache.expiresAt > Date.now()) {
       return this.latestCache.revision
     }
     const response = await this.fetcher(
-      `https://api.github.com/repos/${this.config.repository}/actions/workflows/publish-images.yml/runs?branch=main&event=push&status=success&per_page=1`,
+        `https://api.github.com/repos/${this.config.repository}/releases/latest`,
       {
         headers: {
           accept: 'application/vnd.github+json',
           'user-agent': 'GravitPanel/0.1 self-update',
-          authorization: `Bearer ${this.config.githubToken}`,
+          ...(this.config.githubToken
+            ? { authorization: `Bearer ${this.config.githubToken}` }
+            : {}),
         },
       },
     )
     if (!response.ok) {
       throw new Error(`Unable to check published panel revision (HTTP ${response.status}).`)
     }
-    const payload = (await response.json()) as WorkflowRunsResponse
-    const revision = this.revision(payload.workflow_runs?.[0]?.head_sha)
+    const payload = (await response.json()) as ReleaseResponse
+    const revision = this.revision(payload.tag_name?.match(/[a-f0-9]{40}$/i)?.[0])
     this.latestCache = { revision, expiresAt: Date.now() + cacheLifetimeMs }
     return revision
   }

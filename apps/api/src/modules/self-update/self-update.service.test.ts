@@ -13,7 +13,7 @@ test('detects a newer successfully published panel revision', async () => {
     currentRevision,
     repository: 'BADtochka/gravit-panel',
     githubToken: 'github-token',
-  }, async () => Response.json({ workflow_runs: [{ head_sha: latestRevision }] }))
+  }, async () => Response.json({ tag_name: `panel-${latestRevision}` }))
 
   expect(await service.status()).toMatchObject({
     configured: false,
@@ -25,23 +25,36 @@ test('detects a newer successfully published panel revision', async () => {
   })
 })
 
-test('does not check GitHub without an update token', async () => {
+test('checks public releases without an update token', async () => {
   let requests = 0
   const service = new SelfUpdateService({
     currentRevision,
     repository: 'BADtochka/gravit-panel',
   }, async () => {
     requests += 1
-    return Response.json({ workflow_runs: [{ head_sha: latestRevision }] })
+    return Response.json({ tag_name: `panel-${latestRevision}` })
   })
 
   expect(await service.status()).toMatchObject({
-    latestRevision: null,
-    updateAvailable: null,
+    latestRevision,
+    updateAvailable: true,
     deployEnabled: false,
-    message: 'GitHub update checks are not configured.',
+    message: null,
   })
-  expect(requests).toBe(0)
+  expect(requests).toBe(1)
+})
+
+test('bypasses the release cache for a forced status check', async () => {
+  let revision = latestRevision
+  const service = new SelfUpdateService({
+    currentRevision,
+    repository: 'BADtochka/gravit-panel',
+  }, async () => Response.json({ tag_name: `panel-${revision}` }))
+
+  expect((await service.status()).latestRevision).toBe(latestRevision)
+  revision = 'c'.repeat(40)
+  expect((await service.status()).latestRevision).toBe(latestRevision)
+  expect((await service.status(true)).latestRevision).toBe(revision)
 })
 
 test('queues one forced Coolify Compose deployment without exposing credentials', async () => {
