@@ -207,7 +207,7 @@
           </div>
           <div class="flex shrink-0 items-center gap-2">
             <Button
-              v-if="panelUpdate?.configured"
+              v-if="panelUpdate"
               variant="outline"
               size="icon"
               type="button"
@@ -325,8 +325,8 @@ const { launchServer } = storeToRefs(launchServerStore)
 const mobileNavOpen = ref(false)
 const route = useRoute()
 const router = useRouter()
-const { data: panelUpdate, isFetching: checkingPanelUpdate, refetch: refetchPanelUpdate } = usePanelSelfUpdate()
-const checkPanelUpdate = () => void refetchPanelUpdate()
+const { data: panelUpdate, isFetching: checkingPanelUpdate, checkNow: checkPanelUpdateNow } = usePanelSelfUpdate()
+const checkPanelUpdate = () => void checkPanelUpdateNow()
 const jobsStore = useJobsStore()
 type DashboardMode = 'client' | 'server'
 const dashboardMode = ref<DashboardMode>(
