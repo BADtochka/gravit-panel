@@ -138,10 +138,12 @@ describe('ModManagerService', () => {
     const directory = join(root, 'launcher', 'updates', 'fabric', 'mods')
     await mkdir(directory, { recursive: true })
     await writeFile(join(directory, 'sodium.jar'), 'mod')
+    let syncs = 0
     const service = new ModManagerService(
       {} as ControlFileService,
       {} as ModrinthService,
       localVolume,
+      { reloadProfileUpdates: async () => { syncs += 1 } } as never,
     )
     const installation = installationFor(root)
 
@@ -169,6 +171,7 @@ describe('ModManagerService', () => {
       })
       await expect(access(join(directory, 'sodium.jar.disabled'))).rejects.toThrow()
       await expect(access(join(directory, '.gravit-panel-trash'))).rejects.toThrow()
+      expect(syncs).toBe(2)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -403,7 +406,7 @@ describe('ModManagerService', () => {
         enabledByDefault: true,
       }])
       expect(removedOptionalProjectIds).toEqual(['architectury', 'cloth-config'])
-      expect(reloaded).toBe(0)
+      expect(reloaded).toBe(1)
       expect(installedOnServer).toEqual(['mods/sodium.jar', 'mods/architectury.jar', 'mods/cloth-config.jar', 'mods/lithium.jar'])
       expect(published).toBe(0)
     } finally {

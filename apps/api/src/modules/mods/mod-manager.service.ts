@@ -204,8 +204,6 @@ export class ModManagerService {
           context,
           [...optionalDependencyProjectIds],
         )
-      } else if (requiredClientChanged) {
-        await this.clients.reloadProfileUpdates(installation, context, 85)
       }
       const serverSelections = new Map<string, Set<string>>()
       for (const selection of input.selections) {
@@ -233,6 +231,9 @@ export class ModManagerService {
           input.loader,
           context,
         )
+      }
+      if (requiredClientChanged || optionalClientMods.size) {
+        await this.clients.reloadProfileUpdates(installation, context, 96)
       }
       context.progress(95, 'Selected client and server mod destinations updated')
       return {
@@ -262,6 +263,7 @@ export class ModManagerService {
         `MirrorHelper did not install the requested mods: ${missing.map((item) => item.slug).join(', ')}`,
       )
     }
+    if (this.clients) await this.clients.reloadProfileUpdates(installation, context, 96)
     return {
       installationId: installation.id,
       profile: input.profile,
@@ -282,7 +284,7 @@ export class ModManagerService {
     context: JobTaskContext,
   ) {
     if (!this.clients) throw new Error('Optional mod management is unavailable')
-    return this.clients.updateOptionalMod(
+    const result = await this.clients.updateOptionalMod(
       installation,
       input.profile,
       {
@@ -295,6 +297,8 @@ export class ModManagerService {
       },
       context,
     )
+    await this.clients.reloadProfileUpdates(installation, context, 96)
+    return result
   }
 
   async removeOptional(
@@ -304,7 +308,9 @@ export class ModManagerService {
     context: JobTaskContext,
   ) {
     if (!this.clients) throw new Error('Optional mod management is unavailable')
-    return this.clients.removeOptionalMod(installation, profile, projectId, context)
+    const result = await this.clients.removeOptionalMod(installation, profile, projectId, context)
+    await this.clients.reloadProfileUpdates(installation, context, 96)
+    return result
   }
 
   async importModpack(
@@ -492,8 +498,9 @@ export class ModManagerService {
         [...optionals.values()],
         context,
       )
-    } else if (clientChanged) {
-      await this.clients.reloadProfileUpdates(installation, context, 82)
+    }
+    if (clientChanged || optionals.size) {
+      await this.clients.reloadProfileUpdates(installation, context, 96)
     }
     context.progress(98, `Imported ${pack.inspection.name}`)
     return {
@@ -511,6 +518,7 @@ export class ModManagerService {
     filename: string,
     enabled: boolean,
     context: JobTaskContext,
+    sync = true,
   ) {
     const directory = this.modsDirectory(installation, profile)
     const relativeDirectory = this.modsRelativeDirectory(profile)
@@ -536,6 +544,7 @@ export class ModManagerService {
       posix.join(relativeDirectory, current),
       posix.join(relativeDirectory, targetName),
     )
+    if (sync && this.clients) await this.clients.reloadProfileUpdates(installation, context, 96)
     context.log(`${enabled ? 'Enabled' : 'Disabled'} ${current}`)
     context.progress(95, 'Mod state updated')
     return { installationId: installation.id, profile, filename: targetName, enabled }
@@ -578,8 +587,9 @@ export class ModManagerService {
           installation,
           input.profile,
           filename,
-          input.action === 'enable',
-          scopedContext,
+            input.action === 'enable',
+            scopedContext,
+            false,
         ))
       } else if (input.action === 'update') {
         results.push(await this.update(
@@ -587,8 +597,9 @@ export class ModManagerService {
           input.profile,
           filename,
           input.minecraftVersion!,
-          input.loader!,
-          scopedContext,
+            input.loader!,
+            scopedContext,
+            false,
         ))
       } else {
         results.push(await this.remove(
@@ -596,13 +607,15 @@ export class ModManagerService {
           input.profile,
           filename,
           scopedContext,
-          {
-            removeFromServer: input.removeFromServer,
-            removeUnusedDependencies: input.removeUnusedDependencies,
-          },
+            {
+              removeFromServer: input.removeFromServer,
+              removeUnusedDependencies: input.removeUnusedDependencies,
+              sync: false,
+            },
         ))
       }
     }
+    if (this.clients) await this.clients.reloadProfileUpdates(installation, context, 96)
     context.progress(98, `Bulk ${input.action} completed for ${results.length} mods`)
     return {
       installationId: installation.id,
@@ -618,7 +631,7 @@ export class ModManagerService {
     profile: string,
     filename: string,
     context: JobTaskContext,
-    options: { removeFromServer?: boolean; removeUnusedDependencies?: boolean } = {},
+    options: { removeFromServer?: boolean; removeUnusedDependencies?: boolean; sync?: boolean } = {},
   ) {
     const directory = this.modsDirectory(installation, profile)
     const relativeDirectory = this.modsRelativeDirectory(profile)
@@ -641,6 +654,9 @@ export class ModManagerService {
       }
     }
     await this.volume.remove(installation, posix.join(relativeDirectory, safeName))
+    if (options.sync !== false && this.clients) {
+      await this.clients.reloadProfileUpdates(installation, context, 96)
+    }
     context.log(`Deleted ${safeName} permanently`)
     context.progress(95, 'Mod deleted from profile')
     return { installationId: installation.id, profile, filename: safeName }
@@ -653,6 +669,7 @@ export class ModManagerService {
     minecraftVersion: string,
     loader: string,
     context: JobTaskContext,
+    sync = true,
   ) {
     const directory = this.modsDirectory(installation, profile)
     const relativeDirectory = this.modsRelativeDirectory(profile)
@@ -714,6 +731,7 @@ export class ModManagerService {
       throw error
     }
     await this.volume.remove(installation, backupRelativePath)
+    if (sync && this.clients) await this.clients.reloadProfileUpdates(installation, context, 96)
     context.log(`Updated ${safeName} to ${targetName}; previous file deleted`)
     context.progress(95, 'Mod update verified and installed')
     return {
