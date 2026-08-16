@@ -13,7 +13,8 @@ import (
 	"time"
 )
 
-const maxLiveFileBytes = 512 * 1024
+const maxLiveTextBytes = 512 * 1024
+const maxLiveTransferBytes = 64 * 1024 * 1024
 
 var reservedLiveRoots = map[string]bool{
 	"eula.txt": true, "serverwrapper.jar": true, "serverwrapperinline.jar": true,
@@ -99,13 +100,18 @@ func executeFilesystem(root string, request filesystemRequest) (any, error) {
 	case "read":
 		target, err := safeLivePath(root, request.Path, false); if err != nil { return nil, err }
 		info, err := os.Lstat(target); if err != nil || !info.Mode().IsRegular() { return nil, errors.New("file is unavailable") }
-		if info.Size() > maxLiveFileBytes { return nil, errors.New("file exceeds 512 KiB editor limit") }
+		maxBytes := int64(maxLiveTextBytes)
+		if request.MaxBytes > 0 && request.MaxBytes < maxBytes { maxBytes = request.MaxBytes }
+		if info.Size() > maxBytes { return nil, fmt.Errorf("file exceeds %d bytes", maxBytes) }
 		data, err := os.ReadFile(target); if err != nil { return nil, errors.New("read file") }
 		digest := sha256.Sum256(data)
 		return map[string]any{"path":request.Path,"data":base64.StdEncoding.EncodeToString(data),"size":len(data),"sha256":hex.EncodeToString(digest[:]),"modifiedAt":info.ModTime().UTC().Format(time.RFC3339Nano)}, nil
 	case "write":
 		target, err := safeLivePath(root, request.Path, false); if err != nil { return nil, err }
-		data, err := base64.StdEncoding.Strict().DecodeString(request.Data); if err != nil || len(data)>maxLiveFileBytes { return nil, errors.New("invalid or oversized file data") }
+		data, err := base64.StdEncoding.Strict().DecodeString(request.Data)
+		maxBytes := int64(maxLiveTransferBytes)
+		if request.MaxBytes > 0 && request.MaxBytes < maxBytes { maxBytes = request.MaxBytes }
+		if err != nil || int64(len(data)) > maxBytes { return nil, errors.New("invalid or oversized file data") }
 		if !request.Overwrite { if _, err := os.Lstat(target); err == nil { return nil, errors.New("destination already exists") } }
 		if info, err := os.Lstat(filepath.Dir(target)); err != nil || !info.IsDir() { return nil, errors.New("parent directory is unavailable") }
 		temp, err := os.CreateTemp(filepath.Dir(target), ".gravit-fs-"); if err != nil { return nil, errors.New("create temporary file") }

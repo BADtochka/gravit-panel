@@ -96,7 +96,7 @@
                 <TriangleAlert class="size-4" />
                 <AlertTitle>Legacy server binding</AlertTitle>
                 <AlertDescription>
-                  Adopt this server to manage installation, runtime controls, and pack files.
+                  Adopt this server to manage installation, runtime controls, and live files.
                 </AlertDescription>
               </Alert>
 
@@ -125,33 +125,13 @@
                 </div>
                 <div class="rounded-lg bg-muted/40 p-4">
                   <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                    <PackageOpen class="size-4" /> Desired pack
-                  </div>
-                  <p class="mt-3 text-sm font-medium">
-                    {{ selectedBinding.packVersionId ? 'Version assigned' : 'No version assigned' }}
-                  </p>
-                    <Button class="mt-3 px-0" size="sm" variant="link" @click="selectSection('files')">
-                    Manage mods &amp; files <ArrowRight class="size-3.5" />
-                  </Button>
-                </div>
-                <div class="rounded-lg bg-muted/40 p-4">
-                  <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                    <RefreshCw class="size-4" /> Pack update
-                  </div>
-                  <p class="mt-3 text-sm font-medium">{{ packUpdateSummary }}</p>
-                  <p v-if="selectedBinding.updaterError" class="mt-1 text-xs text-destructive">
-                    {{ selectedBinding.updaterError }}
-                  </p>
-                </div>
-                <div class="rounded-lg bg-muted/40 p-4">
-                  <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                    <Rocket class="size-4" /> Deployment
+                    <Rocket class="size-4" /> Installation
                   </div>
                   <p class="mt-3 text-sm font-medium">
                     {{ selectedBinding.managed ? selectedBinding.deploymentState : 'Not managed' }}
                   </p>
                     <Button class="mt-3 px-0" size="sm" variant="link" @click="selectSection('deployment')">
-                    Open deployment <ArrowRight class="size-3.5" />
+                    Open installation <ArrowRight class="size-3.5" />
                   </Button>
                 </div>
               </div>
@@ -175,9 +155,9 @@
             </TabsContent>
 
             <TabsContent value="files" class="m-0">
-              <ServerPackCard
+                <ServerFilesCard
                 v-if="activeTab === 'files' && selectedBinding.managed && selectedBinding.id"
-                :key="`pack-${selectedBinding.id}`"
+                :key="`files-${selectedBinding.id}`"
                 :binding-id="selectedBinding.id"
                 :disabled="pending"
                 :installation-id="installationId"
@@ -187,45 +167,6 @@
             </TabsContent>
 
             <TabsContent value="deployment" class="m-0 space-y-4">
-              <div
-                v-if="selectedBinding.managed && selectedBinding.id && selectedBinding.updaterInstalledAt"
-                class="rounded-lg border p-4"
-                :class="packUpdatePending ? 'border-sky-500/40 bg-sky-500/5' : 'bg-muted/35'"
-              >
-                <div class="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p class="text-sm font-semibold">Server pack deployment</p>
-                    <p class="mt-1 text-xs text-muted-foreground">
-                      {{ packUpdatePending
-                        ? 'A published pack is waiting to be redeployed to this server.'
-                        : 'The desired server pack is currently applied.' }}
-                    </p>
-                    <p v-if="packUpdatePending && !canApplyPack" class="mt-2 text-xs text-amber-700 dark:text-amber-300">
-                      {{ packApplyUnavailableReason }}
-                    </p>
-                  </div>
-                  <Button
-                    v-if="packUpdatePending"
-                    type="button"
-                    :disabled="pending || !canApplyPack"
-                    @click="applyPack"
-                  >
-                    <Rocket class="size-4" /> Redeploy server pack
-                  </Button>
-                </div>
-                <div
-                  v-if="successfulPackDeploy"
-                  class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-emerald-500/30 pt-4"
-                >
-                  <p class="text-sm text-emerald-700 dark:text-emerald-300">
-                    Server pack redeployed successfully. Restart to load updated mods and configuration.
-                  </p>
-                  <Button type="button" variant="outline" :disabled="pending || !selectedRuntime?.connected" @click="restartServer">
-                    <RefreshCw class="size-4" /> Restart server
-                  </Button>
-                </div>
-              </div>
-
               <Alert variant="destructive">
                 <ShieldAlert class="size-4" />
                 <AlertTitle>Native LaunchServer token cannot be revoked separately</AlertTitle>
@@ -318,26 +259,6 @@
                 </code>
                 <p v-if="visibleIssuedCommand.expiresAt" class="mt-2 text-xs text-muted-foreground">
                   Expires {{ new Date(visibleIssuedCommand.expiresAt).toLocaleString() }}
-                </p>
-              </div>
-
-              <div
-                v-if="selectedBinding.managed && selectedBinding.id && selectedBinding.updaterInstalledAt"
-                class="rounded-lg bg-muted/35 p-4"
-              >
-                <p class="text-sm font-medium">Manual pack update</p>
-                <p class="mt-1 text-xs text-muted-foreground">
-                  Start the installed updater without restarting the game server.
-                </p>
-                <code class="mt-3 block overflow-x-auto rounded bg-muted p-3 text-xs">
-                  sudo systemctl start gravit-{{ selectedBinding.id.slice(0, 8) }}-pack-update.service
-                </code>
-                <p class="mt-2 text-xs text-muted-foreground">
-                  Applied: {{ selectedBinding.appliedPackVersionId ? 'current version reported' : 'not reported' }}
-                  · last poll {{ selectedBinding.updaterLastSeenAt ?? 'never' }}
-                </p>
-                <p v-if="selectedBinding.updaterError" class="mt-2 text-xs text-destructive">
-                  Last update failed: {{ selectedBinding.updaterError }}
                 </p>
               </div>
 
@@ -437,7 +358,7 @@
           <AlertDialogTitle>Accept the Minecraft EULA?</AlertDialogTitle>
           <AlertDialogDescription>
             This confirmation is stored for this server and is not requested again for future
-            install or pack update commands.
+            install or live-agent update commands.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -452,7 +373,7 @@
 </template>
 
 <script setup lang="ts">
-import ServerPackCard from '@/components/clients/ServerPackCard.vue'
+import ServerFilesCard from '@/components/clients/ServerFilesCard.vue'
 import ServerRuntimeConsole from '@/components/servers/ServerRuntimeConsole.vue'
 import UnavailableWorkspace from '@/components/servers/UnavailableWorkspace.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -473,12 +394,11 @@ import { Tabs, TabsContent } from '@/components/ui/tabs'
 import type {
   AuthConfiguration, ClientProfileDescriptor, JobRecord, ProfileServerBinding,
   ServerBootstrapDraft, ServerBootstrapIssueResult,
-  ServerCommand, ServerRuntimeState,
 } from '@gravit-panel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
-  ArrowRight, Check, Copy, KeyRound, MemoryStick, Network, PackageOpen, Pencil, Plus,
-  RefreshCw, Rocket, Save, Server, ShieldAlert,
+  ArrowRight, Check, Copy, KeyRound, MemoryStick, Network, Pencil, Plus,
+  Rocket, Save, Server, ShieldAlert,
   Terminal, Trash2, TriangleAlert,
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
@@ -517,7 +437,6 @@ const eulaOpen = ref(false)
 const pendingPrepareBinding = ref<ProfileServerBinding | null>(null)
 const jvmArgs = ref('')
 const gameArgs = ref('nogui')
-const currentPackVersionId = ref<string | null>(null)
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 onBeforeUnmount(() => {
   if (copiedTimer) clearTimeout(copiedTimer)
@@ -577,13 +496,6 @@ const { data: selectedDrafts } = useQuery({
   ),
   enabled: computed(() => Boolean(selectedManagedId.value)),
 })
-const { data: selectedRuntime } = useQuery({
-  queryKey: computed(() => ['server-runtime', props.installationId, selectedManagedId.value]),
-  queryFn: () => getJson<ServerRuntimeState>(
-    `/api/servers/bindings/${selectedManagedId.value}/runtime?installationId=${encodeURIComponent(props.installationId)}`,
-  ),
-  enabled: computed(() => Boolean(selectedManagedId.value)),
-})
 const activeDraft = computed(
   () => selectedDrafts.value?.items.find(
     (item) => item.bindingId === selectedManagedId.value && ['ready', 'issued', 'claimed'].includes(item.status),
@@ -601,33 +513,9 @@ const authProviderName = computed(() => {
   const provider = auth.value?.providers.find((item) => item.id === id)
   return provider ? `${provider.displayName} (${provider.id})` : id
 })
-const packUpdateSummary = computed(() => {
-  const binding = selectedBinding.value
-  if (!binding?.updaterInstalledAt) return 'Updater not installed'
-  if (!binding.packVersionId) return 'No desired version'
-  return binding.appliedPackVersionId === binding.packVersionId ? 'Desired version applied' : 'Update pending'
-})
-const packUpdatePending = computed(() => Boolean(
-  selectedBinding.value?.updaterInstalledAt &&
-  selectedBinding.value.packVersionId &&
-  selectedBinding.value.packVersionId !== selectedBinding.value.appliedPackVersionId,
-))
 const showPrepareInstall = computed(() => Boolean(
-  !activeDraft.value && selectedBinding.value?.managed && (
-    !selectedBinding.value.updaterInstalledAt ||
-    (!packUpdatePending.value && ['requires-update', 'failed'].includes(selectedBinding.value.deploymentState))
-  ),
+  !activeDraft.value && selectedBinding.value?.managed,
 ))
-const canApplyPack = computed(() => Boolean(
-  selectedRuntime.value?.connected && selectedRuntime.value.capabilities.includes('pack-updater'),
-))
-const packApplyUnavailableReason = computed(() => {
-  if (!selectedRuntime.value?.connected) return 'Host agent is offline.'
-  if (!selectedRuntime.value.capabilities.includes('pack-updater')) {
-    return 'Repeat bootstrap once to upgrade the host agent.'
-  }
-  return ''
-})
 const jobMutation = useMutation({
   mutationFn: (request: { path: string; body: Record<string, unknown>; nestedJob?: boolean }) =>
     getJson<JobRecord | { job: JobRecord }>(request.path, {
@@ -665,19 +553,6 @@ const revokeMutation = useMutation({
     void queryClient.invalidateQueries({ queryKey: ['server-bootstrap'] })
   },
 })
-const applyPackMutation = useMutation({
-  mutationFn: () => getJson<JobRecord>(
-    `/api/servers/bindings/${selectedManagedId.value}/pack/deploy`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ installationId: props.installationId }),
-    },
-  ),
-  onSuccess: (job) => {
-    emit('job', job)
-    void router.push('/panel/server/deployment')
-  },
-})
 const eulaMutation = useMutation({
   mutationFn: (binding: ProfileServerBinding) => getJson(`/api/servers/bindings/${binding.id}/eula`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
@@ -699,7 +574,6 @@ const startCreate = () => {
     authId: auth.value?.providers.find((item) => item.isDefault)?.id ?? auth.value?.providers[0]?.id ?? '',
     xms: '1G', xmx: '4G',
   })
-  currentPackVersionId.value = null
   jvmArgs.value = ''
   gameArgs.value = 'nogui'
   formOpen.value = true
@@ -714,7 +588,6 @@ const edit = (binding: ProfileServerBinding) => {
     isDefault: binding.isDefault, authId: binding.authId ?? '',
     xms: binding.xms ?? '1G', xmx: binding.xmx ?? '4G',
   })
-  currentPackVersionId.value = binding.packVersionId
   jvmArgs.value = binding.jvmArgs.join(' ')
   gameArgs.value = binding.gameArgs.join(' ')
   formOpen.value = true
@@ -745,7 +618,7 @@ const adopt = (binding: ProfileServerBinding) => {
 }
 const splitArgs = (value: string) => value.trim() ? value.trim().split(/\s+/) : []
 const body = () => ({
-  installationId: props.installationId, ...form, packVersionId: currentPackVersionId.value,
+  installationId: props.installationId, ...form, packVersionId: null,
   jvmArgs: splitArgs(jvmArgs.value), gameArgs: splitArgs(gameArgs.value),
 })
 const save = () => jobMutation.mutate({
@@ -794,28 +667,6 @@ const revoke = (draft: ServerBootstrapDraft) => {
   issuedCommand.value = null
   revokeMutation.mutate(draft)
 }
-const applyPack = () => {
-  if (packUpdatePending.value && canApplyPack.value) applyPackMutation.mutate()
-}
-const successfulPackDeploy = computed(() => Boolean(
-  props.finishedJob?.type === 'gravit.server-pack.deploy' &&
-  props.finishedJob.status === 'succeeded' &&
-  props.finishedJob.input.bindingId === selectedManagedId.value,
-))
-const restartServer = () => {
-  if (!selectedManagedId.value) return
-  void getJson<ServerCommand>(`/api/servers/bindings/${selectedManagedId.value}/commands`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      installationId: props.installationId,
-      type: 'service.restart',
-      payload: {},
-    }),
-  }).catch((cause) => {
-    copyError.value = cause instanceof Error ? cause : new Error(String(cause))
-  })
-}
 const copyCommand = async () => {
   if (!visibleIssuedCommand.value) return
   try {
@@ -834,11 +685,10 @@ const canSave = computed(() => Boolean(
   /^[1-9][0-9]{0,5}[MG]$/i.test(form.xms) && /^[1-9][0-9]{0,5}[MG]$/i.test(form.xmx),
 ))
 const pending = computed(() => props.disabled || jobMutation.isPending.value || issueMutation.isPending.value ||
-  revokeMutation.isPending.value || eulaMutation.isPending.value || applyPackMutation.isPending.value)
+  revokeMutation.isPending.value || eulaMutation.isPending.value)
 const formError = computed(() => jobMutation.error.value as Error | null)
 const error = computed(() => (
   bindingError.value || jobMutation.error.value || issueMutation.error.value || revokeMutation.error.value ||
-  applyPackMutation.error.value ||
   eulaMutation.error.value || copyError.value
 ) as Error | null)
 </script>

@@ -6,7 +6,7 @@
         Browse and edit the live LaunchServer data volume. Protected credentials and runtime files are hidden.
       </p>
     </div>
-    <ServerPackCard
+    <ServerFilesCard
       v-if="launchServerId"
       :installation-id="launchServerId"
       server-name="LaunchServer"
@@ -19,7 +19,7 @@
 </template>
 
 <script setup lang="ts">
-import ServerPackCard from '@/components/clients/ServerPackCard.vue'
+import ServerFilesCard from '@/components/clients/ServerFilesCard.vue'
 import { useLaunchServerStore } from '@/stores/launchserver'
 import { storeToRefs } from 'pinia'
 

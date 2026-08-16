@@ -314,6 +314,11 @@ describe('ClientBuildService', () => {
       ) => {
         files.set(path, new TextDecoder().decode(bytes))
       },
+      ensureDirectory: async () => {},
+      move: async (_installation: GravitInstallation, source: string, target: string) => {
+        files.set(target, files.get(source)!)
+        files.delete(source)
+      },
       remove: async (_installation: GravitInstallation, path: string) => {
         files.delete(path)
       },
@@ -340,8 +345,9 @@ describe('ClientBuildService', () => {
       installation,
       'main',
       {
-        projectId: 'sodium',
-        title: 'Sodium renderer',
+         projectId: 'sodium',
+         filename: 'sodium.jar',
+         title: 'Sodium renderer',
         description: 'Recommended rendering optimization',
         category: 'Performance',
         enabledByDefault: true,
@@ -358,6 +364,29 @@ describe('ClientBuildService', () => {
     await service.removeOptionalMod(installation, 'main', 'sodium', context())
     expect((await service.listOptionalMods(installation, 'main')).items).toEqual([])
     expect(files.has(sourcePath)).toBe(false)
+
+    files.set('profiles/main.json', JSON.stringify({ title: 'Main', updateOptional: [] }))
+    files.set('updates/main/mods/iris.jar', 'jar')
+    await service.updateOptionalMod(
+      installation,
+      'main',
+      {
+        projectId: 'iris',
+        filename: 'iris.jar',
+        title: 'Iris',
+        description: 'Shaders',
+        category: 'Graphics',
+        enabledByDefault: false,
+      },
+      context(),
+    )
+    expect(files.has('updates/main/mods/iris.jar')).toBe(false)
+    expect(files.has('updates/main/.gravit-panel-optional/mods/iris/iris.jar')).toBe(true)
+    expect((await service.listOptionalMods(installation, 'main')).items[0]).toMatchObject({
+      projectId: 'iris',
+      filename: 'iris.jar',
+      enabledByDefault: false,
+    })
   })
 
   test('keeps an already loaded Prestarter module and installs the verified executable', async () => {

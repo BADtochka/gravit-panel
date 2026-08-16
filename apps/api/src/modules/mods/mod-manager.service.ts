@@ -17,6 +17,7 @@ import type { JobTaskContext } from '../jobs/jobs.runner'
 import type { ClientBuildService } from '../clients/client-build.service'
 import type { ServerPackService } from '../servers/server-pack.service'
 import type { ServerBindingsStore } from '../servers/server-bindings.store'
+import type { ServerAgentService } from '../servers/server-agent.service'
 import {
   ModrinthService,
   modrinthSource,
@@ -43,11 +44,12 @@ export class ModManagerService {
       | 'listProfiles'
       | 'buildClient'
     >,
-    private readonly serverPacks?: Pick<
+    private readonly _serverPacks?: Pick<
       ServerPackService,
       'installMods' | 'putFile' | 'publish' | 'removeMod'
     >,
-    private readonly serverBindings?: Pick<ServerBindingsStore, 'get' | 'list' | 'setDesiredPack'>,
+    private readonly serverBindings?: Pick<ServerBindingsStore, 'get' | 'list'>,
+    private readonly serverAgent?: Pick<ServerAgentService, 'requestFilesystem'>,
   ) {}
 
   async list(installation: GravitInstallation, profile: string) {
@@ -123,7 +125,7 @@ export class ModManagerService {
       ) {
         throw new Error('Selected mods and destination assignments do not match')
       }
-      if (!this.clients || !this.serverPacks || !this.serverBindings) {
+      if (!this.clients || !this.serverBindings) {
         throw new Error('Unified mod destinations are unavailable')
       }
       const clientSelections = input.selections.filter(
@@ -219,14 +221,18 @@ export class ModManagerService {
           serverSelections.set(bindingId, slugs)
         }
       }
+      if (serverSelections.size && !this.serverAgent) {
+        throw new Error('Live server files are unavailable')
+      }
       for (const [bindingId, slugs] of serverSelections) {
-        await this.serverPacks.installMods(installation, bindingId, [...slugs], context)
-        const published = await this.serverPacks.publish(
+        await this.installLiveServerMods(
           installation,
           bindingId,
+          [...slugs],
+          input.minecraftVersion,
+          input.loader,
           context,
         )
-        this.serverBindings.setDesiredPack(bindingId, published.version.id)
       }
       context.progress(95, 'Selected client and server mod destinations updated')
       return {
@@ -281,6 +287,7 @@ export class ModManagerService {
       input.profile,
       {
         projectId: input.projectId,
+        filename: input.filename,
         title: input.name,
         description: input.description,
         category: input.category,
@@ -339,7 +346,7 @@ export class ModManagerService {
     context: JobTaskContext,
   ) {
     this.validateProfile(input.profile)
-    if (!this.clients || !this.serverPacks || !this.serverBindings) {
+    if (!this.clients || !this.serverBindings || !this.serverAgent) {
       throw new Error('Modpack destinations are unavailable')
     }
     if (input.loaderVersion !== pack.inspection.loaderVersion) {
@@ -455,7 +462,7 @@ export class ModManagerService {
       }
       if (selection.installOnServer) {
         for (const binding of bindings) {
-          await this.serverPacks.putFile(installation, binding.id!, file.path, bytes)
+          await this.writeLiveServerFile(installation, binding.id!, file.path, bytes)
           serverChanged = true
         }
       }
@@ -473,12 +480,7 @@ export class ModManagerService {
       }
       if (override.side !== 'client') {
         for (const binding of bindings) {
-          await this.serverPacks.putFile(
-            installation,
-            binding.id!,
-            override.path,
-            override.bytes,
-          )
+          await this.writeLiveServerFile(installation, binding.id!, override.path, override.bytes)
           serverChanged = true
         }
       }
@@ -493,21 +495,13 @@ export class ModManagerService {
     } else if (clientChanged) {
       await this.clients.reloadProfileUpdates(installation, context, 82)
     }
-    const packVersions = []
-    if (serverChanged) {
-      for (const binding of bindings) {
-        const published = await this.serverPacks.publish(installation, binding.id!, context)
-        this.serverBindings.setDesiredPack(binding.id!, published.version.id)
-        packVersions.push(published.version.id)
-      }
-    }
     context.progress(98, `Imported ${pack.inspection.name}`)
     return {
       installationId: installation.id,
       profile: input.profile,
       modpack: pack.inspection,
       optionalCount: optionals.size,
-      serverPackVersionIds: packVersions,
+      serverFilesApplied: serverChanged,
     }
   }
 
@@ -631,29 +625,19 @@ export class ModManagerService {
     const safeName = this.safeFilename(filename)
     const sourcePath = join(directory, safeName)
     await this.assertRegularMod(sourcePath)
-    let installed: InstalledMod | undefined
     if (options.removeFromServer) {
-      installed = (await this.list(installation, profile)).items.find((item) => item.filename === safeName)
-      if (!installed?.projectId || !installed.slug) {
-        throw new Error('Server removal requires a mod recognized by Modrinth')
-      }
-      if (!this.serverPacks || !this.serverBindings) {
+      if (!this.serverAgent || !this.serverBindings) {
         throw new Error('Server mod removal is unavailable')
       }
     }
-    if (installed?.projectId && installed.slug && this.serverPacks && this.serverBindings) {
+    if (options.removeFromServer && this.serverBindings) {
+      const serverFilename = safeName.endsWith('.disabled')
+        ? safeName.slice(0, -'.disabled'.length)
+        : safeName
       for (const binding of this.serverBindings.list(installation.id, profile)) {
         if (!binding.id) continue
-        const result = await this.serverPacks.removeMod(
-          installation,
-          binding.id,
-          { projectId: installed.projectId, slug: installed.slug, filename: safeName },
-          options.removeUnusedDependencies === true,
-        )
-        if (!result.removed.length) continue
-        const published = await this.serverPacks.publish(installation, binding.id, context)
-        this.serverBindings.setDesiredPack(binding.id, published.version.id)
-        context.log(`Removed ${result.removed.length} server pack file(s) from ${binding.name}`)
+        const result = await this.removeLiveServerMod(installation, binding.id, serverFilename)
+        if (result) context.log(`Removed ${serverFilename} from ${binding.name}`)
       }
     }
     await this.volume.remove(installation, posix.join(relativeDirectory, safeName))
@@ -744,6 +728,78 @@ export class ModManagerService {
 
   private modsDirectory(installation: GravitInstallation, profile: string) {
     return join(installation.path, 'launcher', this.modsRelativeDirectory(profile))
+  }
+
+  private async installLiveServerMods(
+    installation: GravitInstallation,
+    bindingId: string,
+    slugs: string[],
+    minecraftVersion: string,
+    loader: ModInstallInput['loader'],
+    context: JobTaskContext,
+  ) {
+    if (!this.serverAgent) throw new Error('Live server files are unavailable')
+    const installed = new Set<string>()
+    for (const slug of slugs) {
+      const resolved = await this.modrinth.resolveInstall(slug, minecraftVersion, loader, 'server')
+      for (const item of resolved) {
+        if (installed.has(item.file.filename)) continue
+        installed.add(item.file.filename)
+        const bytes = await this.modrinth.download(item.file)
+        await this.writeLiveServerFile(installation, bindingId, posix.join('mods', item.file.filename), bytes)
+      }
+    }
+    context.log(`Applied ${installed.size} server mod file(s) immediately`)
+  }
+
+  private async writeLiveServerFile(
+    _installation: GravitInstallation,
+    bindingId: string,
+    path: string,
+    bytes: Uint8Array,
+  ) {
+    if (!this.serverAgent) throw new Error('Live server files are unavailable')
+    if (bytes.length > 64 * 1024 * 1024) throw new Error('Server file exceeds 64 MiB')
+    const parts = path.split('/').slice(0, -1)
+    let directory = ''
+    for (const part of parts) {
+      directory = directory ? `${directory}/${part}` : part
+      try {
+        await this.serverAgent.requestFilesystem(bindingId, 'list', { path: directory })
+      } catch {
+        await this.serverAgent.requestFilesystem(bindingId, 'mkdir', { path: directory })
+      }
+    }
+    await this.serverAgent.requestFilesystem(bindingId, 'write', {
+      path,
+      data: Buffer.from(bytes).toString('base64'),
+      overwrite: true,
+      maxBytes: 64 * 1024 * 1024,
+    })
+  }
+
+  private async removeLiveServerMod(
+    _installation: GravitInstallation,
+    bindingId: string,
+    filename: string,
+  ) {
+    if (!this.serverAgent) throw new Error('Live server files are unavailable')
+    let result: { entries?: Array<{ path: string; type: string }> }
+    try {
+      result = await this.serverAgent.requestFilesystem(bindingId, 'list', { path: 'mods' }) as {
+      entries?: Array<{ path: string; type: string }>
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('directory is unavailable')) return false
+      throw error
+    }
+    const path = `mods/${filename}`
+    if (!result.entries?.some((entry) => entry.type === 'file' && entry.path === path)) return false
+    await this.serverAgent.requestFilesystem(bindingId, 'delete', {
+      paths: [path],
+      confirm: true,
+    })
+    return true
   }
 
   private modsRelativeDirectory(profile: string) {

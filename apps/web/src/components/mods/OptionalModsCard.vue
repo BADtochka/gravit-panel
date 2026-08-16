@@ -135,9 +135,10 @@ const run = async (operation: () => Promise<JobRecord>) => {
 }
 const save = (item: OptionalMod) => run(() => post('/api/mods/optional/update', {
   installationId: props.installationId,
-  profile: props.profile,
-  projectId: item.projectId,
-  ...draft(item),
+   profile: props.profile,
+   projectId: item.projectId,
+   filename: item.filename,
+   ...draft(item),
 }))
 const remove = (item: OptionalMod) => run(() => post('/api/mods/optional/remove', {
   installationId: props.installationId,
