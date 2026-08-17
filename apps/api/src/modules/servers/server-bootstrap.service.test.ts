@@ -145,7 +145,6 @@ test('server bootstrap claim survives downloads and ends only after a terminal r
       authlibArtifact: 'LauncherAuthlib6.jar',
       coreFile: 'server.jar',
       coreInstall: 'vanilla',
-      hasServerPack: false,
       launchServerAddress: 'wss://mine.example.com/api',
       binding,
     },

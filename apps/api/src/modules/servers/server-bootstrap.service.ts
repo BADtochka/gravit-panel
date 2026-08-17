@@ -69,7 +69,6 @@ interface BootstrapConfig {
   authlibArtifact: string
   coreFile: string
   coreInstall: 'vanilla' | 'fabric' | 'forge' | 'neoforge'
-  hasServerPack: boolean
   launchServerAddress: string
   binding: ProfileServerBinding
 }
@@ -229,7 +228,6 @@ export class ServerBootstrapService {
         authlibArtifact: compatibility.authlibArtifact,
         coreFile: profile.loader === 'VANILLA' ? 'server.jar' : 'core-installer.jar',
         coreInstall: profile.loader.toLowerCase() as BootstrapConfig['coreInstall'],
-        hasServerPack: false,
         launchServerAddress,
         binding,
       }
@@ -299,7 +297,6 @@ export class ServerBootstrapService {
               config.loader === 'FABRIC' ? fabricInstaller.version : null,
             coreSha256: sha256(core.bytes),
             authlibArtifact: config.authlibArtifact,
-            serverPackId: null,
           }, null, 2)}\n`,
         )
         context.progress(45, 'Packing bootstrap payload')

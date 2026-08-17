@@ -204,8 +204,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { panelFetch } from '@/lib/public-path'
-import type { ServerPackEntry, ServerPackTextFile } from '@gravit-panel/shared'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import type { JobRecord, ServerPackEntry, ServerPackTextFile } from '@gravit-panel/shared'
+import { useMutation, useQuery } from '@tanstack/vue-query'
 import { ArrowUp, ChevronRight, EllipsisVertical, File, FileCode2, FilePlus2, Folder, FolderOpen, FolderPlus, HardDrive, Package, Pencil, Save, Search, Trash2, TriangleAlert, Upload } from '@lucide/vue'
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -219,13 +219,14 @@ const props = withDefaults(defineProps<{
   endpointBase?: string
   title?: string
   rootLabel?: string
+  finishedJob?: JobRecord | null
 }>(), {
   bindingId: '',
   endpointBase: '',
   title: 'Live server files',
   rootLabel: 'Server',
 })
-const queryClient = useQueryClient()
+const emit = defineEmits<{ job: [job: JobRecord] }>()
 const route = useRoute()
 const router = useRouter()
 const initialDirectory = typeof route.query.path === 'string' && !route.query.path.startsWith('/') && !route.query.path.includes('..')
@@ -238,6 +239,7 @@ const activePath = ref('')
 const editorOpen = ref(false)
 const editorContent = ref('')
 const savedContent = ref('')
+const pendingEditorJobId = ref<string | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const createOpen = ref(false)
 const createKind = ref<'file' | 'directory'>('file')
@@ -287,6 +289,11 @@ const textQuery = useQuery({
 watch(() => textQuery.data.value, (value) => { if (value?.path === activePath.value) { editorContent.value = value.content; savedContent.value = value.content } }, { immediate: true })
 const editorDirty = computed(() => editorContent.value !== savedContent.value)
 const textLoading = computed(() => textQuery.isFetching.value)
+watch(() => props.finishedJob, (job) => {
+  if (!job || job.id !== pendingEditorJobId.value) return
+  if (job.status === 'succeeded') savedContent.value = editorContent.value
+  pendingEditorJobId.value = null
+})
 const confirmDiscard = () => !editorDirty.value || window.confirm('Discard unsaved file changes?')
 const navigate = (path: string) => {
   if (!confirmDiscard()) return
@@ -306,16 +313,16 @@ const setEditorOpen = (open: boolean) => { if (open) editorOpen.value = true; el
 const toggleSelection = (path: string) => { selectedPaths.value = selectedPaths.value.includes(path) ? selectedPaths.value.filter((item) => item !== path) : [...selectedPaths.value, path] }
 const toggleAll = () => { selectedPaths.value = allVisibleSelected.value ? selectedPaths.value.filter((path) => !visibleEntries.value.some((entry) => entry.path === path)) : [...new Set([...selectedPaths.value, ...visibleEntries.value.map((entry) => entry.path)])] }
 const operationMutation = useMutation({
-  mutationFn: (body: Record<string, unknown>) => getJson(`${filesEndpoint.value}/operations`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ installationId: props.installationId, ...body }) }),
-  onSuccess: () => queryClient.invalidateQueries({ queryKey: cacheScope.value }),
+  mutationFn: (body: Record<string, unknown>) => getJson<JobRecord>(`${filesEndpoint.value}/operations`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ installationId: props.installationId, ...body }) }),
+  onSuccess: (job: JobRecord) => emit('job', job),
 })
 const uploadMutation = useMutation({
-  mutationFn: async ({ file, path, overwrite }: { file: File; path: string; overwrite: boolean }) => { const form = new FormData(); form.set('installationId', props.installationId); form.set('path', path); form.set('overwrite', String(overwrite)); form.set('file', file); return getJson(`${filesEndpoint.value}/upload`, { method: 'POST', body: form }) },
-  onSuccess: () => queryClient.invalidateQueries({ queryKey: cacheScope.value }),
+  mutationFn: async ({ file, path, overwrite }: { file: File; path: string; overwrite: boolean }) => { const form = new FormData(); form.set('installationId', props.installationId); form.set('path', path); form.set('overwrite', String(overwrite)); form.set('file', file); return getJson<JobRecord>(`${filesEndpoint.value}/upload`, { method: 'POST', body: form }) },
+  onSuccess: (job: JobRecord) => emit('job', job),
 })
 const saveMutation = useMutation({
-  mutationFn: ({ path, content, overwrite }: { path: string; content: string; overwrite: boolean }) => getJson(`${filesEndpoint.value}/file`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ installationId: props.installationId, path, content, overwrite }) }),
-  onSuccess: () => { savedContent.value = editorContent.value; void queryClient.invalidateQueries({ queryKey: cacheScope.value }) },
+  mutationFn: ({ path, content, overwrite }: { path: string; content: string; overwrite: boolean }) => getJson<JobRecord>(`${filesEndpoint.value}/file`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ installationId: props.installationId, path, content, overwrite }) }),
+  onSuccess: (job: JobRecord) => { pendingEditorJobId.value = job.id; emit('job', job) },
 })
 const pending = computed(() => props.disabled || operationMutation.isPending.value || uploadMutation.isPending.value || saveMutation.isPending.value)
 const error = computed(() => (queryError.value || textQuery.error.value || operationMutation.error.value || uploadMutation.error.value || saveMutation.error.value) as Error | null)

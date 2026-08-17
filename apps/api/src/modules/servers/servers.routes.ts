@@ -184,24 +184,34 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
   )
   .post(
     '/bindings/:bindingId/files/file',
-    async ({ params, body, set }) => {
+    ({ params, body, set }) => {
       const target = liveBinding(body.installationId, params.bindingId, set)
       if (!target) return { message: 'Managed server binding not found.' }
+      const conflict = conflictFor(target.installation.id, set)
+      if (conflict) return { message: 'Another server operation is active.', jobId: conflict.id }
       const bytes = new TextEncoder().encode(body.content)
       if (bytes.length > 512 * 1024) {
         set.status = 422
         return { message: 'Live editor supports files up to 512 KiB.' }
       }
-      try {
-        return await serverAgentService.requestFilesystem(params.bindingId, 'write', {
-          path: body.path,
-          data: Buffer.from(bytes).toString('base64'),
-          overwrite: body.overwrite,
-          maxBytes: 512 * 1024,
-        })
-      } catch (error) {
-        return liveFileError(set, error)
-      }
+      const job = jobsRunner.create(
+        'gravit.server.files.modify',
+        { installationId: target.installation.id, bindingId: params.bindingId, action: 'write', path: body.path },
+        'Live server file save queued',
+        async (context) => {
+          context.progress(20, 'Writing live server file')
+          const result = await serverAgentService.requestFilesystem(params.bindingId, 'write', {
+            path: body.path,
+            data: Buffer.from(bytes).toString('base64'),
+            overwrite: body.overwrite,
+            maxBytes: 512 * 1024,
+          })
+          context.progress(95, 'Live server file applied')
+          return result as Record<string, unknown>
+        },
+      )
+      set.status = 202
+      return job
     },
     {
       params: t.Object({ bindingId }),
@@ -218,21 +228,31 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
     async ({ params, body, set }) => {
       const target = liveBinding(body.installationId, params.bindingId, set)
       if (!target) return { message: 'Managed server binding not found.' }
+       const conflict = conflictFor(target.installation.id, set)
+       if (conflict) return { message: 'Another server operation is active.', jobId: conflict.id }
        const bytes = new Uint8Array(await body.file.arrayBuffer())
        if (bytes.length > 256 * 1024 * 1024) {
          set.status = 422
          return { message: 'Live uploads currently support files up to 256 MiB.' }
       }
-      try {
-        return await serverAgentService.requestFilesystem(params.bindingId, 'write', {
-          path: body.path,
-          data: Buffer.from(bytes).toString('base64'),
-          overwrite: body.overwrite === 'true',
-          maxBytes: 256 * 1024 * 1024,
-        })
-      } catch (error) {
-        return liveFileError(set, error)
-      }
+       const job = jobsRunner.create(
+         'gravit.server.files.modify',
+         { installationId: target.installation.id, bindingId: params.bindingId, action: 'upload', path: body.path },
+         'Live server file upload queued',
+         async (context) => {
+           context.progress(20, 'Uploading live server file')
+           const result = await serverAgentService.requestFilesystem(params.bindingId, 'write', {
+             path: body.path,
+             data: Buffer.from(bytes).toString('base64'),
+             overwrite: body.overwrite === 'true',
+             maxBytes: 256 * 1024 * 1024,
+           })
+           context.progress(95, 'Live server file applied')
+           return result as Record<string, unknown>
+         },
+       )
+       set.status = 202
+       return job
     },
     {
       params: t.Object({ bindingId }),
@@ -246,26 +266,34 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
   )
   .post(
     '/bindings/:bindingId/files/operations',
-    async ({ params, body, set }) => {
+    ({ params, body, set }) => {
       const target = liveBinding(body.installationId, params.bindingId, set)
       if (!target) return { message: 'Managed server binding not found.' }
-      try {
-        if (body.action === 'mkdir') {
-          return await serverAgentService.requestFilesystem(params.bindingId, 'mkdir', { path: body.path })
-        }
-        if (body.action === 'move') {
-          return await serverAgentService.requestFilesystem(params.bindingId, 'move', {
-            sourcePath: body.sourcePath,
-            destinationPath: body.destinationPath,
-          })
-        }
-        return await serverAgentService.requestFilesystem(params.bindingId, 'delete', {
-          paths: body.paths,
-          confirm: true,
-        })
-      } catch (error) {
-        return liveFileError(set, error)
-      }
+      const conflict = conflictFor(target.installation.id, set)
+      if (conflict) return { message: 'Another server operation is active.', jobId: conflict.id }
+      const job = jobsRunner.create(
+        'gravit.server.files.modify',
+        { installationId: target.installation.id, bindingId: params.bindingId, action: body.action },
+        `Live server file ${body.action} queued`,
+        async (context) => {
+          context.progress(20, `Applying live server file ${body.action}`)
+          const result = body.action === 'mkdir'
+            ? await serverAgentService.requestFilesystem(params.bindingId, 'mkdir', { path: body.path })
+            : body.action === 'move'
+              ? await serverAgentService.requestFilesystem(params.bindingId, 'move', {
+                sourcePath: body.sourcePath,
+                destinationPath: body.destinationPath,
+              })
+              : await serverAgentService.requestFilesystem(params.bindingId, 'delete', {
+                paths: body.paths,
+                confirm: true,
+              })
+          context.progress(95, 'Live server files applied')
+          return result as Record<string, unknown>
+        },
+      )
+      set.status = 202
+      return job
     },
     {
       params: t.Object({ bindingId }),

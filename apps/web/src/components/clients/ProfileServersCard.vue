@@ -162,6 +162,8 @@
                 :disabled="pending"
                 :installation-id="installationId"
                 :server-name="selectedBinding.name"
+                :finished-job="finishedJob"
+                @job="emit('job', $event)"
               />
               <UnavailableWorkspace v-else title="Files & Mods unavailable" />
             </TabsContent>

@@ -62,6 +62,7 @@ const {
     'gravit.server.binding.apply',
     'gravit.server.binding.remove',
     'gravit.server.service',
+    'gravit.server.files.modify',
     'gravit.server-bootstrap.prepare',
   ],
 )
@@ -79,6 +80,7 @@ const jobFinished = async (job: JobRecord) => {
     queryClient.invalidateQueries({
       queryKey: ['client-profiles', installationId.value],
     }),
+    queryClient.invalidateQueries({ queryKey: ['live-files'] }),
   ])
 }
 const pageError = computed(

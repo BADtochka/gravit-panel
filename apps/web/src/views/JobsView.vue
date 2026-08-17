@@ -176,10 +176,8 @@ const { error: createError, mutate: createJob, isPending } = useMutation({
 const serverJobTypes = new Set<JobType>([
   'gravit.server.binding.apply',
   'gravit.server.binding.remove',
-  'gravit.server-pack.modify',
-  'gravit.server-pack.publish',
-  'gravit.server-pack.deploy',
   'gravit.server.service',
+  'gravit.server.files.modify',
   'gravit.server-bootstrap.prepare',
   'gravit.mods.server.install',
 ])
