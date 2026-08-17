@@ -219,16 +219,16 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
       const target = liveBinding(body.installationId, params.bindingId, set)
       if (!target) return { message: 'Managed server binding not found.' }
        const bytes = new Uint8Array(await body.file.arrayBuffer())
-       if (bytes.length > 64 * 1024 * 1024) {
+       if (bytes.length > 256 * 1024 * 1024) {
          set.status = 422
-         return { message: 'Live uploads currently support files up to 64 MiB.' }
+         return { message: 'Live uploads currently support files up to 256 MiB.' }
       }
       try {
         return await serverAgentService.requestFilesystem(params.bindingId, 'write', {
           path: body.path,
           data: Buffer.from(bytes).toString('base64'),
           overwrite: body.overwrite === 'true',
-          maxBytes: 64 * 1024 * 1024,
+          maxBytes: 256 * 1024 * 1024,
         })
       } catch (error) {
         return liveFileError(set, error)
@@ -240,7 +240,7 @@ export const serversRoutes = new Elysia({ prefix: '/servers' })
         installationId,
         path: t.String({ minLength: 1, maxLength: 512 }),
         overwrite: t.String(),
-         file: t.File({ maxSize: 64 * 1024 * 1024 }),
+         file: t.File({ maxSize: 256 * 1024 * 1024 }),
       }),
     },
   )
@@ -751,7 +751,7 @@ export const serverBootstrapRoutes = new Elysia({ prefix: '/server-bootstrap' })
 export const serverAgentRoutes = new Elysia({ prefix: '/server-agent' })
   .ws('/connect', {
     idleTimeout: 45,
-    maxPayloadLength: 96 * 1024 * 1024,
+     maxPayloadLength: 384 * 1024 * 1024,
     open: (socket) => {
       serverAgentService.open(socket)
     },

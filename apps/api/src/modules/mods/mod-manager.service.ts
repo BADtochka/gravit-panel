@@ -777,7 +777,7 @@ export class ModManagerService {
     bytes: Uint8Array,
   ) {
     if (!this.serverAgent) throw new Error('Live server files are unavailable')
-    if (bytes.length > 64 * 1024 * 1024) throw new Error('Server file exceeds 64 MiB')
+    if (bytes.length > 256 * 1024 * 1024) throw new Error('Server file exceeds 256 MiB')
     const parts = path.split('/').slice(0, -1)
     let directory = ''
     for (const part of parts) {
@@ -792,7 +792,7 @@ export class ModManagerService {
       path,
       data: Buffer.from(bytes).toString('base64'),
       overwrite: true,
-      maxBytes: 64 * 1024 * 1024,
+      maxBytes: 256 * 1024 * 1024,
     })
   }
 

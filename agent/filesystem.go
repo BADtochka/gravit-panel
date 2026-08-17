@@ -14,7 +14,7 @@ import (
 )
 
 const maxLiveTextBytes = 512 * 1024
-const maxLiveTransferBytes = 64 * 1024 * 1024
+const maxLiveTransferBytes = 256 * 1024 * 1024
 
 var reservedLiveRoots = map[string]bool{
 	"eula.txt": true, "serverwrapper.jar": true, "serverwrapperinline.jar": true,
@@ -111,7 +111,8 @@ func executeFilesystem(root string, request filesystemRequest) (any, error) {
 		data, err := base64.StdEncoding.Strict().DecodeString(request.Data)
 		maxBytes := int64(maxLiveTransferBytes)
 		if request.MaxBytes > 0 && request.MaxBytes < maxBytes { maxBytes = request.MaxBytes }
-		if err != nil || int64(len(data)) > maxBytes { return nil, errors.New("invalid or oversized file data") }
+		if err != nil { return nil, errors.New("file data is not valid base64") }
+		if int64(len(data)) > maxBytes { return nil, fmt.Errorf("file exceeds %d MiB", maxBytes/(1024*1024)) }
 		if !request.Overwrite { if _, err := os.Lstat(target); err == nil { return nil, errors.New("destination already exists") } }
 		if info, err := os.Lstat(filepath.Dir(target)); err != nil || !info.IsDir() { return nil, errors.New("parent directory is unavailable") }
 		temp, err := os.CreateTemp(filepath.Dir(target), ".gravit-fs-"); if err != nil { return nil, errors.New("create temporary file") }
