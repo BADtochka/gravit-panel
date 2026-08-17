@@ -92,7 +92,7 @@ func (a *bindingAgent) connect(parent context.Context) error {
 		cancel()
 		_ = session.close()
 	}()
-	conn.SetReadLimit(96 << 20)
+	conn.SetReadLimit(384 << 20)
 	_ = conn.SetReadDeadline(time.Now().Add(2 * a.heartbeatInterval))
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(2 * a.heartbeatInterval))

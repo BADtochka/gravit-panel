@@ -24,6 +24,17 @@
                 Search and select mods to install. Results are filtered by Minecraft version, loader, and project type.
               </DialogDescription>
             </DialogHeader>
+            <div v-if="selectedModSummaries.length" class="shrink-0 rounded-lg border bg-muted/30 p-3">
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-xs font-medium">Selected mods</p>
+                <span class="text-[11px] text-muted-foreground">{{ selectedModSummaries.length }} / {{ installSelectionLimit }}</span>
+              </div>
+              <div class="mt-2 flex max-h-20 flex-wrap gap-1.5 overflow-y-auto">
+                <Badge v-for="item in selectedModSummaries" :key="item.slug" variant="outline" class="max-w-full">
+                  <span class="truncate">{{ item.title }}</span>
+                </Badge>
+              </div>
+            </div>
             <div class="flex-1 overflow-hidden flex flex-col gap-4 min-h-0">
               <div class="flex gap-2">
                 <Input v-model="searchText" placeholder="Search mods..." @keyup.enter="searchMods" />
@@ -731,6 +742,7 @@ const optionalForm = reactive({
   enabledByDefault: false,
 })
 const selectionTargets = reactive<Record<string, ModInstallSelection>>({})
+const selectionNames = reactive<Record<string, string>>({})
 let selectionCopiedTimer: ReturnType<typeof setTimeout> | null = null
 const {
   activeJob,
@@ -754,6 +766,8 @@ const {
 watch(installationId, () => {
   selectedSlugs.value = []
   selectedInstalledFilenames.value = []
+  Object.keys(selectionTargets).forEach((key) => delete selectionTargets[key])
+  Object.keys(selectionNames).forEach((key) => delete selectionNames[key])
   version.value = ''
   loader.value = 'FABRIC'
   constraintsLocked.value = true
@@ -800,6 +814,7 @@ watch(profile, () => {
   selectedSlugs.value = []
   selectedInstalledFilenames.value = []
   Object.keys(selectionTargets).forEach((key) => delete selectionTargets[key])
+  Object.keys(selectionNames).forEach((key) => delete selectionNames[key])
   if (constraintsLocked.value) applyProfileParameters()
 })
 const selectionStorageKey = computed(
@@ -808,12 +823,14 @@ const selectionStorageKey = computed(
 const restoreInstallSelection = () => {
   selectedSlugs.value = []
   Object.keys(selectionTargets).forEach((key) => delete selectionTargets[key])
+  Object.keys(selectionNames).forEach((key) => delete selectionNames[key])
   try {
     const raw = localStorage.getItem(selectionStorageKey.value)
     if (!raw) return
     const stored = JSON.parse(raw) as {
       slugs?: unknown
       targets?: Record<string, ModInstallSelection>
+      names?: Record<string, string>
     }
     if (!Array.isArray(stored.slugs)) return
     selectedSlugs.value = [...new Set(stored.slugs.filter(
@@ -822,13 +839,15 @@ const restoreInstallSelection = () => {
     for (const slug of selectedSlugs.value) {
       const target = stored.targets?.[slug]
       if (target) selectionTargets[slug] = target
+      const name = stored.names?.[slug]
+      if (name) selectionNames[slug] = name
     }
   } catch {
     localStorage.removeItem(selectionStorageKey.value)
   }
 }
 watch([installationId, profile], restoreInstallSelection, { immediate: true })
-watch([selectedSlugs, selectionTargets], () => {
+watch([selectedSlugs, selectionTargets, selectionNames], () => {
   const targets = Object.fromEntries(
     selectedSlugs.value.flatMap((slug) => selectionTargets[slug]
       ? [[slug, selectionTargets[slug]]]
@@ -837,6 +856,7 @@ watch([selectedSlugs, selectionTargets], () => {
   localStorage.setItem(selectionStorageKey.value, JSON.stringify({
     slugs: selectedSlugs.value,
     targets,
+    names: { ...selectionNames },
   }))
 }, { deep: true })
 watch(constraintsLocked, (locked) => {
@@ -943,6 +963,10 @@ const {
     `/api/mods/search?query=${encodeURIComponent(searchText.value)}&minecraftVersion=${encodeURIComponent(version.value)}&loader=${loader.value}`,
   ),
 })
+const selectedModSummaries = computed(() => selectedSlugs.value.map((slug) => ({
+  slug,
+  title: selectionNames[slug] || searchResults.value?.items.find((item) => item.slug === slug)?.title || slug,
+})))
 const canSearch = computed(() => Boolean(searchText.value.trim() && targetReady.value))
 const searchMods = () => { if (canSearch.value) runSearch() }
 const defaultTargets = (item: ModrinthProject): ModInstallSelection => ({
@@ -977,10 +1001,12 @@ const toggleSelected = (item: ModrinthProject) => {
   if (selectedSlugs.value.includes(item.slug)) {
     selectedSlugs.value = selectedSlugs.value.filter((slug) => slug !== item.slug)
     delete selectionTargets[item.slug]
+    delete selectionNames[item.slug]
   } else {
     if (installSelectionAtLimit.value || !hasAvailableDestination(item)) return
     selectedSlugs.value = [...selectedSlugs.value, item.slug]
     selectionTargets[item.slug] = defaultTargets(item)
+    selectionNames[item.slug] = item.title
   }
 }
 const setClientMode = (item: ModrinthProject, mode: ClientModMode) => {

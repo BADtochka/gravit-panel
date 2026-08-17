@@ -346,7 +346,7 @@ const uploadFile = (event: Event) => {
   if (!file) return
   const path = joinPath(currentDirectory.value, file.name)
   if (entries.value.some((entry) => entry.path === path) && !window.confirm(`Replace ${path}?`)) return
-  if (file.size > 64 * 1024 * 1024) { window.alert('Live uploads currently support files up to 64 MiB.'); return }
+  if (file.size > 256 * 1024 * 1024) { window.alert('Live uploads currently support files up to 256 MiB.'); return }
   uploadMutation.mutate({ file, path, overwrite: entries.value.some((entry) => entry.path === path) })
 }
 const saveText = () => { if (editorDirty.value && !pending.value) saveMutation.mutate({ path: activePath.value, content: editorContent.value, overwrite: true }) }
