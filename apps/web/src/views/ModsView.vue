@@ -182,6 +182,14 @@
                   {{ selectionCopied ? 'Copied' : 'Copy list' }}
                 </Button>
                 <Button
+                  v-if="selectedSlugs.length"
+                  type="button"
+                  variant="ghost"
+                  @click="clearInstallSelection"
+                >
+                  <Trash2 /> Clear selection
+                </Button>
+                <Button
                   :disabled="!selectedSlugs.length || !selectedTargetsReady"
                   @click="installSelected"
                 >
@@ -820,6 +828,13 @@ watch(profile, () => {
 const selectionStorageKey = computed(
   () => `gravit-panel:mods:selection:${installationId.value}:${profile.value}`,
 )
+const clearInstallSelection = () => {
+  selectedSlugs.value = []
+  Object.keys(selectionTargets).forEach((key) => delete selectionTargets[key])
+  Object.keys(selectionNames).forEach((key) => delete selectionNames[key])
+  selectionCopied.value = false
+  localStorage.removeItem(selectionStorageKey.value)
+}
 const restoreInstallSelection = () => {
   selectedSlugs.value = []
   Object.keys(selectionTargets).forEach((key) => delete selectionTargets[key])
@@ -1061,7 +1076,6 @@ const commonBody = () => ({
   profile: profile.value,
 })
 const installSelected = () => {
-  const storageKey = selectionStorageKey.value
   runOperation({
     url: '/api/mods/install',
     body: {
@@ -1074,7 +1088,7 @@ const installSelected = () => {
   }, {
     onSuccess: (job) => {
       registerJobNotification(job, 'Mod installation', (finished) => {
-        if (finished.status === 'succeeded') localStorage.removeItem(storageKey)
+        if (finished.status === 'succeeded') clearInstallSelection()
       })
     },
   })
@@ -1191,10 +1205,10 @@ const runBulk = (action: 'enable' | 'disable' | 'update' | 'remove') => {
 }
 const jobFinished = async (job: JobRecord) => {
   await finishJob(job)
-  if (job.status === 'succeeded' && job.type === 'gravit.mods.install') {
-    selectedSlugs.value = []
-    Object.keys(selectionTargets).forEach((key) => delete selectionTargets[key])
-    localStorage.removeItem(selectionStorageKey.value)
+  const isModUpdate = job.type === 'gravit.mods.update' ||
+    (job.type === 'gravit.mods.bulk' && job.input.action === 'update')
+  if (job.status === 'succeeded' && (job.type === 'gravit.mods.install' || isModUpdate)) {
+    clearInstallSelection()
   }
   if (job.status === 'succeeded') selectedInstalledFilenames.value = []
   await queryClient.invalidateQueries({
